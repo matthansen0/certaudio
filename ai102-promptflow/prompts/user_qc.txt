@@ -1,0 +1,20 @@
+Narration to grade:
+{{narration.narration_text}}
+
+Learning outcomes:
+{{episode.outcomes}}
+
+Rubric:
+- length_ok: 1,200–1,500 words
+- coverage_ok: all outcomes covered
+- clarity_ok: audio-first; no long code dumps
+- exam_ok: explicit “Exam Tips” included
+
+Return only JSON:
+{
+  "length_ok": true,
+  "coverage_ok": true,
+  "clarity_ok": true,
+  "exam_ok": true,
+  "required_edits": []
+}

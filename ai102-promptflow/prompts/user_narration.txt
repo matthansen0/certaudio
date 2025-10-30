@@ -1,0 +1,12 @@
+Episode Context (JSON):
+{{episode}}
+
+Write a 1,200–1,500 word narration that covers:
+1) Why this topic matters for real solutions
+2) Core concepts and Azure architecture patterns
+3) Hands-on examples (describe steps/params; minimal code)
+4) Common pitfalls and gotchas
+5) “Exam Tips” (explicitly called out)
+6) Quick recap
+
+Tone: confident, technical, conversational. Short paragraphs.

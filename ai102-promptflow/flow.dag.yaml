@@ -1,0 +1,304 @@
+
+schema: 2.0
+name: ai102_audio_course_pipeline
+description: >
+  End-to-end pipeline for AI-102: plan episodes -> narration -> quality check -> revise -> SSML -> audio -> blob uploads of audio, narration, and SSML.
+
+inputs:
+  course_title:
+    type: string
+    default: "AI-102 Azure AI Engineer Associate – Full Audio Course"
+  episodes_count:
+    type: integer
+    default: 35
+  voice_name:
+    type: string
+    default: "en-US-GuyNeural"
+  audio_format:
+    type: string
+    default: "mp3"
+  storage_container:
+    type: string
+    default: "ai102-audio"
+
+outputs:
+  course_outline:
+    type: string
+    reference: plan.output_text
+  produced_metadata:
+    type: string
+    reference: upload_to_blob_list.output
+
+nodes:
+
+# 1) COURSE PLAN
+- name: plan
+  type: llm
+  source:
+    type: code
+    path: prompts/user_course_plan.txt
+  inputs:
+    deployment_name: azure_openai_chat
+    temperature: 0.5
+    top_p: 1.0
+    presence_penalty: 0
+    frequency_penalty: 0
+    stop: []
+    system_prompt:
+      type: file
+      path: prompts/system_course_plan.txt
+    user_prompt:
+      type: template
+      value: |
+        {{file:prompts/user_course_plan.txt}}
+  outputs:
+    output_text:
+      type: string
+
+# 2) FOR-EACH EPISODE
+- name: fe_narration
+  type: foreach
+  foreach: "{{plan.output_text}}"
+  items_selector: "$"
+  input_mapping:
+    episode: "$item"
+  nodes:
+
+    # 3a) NARRATION
+    - name: narration
+      type: llm
+      source:
+        type: code
+        path: prompts/user_narration.txt
+      inputs:
+        deployment_name: azure_openai_chat
+        temperature: 0.4
+        top_p: 1.0
+        presence_penalty: 0
+        frequency_penalty: 0
+        stop: []
+        system_prompt:
+          type: file
+          path: prompts/system_narration.txt
+        user_prompt:
+          type: template
+          value: |
+            {{file:prompts/user_narration.txt}}
+      outputs:
+        narration_text:
+          type: string
+
+    # 3b) QUALITY CHECK
+    - name: qc
+      type: llm
+      source:
+        type: code
+        path: prompts/user_qc.txt
+      inputs:
+        deployment_name: azure_openai_chat
+        temperature: 0.2
+        top_p: 1.0
+        presence_penalty: 0
+        frequency_penalty: 0
+        stop: []
+        system_prompt:
+          type: file
+          path: prompts/system_qc.txt
+        user_prompt:
+          type: template
+          value: |
+            {{file:prompts/user_qc.txt}}
+      outputs:
+        qc_json:
+          type: string
+
+    # 3c) AUTO-REVISION (conditional)
+    - name: autorevise
+      type: llm
+      condition: >
+        {{ (from_json(qc.qc_json).length_ok == false) or
+           (from_json(qc.qc_json).coverage_ok == false) or
+           (from_json(qc.qc_json).clarity_ok == false) or
+           (from_json(qc.qc_json).exam_ok == false) }}
+      source:
+        type: code
+        path: prompts/user_autorevise.txt
+      inputs:
+        deployment_name: azure_openai_chat
+        temperature: 0.3
+        system_prompt:
+          type: file
+          path: prompts/system_autorevise.txt
+        user_prompt:
+          type: template
+          value: |
+            {{file:prompts/user_autorevise.txt}}
+      outputs:
+        revised_text:
+          type: string
+
+    # 3d) CHOOSE FINAL NARRATION
+    - name: final_narration
+      type: python
+      source:
+        type: inline
+        code: |
+          def entry(narration_text: str, qc_json: str, revised_text: str = None):
+              import json
+              qc = json.loads(qc_json)
+              if (not qc.get("length_ok")) or (not qc.get("coverage_ok")) or (not qc.get("clarity_ok")) or (not qc.get("exam_ok")):
+                  return revised_text or narration_text
+              return narration_text
+      inputs:
+        narration_text: "{{narration.narration_text}}"
+        qc_json: "{{qc.qc_json}}"
+        revised_text: "{{autorevise.revised_text}}"
+      outputs:
+        final_text:
+          type: string
+
+    # 3e) SSML CONVERSION
+    - name: ssml
+      type: llm
+      source:
+        type: code
+        path: prompts/user_ssml.txt
+      inputs:
+        deployment_name: azure_openai_chat
+        temperature: 0.3
+        system_prompt:
+          type: file
+          path: prompts/system_ssml.txt
+        user_prompt:
+          type: template
+          value: |
+            {{file:prompts/user_ssml.txt}}
+      outputs:
+        ssml_text:
+          type: string
+
+    # 3e.1) WRITE NARRATION .MD LOCALLY
+    - name: write_narration_md
+      type: python
+      source:
+        type: inline
+        code: |
+          def entry(episode: dict, final_text: str) -> str:
+              import os, re, uuid, tempfile
+              slug = episode.get("slug") or re.sub(r'[^a-z0-9-]+','', re.sub(r'\s+','-', (episode.get("title","episode")).lower()))
+              fname = f"{episode.get('number','00')}-{slug or 'episode'}-{uuid.uuid4().hex[:8]}.md"
+              path = os.path.join(tempfile.gettempdir(), fname)
+              with open(path, "w", encoding="utf-8") as f:
+                  f.write(final_text)
+              return path
+      inputs:
+        episode: "{{episode}}"
+        final_text: "{{final_narration.final_text}}"
+      outputs:
+        md_path:
+          type: string
+
+    # 3e.2) WRITE SSML LOCALLY
+    - name: write_ssml_xml
+      type: python
+      source:
+        type: inline
+        code: |
+          def entry(episode: dict, ssml_text: str) -> str:
+              import os, re, uuid, tempfile
+              slug = episode.get("slug") or re.sub(r'[^a-z0-9-]+','', re.sub(r'\s+','-', (episode.get("title","episode")).lower()))
+              fname = f"{episode.get('number','00')}-{slug or 'episode'}-{uuid.uuid4().hex[:8]}.ssml"
+              path = os.path.join(tempfile.gettempdir(), fname)
+              with open(path, "w", encoding="utf-8") as f:
+                  f.write(ssml_text)
+              return path
+      inputs:
+        episode: "{{episode}}"
+        ssml_text: "{{ssml.ssml_text}}"
+      outputs:
+        ssml_path:
+          type: string
+
+    # 3f) SYNTHESIZE AUDIO
+    - name: synthesize_audio
+      type: python
+      source:
+        type: file
+        path: tools/synthesize_audio.py
+      inputs:
+        ssml_text: "{{ssml.ssml_text}}"
+        voice_name: "{{flow.inputs.voice_name}}"
+        audio_format: "{{flow.inputs.audio_format}}"
+        episode_title: "{{episode.title}}"
+      outputs:
+        audio_path:
+          type: string
+
+    # 3f.1) UPLOAD NARRATION .MD
+    - name: upload_narration_md
+      type: python
+      source:
+        type: file
+        path: tools/upload_to_blob.py
+      inputs:
+        file_path: "{{write_narration_md.md_path}}"
+        container_name: "{{flow.inputs.storage_container}}"
+        blob_name: "ai102/{{episode.number}}-{{episode.slug}}/narration.md"
+      outputs:
+        md_url:
+          type: string
+
+    # 3f.2) UPLOAD SSML
+    - name: upload_ssml
+      type: python
+      source:
+        type: file
+        path: tools/upload_to_blob.py
+      inputs:
+        file_path: "{{write_ssml_xml.ssml_path}}"
+        container_name: "{{flow.inputs.storage_container}}"
+        blob_name: "ai102/{{episode.number}}-{{episode.slug}}/narration.ssml"
+      outputs:
+        ssml_url:
+          type: string
+
+    # 3g) UPLOAD AUDIO
+    - name: upload_to_blob
+      type: python
+      source:
+        type: file
+        path: tools/upload_to_blob.py
+      inputs:
+        file_path: "{{synthesize_audio.audio_path}}"
+        container_name: "{{flow.inputs.storage_container}}"
+        blob_name: "ai102/{{episode.number}}-{{episode.slug}}.{{flow.inputs.audio_format}}"
+      outputs:
+        blob_url:
+          type: string
+
+# 4) COLLECT OUTPUTS
+- name: upload_to_blob_list
+  type: python
+  source:
+    type: inline
+    code: |
+      def entry(items: list):
+          out = []
+          for it in items:
+              ep = it.get("episode", {})
+              audio = it.get("upload_to_blob", {}).get("blob_url")
+              md    = it.get("upload_narration_md", {}).get("md_url")
+              ssml  = it.get("upload_ssml", {}).get("ssml_url")
+              out.append({
+                  "number": ep.get("number"),
+                  "title": ep.get("title"),
+                  "slug": ep.get("slug"),
+                  "urls": {"audio": audio, "narration_md": md, "ssml": ssml}
+              })
+          import json
+          return json.dumps(out, ensure_ascii=False, indent=2)
+  inputs:
+    items: "{{fe_narration}}"
+  outputs:
+    output:
+      type: string

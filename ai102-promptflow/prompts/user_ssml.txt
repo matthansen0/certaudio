@@ -1,0 +1,11 @@
+Convert to SSML:
+
+<NARRATION>
+{{final_narration.final_text}}
+</NARRATION>
+
+Constraints:
+- <speak xml:lang="en-US">
+- <voice name="{{flow.inputs.voice_name}}">
+- <break time="300ms"/> between sections
+Return ONLY valid SSML.
