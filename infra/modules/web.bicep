@@ -205,13 +205,20 @@ resource storageBlobDataReaderRole 'Microsoft.Authorization/roleAssignments@2022
 }
 
 // Role assignment: Functions can read/write to Cosmos DB
-resource cosmosDbDataContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(cosmosDb.id, functionsApp.id, 'Cosmos DB Data Contributor')
-  scope: cosmosDb
+// Note: Cosmos DB data-plane RBAC uses sqlRoleAssignments/sqlRoleDefinitions (not Microsoft.Authorization roleDefinitions).
+var cosmosSqlDataContributorRoleDefinitionId = resourceId(
+  'Microsoft.DocumentDB/databaseAccounts/sqlRoleDefinitions'
+  cosmosDb.name
+  '00000000-0000-0000-0000-000000000002'
+)
+
+resource cosmosDbSqlDataContributorRole 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = {
+  parent: cosmosDb
+  name: guid(cosmosDb.id, functionsApp.identity.principalId, 'sqlDataContributor')
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '00000000-0000-0000-0000-000000000002')
+    roleDefinitionId: cosmosSqlDataContributorRoleDefinitionId
     principalId: functionsApp.identity.principalId
-    principalType: 'ServicePrincipal'
+    scope: '/'
   }
 }
 
