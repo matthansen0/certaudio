@@ -91,9 +91,7 @@ module identity 'modules/identity.bicep' = if (enableB2C) {
   name: 'deploy-identity'
   params: {
     resourcePrefix: resourcePrefix
-    location: location
     staticWebAppName: web.outputs.staticWebAppName
-    tags: tags
   }
 }
 
@@ -111,4 +109,4 @@ output openAiEndpoint string = aiServices.outputs.openAiEndpoint
 output speechEndpoint string = aiServices.outputs.speechEndpoint
 output searchEndpoint string = aiServices.outputs.searchEndpoint
 output documentIntelligenceEndpoint string = aiServices.outputs.documentIntelligenceEndpoint
-output b2cTenantName string = enableB2C ? identity.outputs.b2cTenantName : 'N/A - B2C disabled'
+output b2cTenantName string = enableB2C && identity != null ? identity!.outputs.b2cTenantName : 'N/A - B2C disabled'

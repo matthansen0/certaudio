@@ -171,9 +171,10 @@ resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01'
 }
 
 // Container for audio content: {certificationId}/{format}/episodes/
+// Container names must be 3-63 characters, lowercase letters, numbers, and hyphens
 resource audioContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
   parent: blobService
-  name: '${certificationId}-${audioFormat}'
+  name: 'audio-${certificationId}-${audioFormat}'
   properties: {
     publicAccess: 'None'
   }
@@ -182,7 +183,7 @@ resource audioContainer 'Microsoft.Storage/storageAccounts/blobServices/containe
 // Container for scripts and metadata
 resource scriptsContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
   parent: blobService
-  name: '${certificationId}-${audioFormat}-scripts'
+  name: 'scripts-${certificationId}-${audioFormat}'
   properties: {
     publicAccess: 'None'
   }

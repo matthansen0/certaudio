@@ -7,9 +7,9 @@
 // ============================================================================
 
 param resourcePrefix string
-param location string
+
+@description('Name of Static Web App to configure with B2C')
 param staticWebAppName string
-param tags object
 
 // ============================================================================
 // VARIABLES
