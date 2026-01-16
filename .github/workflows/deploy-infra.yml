@@ -190,7 +190,7 @@ jobs:
 
             deploymentName="certaudio-${{ github.run_id }}-${{ github.run_attempt }}"
 
-            az deployment group create \
+            if ! az deployment group create \
               --name "$deploymentName" \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --template-file ./infra/main.bicep \
@@ -201,18 +201,35 @@ jobs:
                 uniqueSuffix=$UNIQUE_SUFFIX \
                 location=$LOCATION \
                 openAiLocation=$OPENAI_LOCATION \
-              --only-show-errors
+              --only-show-errors; then
+              echo "::group::Deployment error (properties.error)"
+              az deployment group show \
+                --name "$deploymentName" \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
+                --query properties.error \
+                -o jsonc || true
+              echo "::endgroup::"
 
-            outputsJson=$(az deployment group show \
-              --name "$deploymentName" \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --query properties.outputs \
-              -o json)
+              echo "::group::Failed deployment operations"
+              az deployment operation group list \
+                --name "$deploymentName" \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
+                --query "[?properties.provisioningState=='Failed'].{resource:properties.targetResource.resourceName, type:properties.targetResource.resourceType, state:properties.provisioningState, message:properties.statusMessage}" \
+                -o table || true
+              echo "::endgroup::"
 
-            echo "staticWebAppUrl=$(echo "$outputsJson" | jq -r '.staticWebAppUrl.value')" >> "$GITHUB_OUTPUT"
-            echo "functionsAppName=$(echo "$outputsJson" | jq -r '.functionsAppName.value')" >> "$GITHUB_OUTPUT"
-            echo "storageAccountName=$(echo "$outputsJson" | jq -r '.storageAccountName.value')" >> "$GITHUB_OUTPUT"
-            echo "cosmosDbAccountName=$(echo "$outputsJson" | jq -r '.cosmosDbAccountName.value')" >> "$GITHUB_OUTPUT"
+              exit 1
+            fi
+
+            staticWebAppUrl=$(az deployment group show --name "$deploymentName" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.staticWebAppUrl.value" -o tsv)
+            functionsAppName=$(az deployment group show --name "$deploymentName" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.functionsAppName.value" -o tsv)
+            storageAccountName=$(az deployment group show --name "$deploymentName" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.storageAccountName.value" -o tsv)
+            cosmosDbAccountName=$(az deployment group show --name "$deploymentName" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.cosmosDbAccountName.value" -o tsv)
+
+            echo "staticWebAppUrl=$staticWebAppUrl" >> "$GITHUB_OUTPUT"
+            echo "functionsAppName=$functionsAppName" >> "$GITHUB_OUTPUT"
+            echo "storageAccountName=$storageAccountName" >> "$GITHUB_OUTPUT"
+            echo "cosmosDbAccountName=$cosmosDbAccountName" >> "$GITHUB_OUTPUT"
 
       - name: Output deployment results
         run: |
