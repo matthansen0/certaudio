@@ -261,7 +261,7 @@ jobs:
 
           echo "$out" | awk -F= '/^(OPENAI_ENDPOINT|SPEECH_ENDPOINT|DOCUMENT_INTELLIGENCE_ENDPOINT|SEARCH_ENDPOINT|COSMOS_DB_ENDPOINT|STORAGE_ACCOUNT_NAME)=/ {print $0}' >> "$GITHUB_ENV"
 
-      - name: Ensure Cosmos SQL RBAC for this workflow principal
+      - name: Ensure Cosmos and Search RBAC for this workflow principal
         run: |
           set -euo pipefail
 
@@ -286,10 +286,12 @@ jobs:
           )
 
           if [[ -z "$principalObjectId" ]]; then
-            echo "::warning::Could not determine automation principal objectId; skipping Cosmos SQL RBAC check."
+            echo "::warning::Could not determine automation principal objectId; skipping RBAC checks."
             exit 0
           fi
+          echo "Principal objectId: $principalObjectId"
 
+          # --- Cosmos SQL RBAC ---
           cosmosName=$(echo "$COSMOS_DB_ENDPOINT" | sed -E 's#^https?://([^./]+)\..*$#\1#')
           if [[ -z "$cosmosName" ]]; then
             echo "::error::Could not parse Cosmos account name from COSMOS_DB_ENDPOINT=$COSMOS_DB_ENDPOINT"
@@ -303,6 +305,7 @@ jobs:
             -o tsv || echo "0")
 
           if [[ "$existing" == "0" ]]; then
+            echo "Creating Cosmos SQL role assignment..."
             az cosmosdb sql role assignment create \
               --account-name "$cosmosName" \
               --resource-group "$AZURE_RESOURCE_GROUP" \
@@ -310,37 +313,11 @@ jobs:
               --scope "/dbs/certaudio" \
               --role-definition-id "00000000-0000-0000-0000-000000000002" \
               --only-show-errors
+          else
+            echo "Cosmos SQL RBAC already exists."
           fi
 
-      - name: Ensure Azure AI Search RBAC for this workflow principal
-        run: |
-          set -euo pipefail
-
-          accessToken=$(az account get-access-token \
-            --resource https://management.azure.com \
-            --query accessToken -o tsv)
-          export ACCESS_TOKEN="$accessToken"
-
-          principalObjectId=$(python3 - <<'PY'
-          import os, json, base64
-          token = os.environ.get('ACCESS_TOKEN', '')
-          parts = token.split('.')
-          if len(parts) < 2:
-            print('')
-            raise SystemExit(0)
-          payload = parts[1]
-          payload += '=' * (-len(payload) % 4)
-          data = base64.urlsafe_b64decode(payload.encode('utf-8')).decode('utf-8')
-          claims = json.loads(data)
-          print(claims.get('oid') or claims.get('objectId') or '')
-          PY
-          )
-
-          if [[ -z "$principalObjectId" ]]; then
-            echo "::warning::Could not determine automation principal objectId; skipping Search RBAC check."
-            exit 0
-          fi
-
+          # --- Azure AI Search RBAC ---
           searchName=$(echo "$SEARCH_ENDPOINT" | sed -E 's#^https?://([^./]+)\..*$#\1#')
           if [[ -z "$searchName" ]]; then
             echo "::error::Could not parse Search service name from SEARCH_ENDPOINT=$SEARCH_ENDPOINT"
@@ -365,6 +342,7 @@ jobs:
             -o tsv || echo "0")
 
           if [[ "$existing" == "0" ]]; then
+            echo "Creating Search Index Data Contributor role assignment..."
             az role assignment create \
               --assignee-object-id "$principalObjectId" \
               --assignee-principal-type ServicePrincipal \
@@ -373,7 +351,10 @@ jobs:
               --only-show-errors
 
             # Role assignments can take a short time to propagate to the Search data plane.
+            echo "Waiting 30s for RBAC propagation..."
             sleep 30
+          else
+            echo "Search RBAC already exists."
           fi
 
       - name: Index content in AI Search
