@@ -5,4 +5,4 @@ param certificationId = 'ai-102'
 param audioFormat = 'instructional'
 param enableB2C = false
 param environment = 'dev'
-param location = 'eastus2'
+param location = 'canadacentral'

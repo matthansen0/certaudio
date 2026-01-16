@@ -58,7 +58,7 @@ cd ai102-audio
 az login
 
 # Create resource group
-az group create --name rg-certaudio-dev --location eastus2
+az group create --name rg-certaudio-dev --location canadacentral
 
 # Create service principal for GitHub Actions
 az ad sp create-for-rbac \
@@ -103,7 +103,7 @@ Run the **Generate Content** workflow to create audio episodes.
 | `certificationId` | `ai-102` | Microsoft certification ID |
 | `audioFormat` | `instructional` | `instructional` or `podcast` |
 | `enableB2C` | `false` | Enable Azure AD B2C authentication |
-| `location` | `eastus2` | Azure region |
+| `location` | `canadacentral` | Azure region |
 
 ### Supported Certifications
 

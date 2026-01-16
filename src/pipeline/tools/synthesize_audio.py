@@ -16,7 +16,7 @@ def get_speech_config() -> speechsdk.SpeechConfig:
     """Create Speech SDK config using managed identity or key."""
     speech_endpoint = os.environ.get("SPEECH_ENDPOINT")
     speech_key = os.environ.get("SPEECH_KEY")
-    speech_region = os.environ.get("SPEECH_REGION", "eastus2")
+    speech_region = os.environ.get("SPEECH_REGION", "canadacentral")
 
     if speech_key:
         # Use API key authentication

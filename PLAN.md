@@ -211,7 +211,7 @@ A fully automated Azure-native system that auto-discovers Microsoft Learn conten
 | `certificationId` | string | `ai-102` | Microsoft certification ID |
 | `audioFormat` | string | `instructional` | `instructional` or `podcast` |
 | `enableB2C` | bool | `false` | Enable Azure AD B2C authentication |
-| `location` | string | `eastus2` | Azure region for resources |
+| `location` | string | `canadacentral` | Azure region for resources |
 | `examPageUrl` | string | auto | Override exam page URL if needed |
 
 ## Implementation Order
