@@ -1,0 +1,167 @@
+$schema: https://azuremlschemas.azureedge.net/promptflow/latest/Flow.schema.json
+environment:
+  python_requirements_txt: requirements.txt
+
+inputs:
+  certification_id:
+    type: string
+    default: "ai-102"
+  audio_format:
+    type: string
+    default: "instructional"
+    enum: ["instructional", "podcast"]
+  skill_domain:
+    type: string
+    description: "The skill domain/section to generate content for"
+  skill_topics:
+    type: list
+    description: "List of topics within this skill domain"
+  episode_number:
+    type: int
+    description: "Sequential episode number"
+  is_amendment:
+    type: bool
+    default: false
+  amendment_of:
+    type: int
+    default: 0
+    description: "Original episode number if this is an amendment"
+  prior_episode_summary:
+    type: string
+    default: ""
+    description: "Summary of prior episode content for amendment reference"
+
+outputs:
+  episode_metadata:
+    type: object
+    reference: ${save_episode.output}
+  audio_url:
+    type: string
+    reference: ${upload_audio.output.audio_url}
+  script_url:
+    type: string
+    reference: ${upload_audio.output.script_url}
+
+nodes:
+  # Step 1: Retrieve relevant content from AI Search
+  - name: retrieve_content
+    type: python
+    source:
+      type: code
+      path: tools/retrieve_content.py
+    inputs:
+      certification_id: ${inputs.certification_id}
+      skill_domain: ${inputs.skill_domain}
+      skill_topics: ${inputs.skill_topics}
+
+  # Step 2: Generate narration script
+  - name: generate_narration
+    type: llm
+    source:
+      type: code
+      path: prompts/narration.jinja2
+    inputs:
+      deployment_name: gpt-4o
+      temperature: 0.7
+      max_tokens: 4000
+      audio_format: ${inputs.audio_format}
+      skill_domain: ${inputs.skill_domain}
+      skill_topics: ${inputs.skill_topics}
+      retrieved_content: ${retrieve_content.output}
+      episode_number: ${inputs.episode_number}
+      is_amendment: ${inputs.is_amendment}
+      amendment_of: ${inputs.amendment_of}
+      prior_episode_summary: ${inputs.prior_episode_summary}
+    connection: aoai_connection
+    api: chat
+
+  # Step 3: Quality check the narration
+  - name: quality_check
+    type: llm
+    source:
+      type: code
+      path: prompts/quality_check.jinja2
+    inputs:
+      deployment_name: gpt-4o
+      temperature: 0.3
+      max_tokens: 1000
+      narration: ${generate_narration.output}
+      skill_domain: ${inputs.skill_domain}
+      skill_topics: ${inputs.skill_topics}
+      audio_format: ${inputs.audio_format}
+    connection: aoai_connection
+    api: chat
+
+  # Step 4: Auto-revise if needed
+  - name: auto_revise
+    type: python
+    source:
+      type: code
+      path: tools/auto_revise.py
+    inputs:
+      narration: ${generate_narration.output}
+      quality_check_result: ${quality_check.output}
+      skill_domain: ${inputs.skill_domain}
+      skill_topics: ${inputs.skill_topics}
+      audio_format: ${inputs.audio_format}
+
+  # Step 5: Convert to SSML
+  - name: generate_ssml
+    type: llm
+    source:
+      type: code
+      path: prompts/ssml.jinja2
+    inputs:
+      deployment_name: gpt-4o
+      temperature: 0.3
+      max_tokens: 6000
+      narration: ${auto_revise.output}
+      audio_format: ${inputs.audio_format}
+    connection: aoai_connection
+    api: chat
+
+  # Step 6: Synthesize audio
+  - name: synthesize_audio
+    type: python
+    source:
+      type: code
+      path: tools/synthesize_audio.py
+    inputs:
+      ssml_content: ${generate_ssml.output}
+      episode_number: ${inputs.episode_number}
+      certification_id: ${inputs.certification_id}
+      audio_format: ${inputs.audio_format}
+
+  # Step 7: Upload to blob storage
+  - name: upload_audio
+    type: python
+    source:
+      type: code
+      path: tools/upload_to_blob.py
+    inputs:
+      audio_file_path: ${synthesize_audio.output.audio_path}
+      script_content: ${auto_revise.output}
+      ssml_content: ${generate_ssml.output}
+      certification_id: ${inputs.certification_id}
+      audio_format: ${inputs.audio_format}
+      episode_number: ${inputs.episode_number}
+
+  # Step 8: Save episode metadata to Cosmos DB
+  - name: save_episode
+    type: python
+    source:
+      type: code
+      path: tools/save_episode.py
+    inputs:
+      certification_id: ${inputs.certification_id}
+      audio_format: ${inputs.audio_format}
+      episode_number: ${inputs.episode_number}
+      skill_domain: ${inputs.skill_domain}
+      skill_topics: ${inputs.skill_topics}
+      audio_url: ${upload_audio.output.audio_url}
+      script_url: ${upload_audio.output.script_url}
+      duration_seconds: ${synthesize_audio.output.duration_seconds}
+      is_amendment: ${inputs.is_amendment}
+      amendment_of: ${inputs.amendment_of}
+      source_urls: ${retrieve_content.output.source_urls}
+      content_hash: ${retrieve_content.output.content_hash}

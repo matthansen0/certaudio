@@ -1,0 +1,151 @@
+// AI Services Module
+// Deploys: Azure OpenAI, AI Speech, Document Intelligence, AI Search
+
+// ============================================================================
+// PARAMETERS
+// ============================================================================
+
+param resourcePrefix string
+param location string
+param uniqueSuffix string
+param tags object
+
+// ============================================================================
+// VARIABLES
+// ============================================================================
+
+var openAiName = '${resourcePrefix}-openai-${uniqueSuffix}'
+var speechName = '${resourcePrefix}-speech-${uniqueSuffix}'
+var docIntelName = '${resourcePrefix}-docintel-${uniqueSuffix}'
+var searchName = '${resourcePrefix}-search-${uniqueSuffix}'
+
+// ============================================================================
+// RESOURCES
+// ============================================================================
+
+// Azure OpenAI Service
+resource openAi 'Microsoft.CognitiveServices/accounts@2024-04-01-preview' = {
+  name: openAiName
+  location: location
+  tags: tags
+  kind: 'OpenAI'
+  sku: {
+    name: 'S0'
+  }
+  properties: {
+    customSubDomainName: openAiName
+    publicNetworkAccess: 'Enabled'
+    networkAcls: {
+      defaultAction: 'Allow'
+    }
+  }
+}
+
+// GPT-4o deployment for script generation
+resource gpt4oDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-04-01-preview' = {
+  parent: openAi
+  name: 'gpt-4o'
+  sku: {
+    name: 'Standard'
+    capacity: 30
+  }
+  properties: {
+    model: {
+      format: 'OpenAI'
+      name: 'gpt-4o'
+      version: '2024-08-06'
+    }
+    raiPolicyName: 'Microsoft.Default'
+  }
+}
+
+// Text embedding deployment for RAG
+resource embeddingDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-04-01-preview' = {
+  parent: openAi
+  name: 'text-embedding-3-large'
+  sku: {
+    name: 'Standard'
+    capacity: 30
+  }
+  properties: {
+    model: {
+      format: 'OpenAI'
+      name: 'text-embedding-3-large'
+      version: '1'
+    }
+  }
+  dependsOn: [gpt4oDeployment]
+}
+
+// Azure AI Speech Service
+resource speech 'Microsoft.CognitiveServices/accounts@2024-04-01-preview' = {
+  name: speechName
+  location: location
+  tags: tags
+  kind: 'SpeechServices'
+  sku: {
+    name: 'S0'
+  }
+  properties: {
+    customSubDomainName: speechName
+    publicNetworkAccess: 'Enabled'
+    networkAcls: {
+      defaultAction: 'Allow'
+    }
+  }
+}
+
+// Azure AI Document Intelligence
+resource documentIntelligence 'Microsoft.CognitiveServices/accounts@2024-04-01-preview' = {
+  name: docIntelName
+  location: location
+  tags: tags
+  kind: 'FormRecognizer'
+  sku: {
+    name: 'S0'
+  }
+  properties: {
+    customSubDomainName: docIntelName
+    publicNetworkAccess: 'Enabled'
+    networkAcls: {
+      defaultAction: 'Allow'
+    }
+  }
+}
+
+// Azure AI Search
+resource search 'Microsoft.Search/searchServices@2024-03-01-preview' = {
+  name: searchName
+  location: location
+  tags: tags
+  sku: {
+    name: 'basic'
+  }
+  properties: {
+    replicaCount: 1
+    partitionCount: 1
+    hostingMode: 'default'
+    publicNetworkAccess: 'enabled'
+    semanticSearch: 'free'
+  }
+}
+
+// ============================================================================
+// OUTPUTS
+// ============================================================================
+
+output openAiName string = openAi.name
+output openAiEndpoint string = openAi.properties.endpoint
+output openAiId string = openAi.id
+
+output speechName string = speech.name
+output speechEndpoint string = speech.properties.endpoint
+output speechId string = speech.id
+
+output documentIntelligenceName string = documentIntelligence.name
+output documentIntelligenceEndpoint string = documentIntelligence.properties.endpoint
+output documentIntelligenceId string = documentIntelligence.id
+
+output searchName string = search.name
+output searchEndpoint string = 'https://${search.name}.search.windows.net'
+output searchId string = search.id

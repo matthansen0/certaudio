@@ -1,0 +1,204 @@
+name: Generate Content
+
+on:
+  workflow_dispatch:
+    inputs:
+      certificationId:
+        description: 'Microsoft certification ID (e.g., ai-102, az-204)'
+        required: true
+        default: 'ai-102'
+      audioFormat:
+        description: 'Audio format'
+        required: true
+        type: choice
+        options:
+          - instructional
+          - podcast
+        default: 'instructional'
+      examPageUrl:
+        description: 'Override exam page URL (optional, auto-discovered if empty)'
+        required: false
+        default: ''
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+
+jobs:
+  discover-content:
+    name: Discover Exam Content
+    runs-on: ubuntu-latest
+    outputs:
+      skillsOutline: ${{ steps.discover.outputs.skillsOutline }}
+      sourceUrls: ${{ steps.discover.outputs.sourceUrls }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          cd src/pipeline
+          pip install -r requirements.txt
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Discover exam content
+        id: discover
+        env:
+          CERTIFICATION_ID: ${{ inputs.certificationId }}
+          EXAM_PAGE_URL: ${{ inputs.examPageUrl }}
+          DOCUMENT_INTELLIGENCE_ENDPOINT: ${{ secrets.DOCUMENT_INTELLIGENCE_ENDPOINT }}
+          SEARCH_ENDPOINT: ${{ secrets.SEARCH_ENDPOINT }}
+          COSMOS_DB_ENDPOINT: ${{ secrets.COSMOS_DB_ENDPOINT }}
+        run: |
+          cd src/pipeline
+          python -m tools.discover_exam_content \
+            --certification-id "$CERTIFICATION_ID" \
+            --exam-page-url "$EXAM_PAGE_URL" \
+            --output-file /tmp/discovery_results.json
+          
+          echo "skillsOutline=$(cat /tmp/discovery_results.json | jq -c '.skillsOutline')" >> $GITHUB_OUTPUT
+          echo "sourceUrls=$(cat /tmp/discovery_results.json | jq -c '.sourceUrls')" >> $GITHUB_OUTPUT
+
+  index-content:
+    name: Index Content for RAG
+    runs-on: ubuntu-latest
+    needs: discover-content
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          cd src/pipeline
+          pip install -r requirements.txt
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Index content in AI Search
+        env:
+          SOURCE_URLS: ${{ needs.discover-content.outputs.sourceUrls }}
+          CERTIFICATION_ID: ${{ inputs.certificationId }}
+          SEARCH_ENDPOINT: ${{ secrets.SEARCH_ENDPOINT }}
+          OPENAI_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
+          COSMOS_DB_ENDPOINT: ${{ secrets.COSMOS_DB_ENDPOINT }}
+        run: |
+          cd src/pipeline
+          python -m tools.index_content \
+            --certification-id "$CERTIFICATION_ID" \
+            --source-urls "$SOURCE_URLS"
+
+  generate-episodes:
+    name: Generate Episodes
+    runs-on: ubuntu-latest
+    needs: [discover-content, index-content]
+    strategy:
+      matrix:
+        batch: [0, 1, 2, 3, 4]  # Process in batches to avoid timeouts
+      max-parallel: 2
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          cd src/pipeline
+          pip install -r requirements.txt
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Generate episode batch
+        env:
+          CERTIFICATION_ID: ${{ inputs.certificationId }}
+          AUDIO_FORMAT: ${{ inputs.audioFormat }}
+          SKILLS_OUTLINE: ${{ needs.discover-content.outputs.skillsOutline }}
+          BATCH_INDEX: ${{ matrix.batch }}
+          OPENAI_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
+          SPEECH_ENDPOINT: ${{ secrets.SPEECH_ENDPOINT }}
+          SEARCH_ENDPOINT: ${{ secrets.SEARCH_ENDPOINT }}
+          STORAGE_ACCOUNT_NAME: ${{ secrets.STORAGE_ACCOUNT_NAME }}
+          COSMOS_DB_ENDPOINT: ${{ secrets.COSMOS_DB_ENDPOINT }}
+        run: |
+          cd src/pipeline
+          python -m tools.generate_episodes \
+            --certification-id "$CERTIFICATION_ID" \
+            --audio-format "$AUDIO_FORMAT" \
+            --skills-outline "$SKILLS_OUTLINE" \
+            --batch-index "$BATCH_INDEX" \
+            --batch-size 10
+
+  finalize:
+    name: Finalize Content Generation
+    runs-on: ubuntu-latest
+    needs: generate-episodes
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Generate episode index
+        env:
+          CERTIFICATION_ID: ${{ inputs.certificationId }}
+          AUDIO_FORMAT: ${{ inputs.audioFormat }}
+          COSMOS_DB_ENDPOINT: ${{ secrets.COSMOS_DB_ENDPOINT }}
+          STORAGE_ACCOUNT_NAME: ${{ secrets.STORAGE_ACCOUNT_NAME }}
+        run: |
+          cd src/pipeline
+          pip install -r requirements.txt
+          python -m tools.generate_index \
+            --certification-id "$CERTIFICATION_ID" \
+            --audio-format "$AUDIO_FORMAT"
+
+      - name: Output generation summary
+        run: |
+          echo "## Content Generation Complete! :headphones:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Certification | ${{ inputs.certificationId }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Format | ${{ inputs.audioFormat }} |" >> $GITHUB_STEP_SUMMARY

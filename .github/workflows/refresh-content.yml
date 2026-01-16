@@ -1,0 +1,172 @@
+name: Refresh Content
+
+on:
+  schedule:
+    # Run weekly on Sundays at 2 AM UTC
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+    inputs:
+      certificationId:
+        description: 'Microsoft certification ID (e.g., ai-102, az-204)'
+        required: true
+        default: 'ai-102'
+      audioFormat:
+        description: 'Audio format'
+        required: true
+        type: choice
+        options:
+          - instructional
+          - podcast
+        default: 'instructional'
+      forceRefresh:
+        description: 'Force refresh all content (ignore delta)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+
+jobs:
+  check-updates:
+    name: Check for Content Updates
+    runs-on: ubuntu-latest
+    outputs:
+      hasUpdates: ${{ steps.delta.outputs.hasUpdates }}
+      changedSources: ${{ steps.delta.outputs.changedSources }}
+      affectedEpisodes: ${{ steps.delta.outputs.affectedEpisodes }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          cd src/pipeline
+          pip install -r requirements.txt
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Check content delta
+        id: delta
+        env:
+          CERTIFICATION_ID: ${{ inputs.certificationId || 'ai-102' }}
+          FORCE_REFRESH: ${{ inputs.forceRefresh || false }}
+          COSMOS_DB_ENDPOINT: ${{ secrets.COSMOS_DB_ENDPOINT }}
+          DOCUMENT_INTELLIGENCE_ENDPOINT: ${{ secrets.DOCUMENT_INTELLIGENCE_ENDPOINT }}
+        run: |
+          cd src/pipeline
+          python -m tools.check_content_delta \
+            --certification-id "$CERTIFICATION_ID" \
+            --force-refresh "$FORCE_REFRESH" \
+            --output-file /tmp/delta_results.json
+          
+          HAS_UPDATES=$(cat /tmp/delta_results.json | jq -r '.hasUpdates')
+          echo "hasUpdates=$HAS_UPDATES" >> $GITHUB_OUTPUT
+          
+          if [ "$HAS_UPDATES" = "true" ]; then
+            echo "changedSources=$(cat /tmp/delta_results.json | jq -c '.changedSources')" >> $GITHUB_OUTPUT
+            echo "affectedEpisodes=$(cat /tmp/delta_results.json | jq -c '.affectedEpisodes')" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Report no updates
+        if: steps.delta.outputs.hasUpdates != 'true'
+        run: |
+          echo "## No Content Updates Found :white_check_mark:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All Microsoft Learn content is up to date." >> $GITHUB_STEP_SUMMARY
+
+  generate-amendments:
+    name: Generate Amendment Episodes
+    runs-on: ubuntu-latest
+    needs: check-updates
+    if: needs.check-updates.outputs.hasUpdates == 'true'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          cd src/pipeline
+          pip install -r requirements.txt
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Update AI Search index
+        env:
+          CHANGED_SOURCES: ${{ needs.check-updates.outputs.changedSources }}
+          CERTIFICATION_ID: ${{ inputs.certificationId || 'ai-102' }}
+          SEARCH_ENDPOINT: ${{ secrets.SEARCH_ENDPOINT }}
+          OPENAI_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
+        run: |
+          cd src/pipeline
+          python -m tools.index_content \
+            --certification-id "$CERTIFICATION_ID" \
+            --source-urls "$CHANGED_SOURCES" \
+            --update-mode true
+
+      - name: Generate amendment episodes
+        env:
+          CERTIFICATION_ID: ${{ inputs.certificationId || 'ai-102' }}
+          AUDIO_FORMAT: ${{ inputs.audioFormat || 'instructional' }}
+          CHANGED_SOURCES: ${{ needs.check-updates.outputs.changedSources }}
+          AFFECTED_EPISODES: ${{ needs.check-updates.outputs.affectedEpisodes }}
+          OPENAI_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
+          SPEECH_ENDPOINT: ${{ secrets.SPEECH_ENDPOINT }}
+          SEARCH_ENDPOINT: ${{ secrets.SEARCH_ENDPOINT }}
+          STORAGE_ACCOUNT_NAME: ${{ secrets.STORAGE_ACCOUNT_NAME }}
+          COSMOS_DB_ENDPOINT: ${{ secrets.COSMOS_DB_ENDPOINT }}
+        run: |
+          cd src/pipeline
+          python -m tools.generate_amendment_episodes \
+            --certification-id "$CERTIFICATION_ID" \
+            --audio-format "$AUDIO_FORMAT" \
+            --changed-sources "$CHANGED_SOURCES" \
+            --affected-episodes "$AFFECTED_EPISODES"
+
+      - name: Update episode index
+        env:
+          CERTIFICATION_ID: ${{ inputs.certificationId || 'ai-102' }}
+          AUDIO_FORMAT: ${{ inputs.audioFormat || 'instructional' }}
+          COSMOS_DB_ENDPOINT: ${{ secrets.COSMOS_DB_ENDPOINT }}
+          STORAGE_ACCOUNT_NAME: ${{ secrets.STORAGE_ACCOUNT_NAME }}
+        run: |
+          cd src/pipeline
+          python -m tools.generate_index \
+            --certification-id "$CERTIFICATION_ID" \
+            --audio-format "$AUDIO_FORMAT"
+
+      - name: Output refresh summary
+        run: |
+          echo "## Content Refresh Complete! :arrows_counterclockwise:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Amendment episodes have been generated for updated content." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Changed Sources" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          echo '${{ needs.check-updates.outputs.changedSources }}' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY

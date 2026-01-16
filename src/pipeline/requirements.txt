@@ -1,0 +1,31 @@
+# Azure AI Certification Audio Pipeline Requirements
+
+# Azure SDKs
+azure-ai-formrecognizer>=3.3.0
+azure-search-documents>=11.4.0
+azure-cognitiveservices-speech>=1.35.0
+azure-cosmos>=4.5.0
+azure-storage-blob>=12.19.0
+azure-identity>=1.15.0
+
+# OpenAI
+openai>=1.12.0
+
+# PromptFlow
+promptflow>=1.10.0
+promptflow-tools>=1.4.0
+
+# Web scraping and content processing
+beautifulsoup4>=4.12.0
+requests>=2.31.0
+lxml>=5.0.0
+markdownify>=0.11.0
+
+# Utilities
+python-dotenv>=1.0.0
+pydantic>=2.5.0
+tenacity>=8.2.0
+httpx>=0.26.0
+
+# Hashing for content delta detection
+hashlib-compat>=1.0.0

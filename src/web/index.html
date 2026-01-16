@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Microsoft Certification Audio Learning</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 18V5l12-2v13"></path>
+                        <circle cx="6" cy="18" r="3"></circle>
+                        <circle cx="18" cy="16" r="3"></circle>
+                    </svg>
+                    <span class="logo-text">CertAudio</span>
+                </div>
+                <div class="certification-selector">
+                    <select id="certSelect">
+                        <option value="ai-102">AI-102: Azure AI Engineer</option>
+                        <option value="az-204">AZ-204: Azure Developer</option>
+                        <option value="az-104">AZ-104: Azure Administrator</option>
+                        <option value="az-900">AZ-900: Azure Fundamentals</option>
+                    </select>
+                    <select id="formatSelect">
+                        <option value="instructional">Instructional</option>
+                        <option value="podcast">Podcast Style</option>
+                    </select>
+                </div>
+                <div class="user-info" id="userInfo">
+                    <button class="btn-signin" id="signInBtn">Sign In</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Sidebar: Episode List -->
+            <aside class="sidebar" id="sidebar">
+                <div class="sidebar-header">
+                    <h2>Episodes</h2>
+                    <div class="progress-summary" id="progressSummary">
+                        <span class="progress-text">0 / 0 completed</span>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="episode-list" id="episodeList">
+                    <div class="loading">Loading episodes...</div>
+                </div>
+            </aside>
+
+            <!-- Player Area -->
+            <section class="player-section">
+                <!-- Now Playing -->
+                <div class="now-playing" id="nowPlaying">
+                    <div class="episode-info">
+                        <h1 class="episode-title" id="episodeTitle">Select an episode to begin</h1>
+                        <p class="episode-domain" id="episodeDomain"></p>
+                        <div class="episode-topics" id="episodeTopics"></div>
+                    </div>
+
+                    <!-- Audio Player -->
+                    <div class="audio-player" id="audioPlayer">
+                        <audio id="audioElement"></audio>
+                        
+                        <div class="player-controls">
+                            <button class="btn-control btn-rewind" id="btnRewind" title="Rewind 15s">
+                                <svg viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
+                                    <text x="12" y="15" text-anchor="middle" font-size="7" fill="currentColor">15</text>
+                                </svg>
+                            </button>
+                            
+                            <button class="btn-control btn-play" id="btnPlay" title="Play/Pause">
+                                <svg class="icon-play" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M8 5v14l11-7z"/>
+                                </svg>
+                                <svg class="icon-pause" viewBox="0 0 24 24" fill="currentColor" style="display: none;">
+                                    <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+                                </svg>
+                            </button>
+                            
+                            <button class="btn-control btn-forward" id="btnForward" title="Forward 15s">
+                                <svg viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/>
+                                    <text x="12" y="15" text-anchor="middle" font-size="7" fill="currentColor">15</text>
+                                </svg>
+                            </button>
+                        </div>
+
+                        <div class="player-progress">
+                            <span class="time-current" id="timeCurrent">0:00</span>
+                            <div class="progress-track" id="progressTrack">
+                                <div class="progress-played" id="progressPlayed"></div>
+                                <div class="progress-handle" id="progressHandle"></div>
+                            </div>
+                            <span class="time-total" id="timeTotal">0:00</span>
+                        </div>
+
+                        <div class="player-extras">
+                            <div class="speed-control">
+                                <label>Speed:</label>
+                                <select id="speedSelect">
+                                    <option value="0.75">0.75x</option>
+                                    <option value="1" selected>1x</option>
+                                    <option value="1.25">1.25x</option>
+                                    <option value="1.5">1.5x</option>
+                                    <option value="1.75">1.75x</option>
+                                    <option value="2">2x</option>
+                                </select>
+                            </div>
+                            <button class="btn-transcript" id="btnTranscript" title="View Transcript">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                    <polyline points="14 2 14 8 20 8"></polyline>
+                                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                                    <polyline points="10 9 9 9 8 9"></polyline>
+                                </svg>
+                                Transcript
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Mark Complete -->
+                    <div class="complete-section">
+                        <label class="checkbox-complete">
+                            <input type="checkbox" id="markComplete">
+                            <span class="checkmark"></span>
+                            Mark as complete
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Transcript Panel -->
+                <div class="transcript-panel" id="transcriptPanel">
+                    <div class="transcript-header">
+                        <h3>Transcript</h3>
+                        <button class="btn-close" id="btnCloseTranscript">&times;</button>
+                    </div>
+                    <div class="transcript-content" id="transcriptContent">
+                        <p>Loading transcript...</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="js/app.js" type="module"></script>
+</body>
+</html>

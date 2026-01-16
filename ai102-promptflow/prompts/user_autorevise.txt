@@ -1,8 +1,0 @@
-Original narration:
-{{narration.narration_text}}
-
-QC JSON:
-{{qc.qc_json}}
-
-Revise the narration so all booleans would be true.
-Return only the final narration.
