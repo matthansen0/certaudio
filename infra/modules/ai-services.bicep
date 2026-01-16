@@ -132,6 +132,12 @@ resource search 'Microsoft.Search/searchServices@2024-03-01-preview' = {
     hostingMode: 'default'
     publicNetworkAccess: 'enabled'
     semanticSearch: 'free'
+    // Enable RBAC authentication for data-plane operations (index management, document upload)
+    authOptions: {
+      aadOrApiKey: {
+        aadAuthFailureMode: 'http401WithBearerChallenge'
+      }
+    }
   }
 }
 
