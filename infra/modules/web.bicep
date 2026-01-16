@@ -61,20 +61,22 @@ resource funcStorageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   properties: {
     accessTier: 'Hot'
     allowBlobPublicAccess: false
-    allowSharedKeyAccess: true
+    // Many tenants/subscriptions enforce this via policy; Functions supports managed-identity auth.
+    allowSharedKeyAccess: false
     minimumTlsVersion: 'TLS1_2'
     supportsHttpsTrafficOnly: true
   }
 }
 
-// App Service Plan for Functions (Consumption)
+// App Service Plan for Functions (Elastic Premium)
+// Using Premium avoids Linux Consumption deployment flows that rely on storage-account keys.
 resource appServicePlan 'Microsoft.Web/serverfarms@2023-12-01' = {
   name: appServicePlanName
   location: location
   tags: tags
   sku: {
-    name: 'Y1'
-    tier: 'Dynamic'
+    name: 'EP1'
+    tier: 'ElasticPremium'
   }
   properties: {
     reserved: true // Linux
@@ -106,14 +108,32 @@ resource functionsApp 'Microsoft.Web/sites@2023-12-01' = {
     siteConfig: {
       linuxFxVersion: 'Python|3.11'
       pythonVersion: '3.11'
+      alwaysOn: true
       cors: {
         allowedOrigins: ['*']
         supportCredentials: false
       }
       appSettings: [
+        // Managed-identity based AzureWebJobsStorage (no storage keys)
         {
-          name: 'AzureWebJobsStorage'
-          value: 'DefaultEndpointsProtocol=https;AccountName=${funcStorageAccount.name};EndpointSuffix=${environment().suffixes.storage};AccountKey=${funcStorageAccount.listKeys().keys[0].value}'
+          name: 'AzureWebJobsStorage__accountName'
+          value: funcStorageAccount.name
+        }
+        {
+          name: 'AzureWebJobsStorage__credential'
+          value: 'managedidentity'
+        }
+        {
+          name: 'AzureWebJobsStorage__blobServiceUri'
+          value: 'https://${funcStorageAccount.name}.blob.${environment().suffixes.storage}'
+        }
+        {
+          name: 'AzureWebJobsStorage__queueServiceUri'
+          value: 'https://${funcStorageAccount.name}.queue.${environment().suffixes.storage}'
+        }
+        {
+          name: 'AzureWebJobsStorage__tableServiceUri'
+          value: 'https://${funcStorageAccount.name}.table.${environment().suffixes.storage}'
         }
         {
           name: 'FUNCTIONS_EXTENSION_VERSION'
@@ -161,6 +181,37 @@ resource functionsApp 'Microsoft.Web/sites@2023-12-01' = {
         }
       ]
     }
+  }
+}
+
+// Data-plane permissions for AzureWebJobsStorage using managed identity
+resource funcStorageBlobContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(funcStorageAccount.id, functionsApp.id, 'Storage Blob Data Contributor')
+  scope: funcStorageAccount
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
+    principalId: functionsApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource funcStorageQueueContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(funcStorageAccount.id, functionsApp.id, 'Storage Queue Data Contributor')
+  scope: funcStorageAccount
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '974c5e8b-45b9-4653-ba55-5f855dd0fb88')
+    principalId: functionsApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource funcStorageTableContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(funcStorageAccount.id, functionsApp.id, 'Storage Table Data Contributor')
+  scope: funcStorageAccount
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3')
+    principalId: functionsApp.identity.principalId
+    principalType: 'ServicePrincipal'
   }
 }
 
