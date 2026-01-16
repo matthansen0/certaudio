@@ -163,7 +163,7 @@ jobs:
               --query accessToken -o tsv)
             export ACCESS_TOKEN="$accessToken"
 
-            automationPrincipalId=$(python - <<'PY'
+            automationPrincipalId=$(python3 - <<'PY'
             import os, json, base64
             token = os.environ.get('ACCESS_TOKEN', '')
             parts = token.split('.')
@@ -231,7 +231,7 @@ jobs:
               --query accessToken -o tsv)
             export ACCESS_TOKEN="$accessToken"
 
-            automationPrincipalId=$(python - <<'PY'
+            automationPrincipalId=$(python3 - <<'PY'
             import os, json, base64
             token = os.environ.get('ACCESS_TOKEN', '')
             parts = token.split('.')
