@@ -9,6 +9,7 @@ on:
     branches: [main]
     paths:
       - 'infra/**'
+      - 'src/**'
       - '.github/workflows/deploy-infra.yml'
   workflow_dispatch:
     inputs:
@@ -99,8 +100,10 @@ env:
   LOCATION: 'centralus'
   # OpenAI location - separate region since centralus doesn't support GPT-4o GlobalStandard
   OPENAI_LOCATION: 'eastus'
-  # Ensures globally-unique resource names per workflow run to avoid collisions with soft-deleted Cognitive Services subdomains.
-  UNIQUE_SUFFIX: '${{ github.run_id }}'
+  # Controls the resource-name suffix used by Bicep.
+  # - Set secret AZURE_UNIQUE_SUFFIX to pin deployments to a single stable environment (recommended).
+  # - If unset, falls back to github.run_id, which avoids name collisions but creates new resources every run.
+  UNIQUE_SUFFIX: ${{ secrets.AZURE_UNIQUE_SUFFIX || github.run_id }}
 
 # =============================================================================
 # REQUIRED SECRETS (configure in GitHub Settings > Secrets > Actions):
@@ -108,6 +111,8 @@ env:
 # - AZURE_TENANT_ID:        Azure AD tenant ID  
 # - AZURE_SUBSCRIPTION_ID:  Azure subscription ID
 # - AZURE_RESOURCE_GROUP:   Resource group name (e.g., rg-certaudio-dev)
+# OPTIONAL:
+# - AZURE_UNIQUE_SUFFIX:    Pin resource name suffix to avoid creating new resources each run
 # =============================================================================
 
 jobs:

@@ -19,6 +19,19 @@ app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 logger = logging.getLogger(__name__)
 
 
+def _format_cert_name(cert_id: str) -> str:
+    # Basic display name helper. Prefer a curated map when present.
+    curated = {
+        "ai-102": "AI-102: Azure AI Engineer",
+        "az-204": "AZ-204: Azure Developer",
+        "az-104": "AZ-104: Azure Administrator",
+        "az-900": "AZ-900: Azure Fundamentals",
+    }
+    if not cert_id:
+        return ""
+    return curated.get(cert_id.lower(), cert_id.upper())
+
+
 def get_cosmos_client():
     """Get Cosmos DB client using managed identity."""
     endpoint = os.environ.get("COSMOS_DB_ENDPOINT")
@@ -34,6 +47,42 @@ def get_blob_service():
         account_url=f"https://{account}.blob.core.windows.net",
         credential=credential,
     )
+
+
+# =============================================================================
+# GET /api/certifications
+# =============================================================================
+@app.route(route="certifications", methods=["GET"])
+def list_certifications(req: func.HttpRequest) -> func.HttpResponse:
+    """List certifications currently present in Cosmos episodes."""
+    try:
+        client = get_cosmos_client()
+        database = client.get_database_client(
+            os.environ.get("COSMOS_DB_DATABASE", "certaudio")
+        )
+        container = database.get_container_client("episodes")
+
+        # DISTINCT across partitions: returns list of certificationIds.
+        query = "SELECT DISTINCT VALUE c.certificationId FROM c"
+        cert_ids = list(
+            container.query_items(query=query, enable_cross_partition_query=True)
+        )
+
+        # Filter/normalize, then sort.
+        cert_ids = sorted({c for c in cert_ids if isinstance(c, str) and c.strip()})
+        result = [{"id": cid, "name": _format_cert_name(cid)} for cid in cert_ids]
+
+        return func.HttpResponse(
+            json.dumps({"certifications": result}),
+            mimetype="application/json",
+        )
+    except Exception as e:
+        logger.error(f"Error listing certifications: {e}")
+        return func.HttpResponse(
+            json.dumps({"error": str(e)}),
+            status_code=500,
+            mimetype="application/json",
+        )
 
 
 # =============================================================================

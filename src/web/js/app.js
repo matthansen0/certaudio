@@ -7,6 +7,15 @@
 const API_BASE = '/api';
 const STORAGE_KEY_PROGRESS = 'certaudio_progress';
 const STORAGE_KEY_USER = 'certaudio_user';
+const STORAGE_KEY_LAST_CERT = 'certaudio_last_cert';
+
+const FALLBACK_CERTIFICATIONS = [
+    { id: 'ai-102', name: 'AI-102: Azure AI Engineer' },
+    { id: 'az-204', name: 'AZ-204: Azure Developer' },
+    { id: 'az-104', name: 'AZ-104: Azure Administrator' },
+    { id: 'az-900', name: 'AZ-900: Azure Fundamentals' },
+    { id: 'dp-700', name: 'DP-700: Fabric Data Engineer' },
+];
 
 // State
 let state = {
@@ -62,6 +71,9 @@ async function init() {
     
     // Set up event listeners
     setupEventListeners();
+
+    // Load certifications list (dynamic) and pick last selection if available
+    await loadCertifications();
     
     // Load episodes for default certification
     await loadEpisodes();
@@ -75,6 +87,7 @@ function setupEventListeners() {
     // Certification and format selection
     elements.certSelect.addEventListener('change', async (e) => {
         state.certificationId = e.target.value;
+        localStorage.setItem(STORAGE_KEY_LAST_CERT, state.certificationId);
         await loadEpisodes();
     });
     
@@ -115,6 +128,60 @@ function setupEventListeners() {
     elements.btnCloseTranscript.addEventListener('click', () => {
         elements.transcriptPanel.classList.remove('visible');
     });
+}
+
+// ============================================
+// Certifications
+// ============================================
+
+function setCertOptions(certs, selectedId) {
+    // Replace options
+    elements.certSelect.innerHTML = '';
+
+    // Ensure stable ordering
+    const sorted = [...certs].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+    for (const cert of sorted) {
+        const opt = document.createElement('option');
+        opt.value = cert.id;
+        opt.textContent = cert.name || cert.id;
+        elements.certSelect.appendChild(opt);
+    }
+
+    // Select desired cert if present, else pick first.
+    const candidate = selectedId && sorted.some(c => c.id === selectedId)
+        ? selectedId
+        : (sorted[0]?.id || '');
+    if (candidate) {
+        elements.certSelect.value = candidate;
+        state.certificationId = candidate;
+        localStorage.setItem(STORAGE_KEY_LAST_CERT, state.certificationId);
+    }
+}
+
+async function loadCertifications() {
+    const lastCert = localStorage.getItem(STORAGE_KEY_LAST_CERT) || state.certificationId;
+
+    try {
+        const response = await fetch(`${API_BASE}/certifications`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+
+        const apiCerts = Array.isArray(payload?.certifications) ? payload.certifications : [];
+        const normalized = apiCerts
+            .filter(c => c && typeof c.id === 'string' && c.id.trim())
+            .map(c => ({ id: c.id.toLowerCase(), name: c.name || c.id.toUpperCase() }));
+
+        // Union with fallback so users can pick upcoming certs even before content exists.
+        const byId = new Map();
+        for (const c of [...FALLBACK_CERTIFICATIONS, ...normalized]) {
+            if (!byId.has(c.id)) byId.set(c.id, c);
+        }
+
+        setCertOptions([...byId.values()], lastCert?.toLowerCase());
+    } catch (err) {
+        console.warn('Failed to load certifications from API; using fallback list.', err);
+        setCertOptions(FALLBACK_CERTIFICATIONS, lastCert?.toLowerCase());
+    }
 }
 
 // ============================================
