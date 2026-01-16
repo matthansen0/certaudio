@@ -97,9 +97,10 @@ permissions:
 env:
   AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
-  LOCATION: 'canadacentral'
-  # OpenAI location - GPT-4o GlobalStandard not available in all regions
-  # Available: eastus, eastus2, westus, westus3, northcentralus, southcentralus, westeurope, swedencentral
+  # Primary location - eastus2 supports all required services:
+  # Static Web Apps, OpenAI, Speech, Search, Cosmos DB, Storage, Functions
+  LOCATION: 'eastus2'
+  # OpenAI location - same as LOCATION since eastus2 supports GPT-4o GlobalStandard
   OPENAI_LOCATION: 'eastus2'
 
 # =============================================================================
