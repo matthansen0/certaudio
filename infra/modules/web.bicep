@@ -25,7 +25,11 @@ var staticWebAppName = '${resourcePrefix}-swa-${uniqueSuffix}'
 var functionsAppName = '${resourcePrefix}-func-${uniqueSuffix}'
 var appServicePlanName = '${resourcePrefix}-asp-${uniqueSuffix}'
 var appInsightsName = '${resourcePrefix}-insights-${uniqueSuffix}'
-var funcStorageAccountName = replace('${resourcePrefix}funcst${uniqueSuffix}', '-', '')
+// Storage account names: 3-24 chars, lowercase alphanumeric only
+// Format: certaudio{env}fn{uniqueSuffix} - always > 3 chars with our prefix
+var funcStorageNameRaw = toLower(replace('${resourcePrefix}fn${uniqueSuffix}', '-', ''))
+#disable-next-line BCP334
+var funcStorageAccountName = take(funcStorageNameRaw, 24)
 
 // ============================================================================
 // RESOURCES
@@ -45,6 +49,7 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
 }
 
 // Storage account for Functions
+#disable-next-line BCP334
 resource funcStorageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: funcStorageAccountName
   location: location

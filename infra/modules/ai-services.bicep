@@ -9,7 +9,8 @@ param resourcePrefix string
 param location string
 param uniqueSuffix string
 param tags object
-
+@description('Location for Azure OpenAI (may differ from main location due to model availability)')
+param openAiLocation string = 'eastus2'
 // ============================================================================
 // VARIABLES
 // ============================================================================
@@ -24,9 +25,10 @@ var searchName = '${resourcePrefix}-search-${uniqueSuffix}'
 // ============================================================================
 
 // Azure OpenAI Service
+// Note: Using separate location due to model availability constraints
 resource openAi 'Microsoft.CognitiveServices/accounts@2024-04-01-preview' = {
   name: openAiName
-  location: location
+  location: openAiLocation
   tags: tags
   kind: 'OpenAI'
   sku: {
@@ -42,11 +44,12 @@ resource openAi 'Microsoft.CognitiveServices/accounts@2024-04-01-preview' = {
 }
 
 // GPT-4o deployment for script generation
+// Using GlobalStandard for wider regional availability
 resource gpt4oDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-04-01-preview' = {
   parent: openAi
   name: 'gpt-4o'
   sku: {
-    name: 'Standard'
+    name: 'GlobalStandard'
     capacity: 30
   }
   properties: {

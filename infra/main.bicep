@@ -27,6 +27,10 @@ param environment string = 'dev'
 @description('Unique suffix for globally unique resource names')
 param uniqueSuffix string = uniqueString(resourceGroup().id)
 
+@description('Location for Azure OpenAI (GPT-4o has limited regional availability)')
+@allowed(['eastus', 'eastus2', 'westus', 'westus3', 'northcentralus', 'southcentralus', 'westeurope', 'swedencentral'])
+param openAiLocation string = 'eastus2'
+
 // ============================================================================
 // VARIABLES
 // ============================================================================
@@ -50,6 +54,7 @@ module aiServices 'modules/ai-services.bicep' = {
   params: {
     resourcePrefix: resourcePrefix
     location: location
+    openAiLocation: openAiLocation
     uniqueSuffix: uniqueSuffix
     tags: tags
   }

@@ -17,7 +17,11 @@ param tags object
 // ============================================================================
 
 var cosmosDbName = '${resourcePrefix}-cosmos-${uniqueSuffix}'
-var storageAccountName = replace('${resourcePrefix}stor${uniqueSuffix}', '-', '')
+// Storage account names: 3-24 chars, lowercase alphanumeric only
+// Format: certaudio{env}st{uniqueSuffix} - always > 3 chars with our prefix
+var storageNameRaw = toLower(replace('${resourcePrefix}st${uniqueSuffix}', '-', ''))
+#disable-next-line BCP334
+var storageAccountName = take(storageNameRaw, 24)
 var databaseName = 'certaudio'
 
 // ============================================================================
@@ -138,6 +142,7 @@ resource userProgressContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabas
 }
 
 // Storage Account (private access only)
+#disable-next-line BCP334
 resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: storageAccountName
   location: location
