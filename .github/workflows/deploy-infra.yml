@@ -8,8 +8,21 @@ on:
   workflow_dispatch:
     inputs:
       certificationId:
-        description: 'Microsoft certification ID (e.g., ai-102, az-204)'
+        description: 'Microsoft certification ID'
         required: true
+        type: choice
+        options:
+          - ai-102    # Azure AI Engineer
+          - dp-600    # Microsoft Fabric Analytics Engineer
+          - az-204    # Azure Developer
+          - az-104    # Azure Administrator
+          - az-305    # Azure Solutions Architect
+          - az-400    # Azure DevOps Engineer
+          - az-500    # Azure Security Engineer
+          - dp-203    # Azure Data Engineer
+          - dp-300    # Azure Database Administrator
+          - pl-300    # Power BI Data Analyst
+          - sc-300    # Identity and Access Administrator
         default: 'ai-102'
       audioFormat:
         description: 'Audio format'
