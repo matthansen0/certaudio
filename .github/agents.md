@@ -2,6 +2,16 @@
 
 This file defines specialized agents for the Azure AI Certification Audio Learning Platform.
 
+## Recent Implementation Notes (Post v1 Plan)
+
+- **Keyless Storage (policy-friendly)**: The platform runs with `allowSharedKeyAccess=false` on storage accounts and uses **Managed Identity / Entra ID** + **data-plane RBAC** instead of account keys.
+- **Functions hosting**: Azure Functions is deployed on **Elastic Premium (EP1)** to avoid Linux Consumption deployment/runtime flows that implicitly depend on storage keys in some locked-down tenants.
+- **Cosmos SQL RBAC scope**: Cosmos DB SQL role assignment scope must be the fully-qualified DB scope `${cosmosDb.id}/dbs/${cosmosDbDatabaseName}`.
+- **SWA deploy token**: Static Web Apps deploy token is retrieved at runtime in CI (no long-lived repo secret).
+- **Deployment sprawl control**: CI supports an optional pinned suffix secret `AZURE_UNIQUE_SUFFIX` to avoid creating a full new resource set every run.
+- **RG cleanup helper**: [scripts/cleanup-rg.sh](../scripts/cleanup-rg.sh) can delete old tagged deployment sets while keeping the active suffix.
+- **Dynamic certification list**: Frontend dropdown is populated from the API (`GET /api/certifications`) with a safe fallback that includes `dp-700`.
+
 ## Agents
 
 ### content-pipeline
@@ -35,6 +45,11 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 - Target episode length: ~10 minutes (~1,200-1,500 words)
 - SSML includes 500ms pauses after key concepts, -8% rate for comprehension
 
+**Auth & Access (no keys)**:
+- GitHub Actions uses OIDC via `azure/login@v2`; Python tools use `DefaultAzureCredential()`.
+- Cosmos access uses Entra ID auth to `CosmosClient(endpoint, DefaultAzureCredential())`.
+- Blob access uses `BlobServiceClient(account_url=..., DefaultAzureCredential())`.
+
 ---
 
 ### frontend
@@ -50,6 +65,7 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 - Sync progress to Cosmos DB (authenticated) or localStorage (anonymous)
 - Responsive design for desktop and mobile
 - Handle Azure AD B2C authentication when enabled
+- Populate certification dropdown dynamically from the backend
 
 **Key Files**:
 - `src/web/index.html` - Main application shell
@@ -65,6 +81,10 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 - Calls Azure Functions API for episode data and audio streaming
 - Audio served via Functions proxy (no public Blob access)
 - B2C authentication optional via feature flag
+
+**Implementation details**:
+- Certifications are fetched from `GET /api/certifications` (Cosmos DISTINCT over `episodes`).
+- If no content exists yet, the UI still offers a fallback list (includes `dp-700`) and shows “No episodes found”.
 
 ---
 
@@ -94,9 +114,21 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 - `.github/workflows/refresh-content.yml` - Scheduled refresh
 
 **Context**:
-- All resources use Managed Identity for authentication
-- Storage Account has public access disabled
+- All resources prefer Managed Identity for authentication
+- Storage accounts have public access disabled
 - Parameters: `certificationId`, `audioFormat`, `enableB2C`, `location`
+
+**Keyless storage + RBAC**:
+- Functions runtime storage (`AzureWebJobsStorage`) is configured with `AzureWebJobsStorage__credential=managedidentity` and service URIs, and the Functions identity is granted:
+	- Storage Blob Data Contributor
+	- Storage Queue Data Contributor
+	- Storage Table Data Contributor
+- Functions read episode media/scripts from the *content* storage account via Storage Blob Data Reader.
+
+**CI/CD notes**:
+- Deploy workflow supports `AZURE_UNIQUE_SUFFIX` (optional secret) to keep one stable environment.
+- Static Web Apps deploy token is fetched via `az staticwebapp secrets list` during the workflow.
+- Functions deployment packages dependencies into `.python_packages/lib/site-packages` and deploys via zip deploy.
 
 ---
 

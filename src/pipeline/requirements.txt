@@ -28,4 +28,4 @@ tenacity>=8.2.0
 httpx>=0.26.0
 
 # Hashing for content delta detection
-hashlib-compat>=1.0.0
+# (uses Python stdlib `hashlib`)
