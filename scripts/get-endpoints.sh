@@ -20,6 +20,10 @@ fi
 
 suffix="${2:-}"
 if [[ -z "$suffix" ]]; then
+  suffix="${AZURE_UNIQUE_SUFFIX:-${UNIQUE_SUFFIX:-}}"
+fi
+
+if [[ -z "$suffix" ]]; then
   # Choose newest deployment suffix by max SWA numeric suffix.
   suffix=$(az staticwebapp list -g "$rg" --query "[].name" -o tsv \
     | sed -n 's/^certaudio-dev-swa-//p' \

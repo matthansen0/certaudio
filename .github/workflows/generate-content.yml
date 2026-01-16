@@ -142,14 +142,143 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Resolve endpoints for latest deployment
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/get-endpoints.sh
+
+          suffix="${{ secrets.AZURE_UNIQUE_SUFFIX }}"
+          if [[ -n "$suffix" ]]; then
+            out=$(./scripts/get-endpoints.sh "$AZURE_RESOURCE_GROUP" "$suffix")
+          else
+            out=$(./scripts/get-endpoints.sh "$AZURE_RESOURCE_GROUP")
+          fi
+
+          echo "$out" | awk -F= '/^(OPENAI_ENDPOINT|SPEECH_ENDPOINT|DOCUMENT_INTELLIGENCE_ENDPOINT|SEARCH_ENDPOINT|COSMOS_DB_ENDPOINT|STORAGE_ACCOUNT_NAME)=/ {print $0}' >> "$GITHUB_ENV"
+
+      - name: Ensure Cosmos SQL RBAC for this workflow principal
+        run: |
+          set -euo pipefail
+
+          accessToken=$(az account get-access-token \
+            --resource https://management.azure.com \
+            --query accessToken -o tsv)
+          export ACCESS_TOKEN="$accessToken"
+
+          principalObjectId=$(python - <<'PY'
+          import os, json, base64
+          token = os.environ.get('ACCESS_TOKEN', '')
+          parts = token.split('.')
+          if len(parts) < 2:
+            print('')
+            raise SystemExit(0)
+          payload = parts[1]
+          payload += '=' * (-len(payload) % 4)
+          data = base64.urlsafe_b64decode(payload.encode('utf-8')).decode('utf-8')
+          claims = json.loads(data)
+          print(claims.get('oid') or claims.get('objectId') or '')
+          PY
+          )
+
+          if [[ -z "$principalObjectId" ]]; then
+            echo "::warning::Could not determine automation principal objectId; skipping Cosmos SQL RBAC check."
+            exit 0
+          fi
+
+          cosmosName=$(echo "$COSMOS_DB_ENDPOINT" | sed -E 's#^https?://([^./]+)\..*$#\1#')
+          if [[ -z "$cosmosName" ]]; then
+            echo "::error::Could not parse Cosmos account name from COSMOS_DB_ENDPOINT=$COSMOS_DB_ENDPOINT"
+            exit 1
+          fi
+
+          existing=$(az cosmosdb sql role assignment list \
+            --account-name "$cosmosName" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "[?principalId=='$principalObjectId' && scope=='/dbs/certaudio'] | length(@)" \
+            -o tsv || echo "0")
+
+          if [[ "$existing" == "0" ]]; then
+            az cosmosdb sql role assignment create \
+              --account-name "$cosmosName" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --principal-id "$principalObjectId" \
+              --scope "/dbs/certaudio" \
+              --role-definition-id "00000000-0000-0000-0000-000000000002" \
+              --only-show-errors
+          fi
+
+      - name: Resolve endpoints for latest deployment
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/get-endpoints.sh
+
+          # Prefer a pinned environment if AZURE_UNIQUE_SUFFIX is set; otherwise pick newest SWA suffix.
+          suffix="${{ secrets.AZURE_UNIQUE_SUFFIX }}"
+          if [[ -n "$suffix" ]]; then
+            out=$(./scripts/get-endpoints.sh "$AZURE_RESOURCE_GROUP" "$suffix")
+          else
+            out=$(./scripts/get-endpoints.sh "$AZURE_RESOURCE_GROUP")
+          fi
+
+          echo "$out" | awk -F= '/^(OPENAI_ENDPOINT|SPEECH_ENDPOINT|DOCUMENT_INTELLIGENCE_ENDPOINT|SEARCH_ENDPOINT|COSMOS_DB_ENDPOINT|STORAGE_ACCOUNT_NAME)=/ {print $0}' >> "$GITHUB_ENV"
+
+      - name: Ensure Cosmos SQL RBAC for this workflow principal
+        run: |
+          set -euo pipefail
+
+          accessToken=$(az account get-access-token \
+            --resource https://management.azure.com \
+            --query accessToken -o tsv)
+          export ACCESS_TOKEN="$accessToken"
+
+          principalObjectId=$(python - <<'PY'
+          import os, json, base64
+          token = os.environ.get('ACCESS_TOKEN', '')
+          parts = token.split('.')
+          if len(parts) < 2:
+            print('')
+            raise SystemExit(0)
+          payload = parts[1]
+          payload += '=' * (-len(payload) % 4)
+          data = base64.urlsafe_b64decode(payload.encode('utf-8')).decode('utf-8')
+          claims = json.loads(data)
+          print(claims.get('oid') or claims.get('objectId') or '')
+          PY
+          )
+
+          if [[ -z "$principalObjectId" ]]; then
+            echo "::warning::Could not determine automation principal objectId; skipping Cosmos SQL RBAC check."
+            exit 0
+          fi
+
+          cosmosName=$(echo "$COSMOS_DB_ENDPOINT" | sed -E 's#^https?://([^./]+)\..*$#\1#')
+          if [[ -z "$cosmosName" ]]; then
+            echo "::error::Could not parse Cosmos account name from COSMOS_DB_ENDPOINT=$COSMOS_DB_ENDPOINT"
+            exit 1
+          fi
+
+          # Idempotently ensure the principal can read/write at the database scope.
+          existing=$(az cosmosdb sql role assignment list \
+            --account-name "$cosmosName" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "[?principalId=='$principalObjectId' && scope=='/dbs/certaudio'] | length(@)" \
+            -o tsv || echo "0")
+
+          if [[ "$existing" == "0" ]]; then
+            az cosmosdb sql role assignment create \
+              --account-name "$cosmosName" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --principal-id "$principalObjectId" \
+              --scope "/dbs/certaudio" \
+              --role-definition-id "00000000-0000-0000-0000-000000000002" \
+              --only-show-errors
+          fi
+
       - name: Discover exam content
         id: discover
         env:
           CERTIFICATION_ID: ${{ inputs.certificationId }}
           EXAM_PAGE_URL: ${{ inputs.examPageUrl }}
-          DOCUMENT_INTELLIGENCE_ENDPOINT: ${{ secrets.DOCUMENT_INTELLIGENCE_ENDPOINT }}
-          SEARCH_ENDPOINT: ${{ secrets.SEARCH_ENDPOINT }}
-          COSMOS_DB_ENDPOINT: ${{ secrets.COSMOS_DB_ENDPOINT }}
         run: |
           cd src/pipeline
           python -m tools.discover_exam_content \
@@ -185,13 +314,75 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Resolve endpoints for latest deployment
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/get-endpoints.sh
+
+          suffix="${{ secrets.AZURE_UNIQUE_SUFFIX }}"
+          if [[ -n "$suffix" ]]; then
+            out=$(./scripts/get-endpoints.sh "$AZURE_RESOURCE_GROUP" "$suffix")
+          else
+            out=$(./scripts/get-endpoints.sh "$AZURE_RESOURCE_GROUP")
+          fi
+
+          echo "$out" | awk -F= '/^(OPENAI_ENDPOINT|SPEECH_ENDPOINT|DOCUMENT_INTELLIGENCE_ENDPOINT|SEARCH_ENDPOINT|COSMOS_DB_ENDPOINT|STORAGE_ACCOUNT_NAME)=/ {print $0}' >> "$GITHUB_ENV"
+
+      - name: Ensure Cosmos SQL RBAC for this workflow principal
+        run: |
+          set -euo pipefail
+
+          accessToken=$(az account get-access-token \
+            --resource https://management.azure.com \
+            --query accessToken -o tsv)
+          export ACCESS_TOKEN="$accessToken"
+
+          principalObjectId=$(python - <<'PY'
+          import os, json, base64
+          token = os.environ.get('ACCESS_TOKEN', '')
+          parts = token.split('.')
+          if len(parts) < 2:
+            print('')
+            raise SystemExit(0)
+          payload = parts[1]
+          payload += '=' * (-len(payload) % 4)
+          data = base64.urlsafe_b64decode(payload.encode('utf-8')).decode('utf-8')
+          claims = json.loads(data)
+          print(claims.get('oid') or claims.get('objectId') or '')
+          PY
+          )
+
+          if [[ -z "$principalObjectId" ]]; then
+            echo "::warning::Could not determine automation principal objectId; skipping Cosmos SQL RBAC check."
+            exit 0
+          fi
+
+          cosmosName=$(echo "$COSMOS_DB_ENDPOINT" | sed -E 's#^https?://([^./]+)\..*$#\1#')
+          if [[ -z "$cosmosName" ]]; then
+            echo "::error::Could not parse Cosmos account name from COSMOS_DB_ENDPOINT=$COSMOS_DB_ENDPOINT"
+            exit 1
+          fi
+
+          existing=$(az cosmosdb sql role assignment list \
+            --account-name "$cosmosName" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "[?principalId=='$principalObjectId' && scope=='/dbs/certaudio'] | length(@)" \
+            -o tsv || echo "0")
+
+          if [[ "$existing" == "0" ]]; then
+            az cosmosdb sql role assignment create \
+              --account-name "$cosmosName" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --principal-id "$principalObjectId" \
+              --scope "/dbs/certaudio" \
+              --role-definition-id "00000000-0000-0000-0000-000000000002" \
+              --only-show-errors
+          fi
+
       - name: Index content in AI Search
         env:
           SOURCE_URLS: ${{ needs.discover-content.outputs.sourceUrls }}
           CERTIFICATION_ID: ${{ inputs.certificationId }}
-          SEARCH_ENDPOINT: ${{ secrets.SEARCH_ENDPOINT }}
-          OPENAI_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
-          COSMOS_DB_ENDPOINT: ${{ secrets.COSMOS_DB_ENDPOINT }}
         run: |
           cd src/pipeline
           python -m tools.index_content \
@@ -233,11 +424,6 @@ jobs:
           AUDIO_FORMAT: ${{ inputs.audioFormat }}
           SKILLS_OUTLINE: ${{ needs.discover-content.outputs.skillsOutline }}
           BATCH_INDEX: ${{ matrix.batch }}
-          OPENAI_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
-          SPEECH_ENDPOINT: ${{ secrets.SPEECH_ENDPOINT }}
-          SEARCH_ENDPOINT: ${{ secrets.SEARCH_ENDPOINT }}
-          STORAGE_ACCOUNT_NAME: ${{ secrets.STORAGE_ACCOUNT_NAME }}
-          COSMOS_DB_ENDPOINT: ${{ secrets.COSMOS_DB_ENDPOINT }}
         run: |
           cd src/pipeline
           python -m tools.generate_episodes \
@@ -267,12 +453,75 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Resolve endpoints for latest deployment
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/get-endpoints.sh
+
+          suffix="${{ secrets.AZURE_UNIQUE_SUFFIX }}"
+          if [[ -n "$suffix" ]]; then
+            out=$(./scripts/get-endpoints.sh "$AZURE_RESOURCE_GROUP" "$suffix")
+          else
+            out=$(./scripts/get-endpoints.sh "$AZURE_RESOURCE_GROUP")
+          fi
+
+          echo "$out" | awk -F= '/^(OPENAI_ENDPOINT|SPEECH_ENDPOINT|DOCUMENT_INTELLIGENCE_ENDPOINT|SEARCH_ENDPOINT|COSMOS_DB_ENDPOINT|STORAGE_ACCOUNT_NAME)=/ {print $0}' >> "$GITHUB_ENV"
+
+      - name: Ensure Cosmos SQL RBAC for this workflow principal
+        run: |
+          set -euo pipefail
+
+          accessToken=$(az account get-access-token \
+            --resource https://management.azure.com \
+            --query accessToken -o tsv)
+          export ACCESS_TOKEN="$accessToken"
+
+          principalObjectId=$(python - <<'PY'
+          import os, json, base64
+          token = os.environ.get('ACCESS_TOKEN', '')
+          parts = token.split('.')
+          if len(parts) < 2:
+            print('')
+            raise SystemExit(0)
+          payload = parts[1]
+          payload += '=' * (-len(payload) % 4)
+          data = base64.urlsafe_b64decode(payload.encode('utf-8')).decode('utf-8')
+          claims = json.loads(data)
+          print(claims.get('oid') or claims.get('objectId') or '')
+          PY
+          )
+
+          if [[ -z "$principalObjectId" ]]; then
+            echo "::warning::Could not determine automation principal objectId; skipping Cosmos SQL RBAC check."
+            exit 0
+          fi
+
+          cosmosName=$(echo "$COSMOS_DB_ENDPOINT" | sed -E 's#^https?://([^./]+)\..*$#\1#')
+          if [[ -z "$cosmosName" ]]; then
+            echo "::error::Could not parse Cosmos account name from COSMOS_DB_ENDPOINT=$COSMOS_DB_ENDPOINT"
+            exit 1
+          fi
+
+          existing=$(az cosmosdb sql role assignment list \
+            --account-name "$cosmosName" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "[?principalId=='$principalObjectId' && scope=='/dbs/certaudio'] | length(@)" \
+            -o tsv || echo "0")
+
+          if [[ "$existing" == "0" ]]; then
+            az cosmosdb sql role assignment create \
+              --account-name "$cosmosName" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --principal-id "$principalObjectId" \
+              --scope "/dbs/certaudio" \
+              --role-definition-id "00000000-0000-0000-0000-000000000002" \
+              --only-show-errors
+          fi
+
       - name: Generate episode index
         env:
           CERTIFICATION_ID: ${{ inputs.certificationId }}
           AUDIO_FORMAT: ${{ inputs.audioFormat }}
-          COSMOS_DB_ENDPOINT: ${{ secrets.COSMOS_DB_ENDPOINT }}
-          STORAGE_ACCOUNT_NAME: ${{ secrets.STORAGE_ACCOUNT_NAME }}
         run: |
           cd src/pipeline
           pip install -r requirements.txt

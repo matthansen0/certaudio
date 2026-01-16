@@ -11,6 +11,8 @@ param uniqueSuffix string
 param storageAccountName string
 param cosmosDbAccountName string
 param cosmosDbDatabaseName string
+@description('Optional AAD object ID of an automation principal (e.g., GitHub OIDC service principal) that should have Cosmos SQL Data Contributor permissions at the database scope.')
+param automationPrincipalId string = ''
 param openAiEndpoint string
 param speechEndpoint string
 param searchEndpoint string
@@ -29,7 +31,7 @@ var appInsightsName = '${resourcePrefix}-insights-${uniqueSuffix}'
 // Format: certaudio{env}fn{uniqueSuffix} - always > 3 chars with our prefix
 var funcStorageNameRaw = toLower(replace('${resourcePrefix}fn${uniqueSuffix}', '-', ''))
 #disable-next-line BCP334
-var funcStorageAccountName = take(funcStorageNameRaw, 24)
+var funcStorageAccountName = take('${funcStorageNameRaw}000', 24)
 
 // ============================================================================
 // RESOURCES
@@ -270,6 +272,18 @@ resource cosmosDbSqlDataContributorRole 'Microsoft.DocumentDB/databaseAccounts/s
   properties: {
     roleDefinitionId: cosmosSqlDataContributorRoleDefinitionId
     principalId: functionsApp.identity.principalId
+    // Cosmos SQL RBAC expects a fully-qualified scope path (starts with /subscriptions)
+    // and uses the data-plane database segment (/dbs/<dbName>).
+    scope: '${cosmosDb.id}/dbs/${cosmosDbDatabaseName}'
+  }
+}
+
+resource cosmosDbSqlDataContributorRoleAutomation 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = if (!empty(automationPrincipalId)) {
+  parent: cosmosDb
+  name: guid(cosmosDb.id, automationPrincipalId, 'sqlDataContributorAutomation')
+  properties: {
+    roleDefinitionId: cosmosSqlDataContributorRoleDefinitionId
+    principalId: automationPrincipalId
     // Cosmos SQL RBAC expects a fully-qualified scope path (starts with /subscriptions)
     // and uses the data-plane database segment (/dbs/<dbName>).
     scope: '${cosmosDb.id}/dbs/${cosmosDbDatabaseName}'

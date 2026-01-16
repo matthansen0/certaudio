@@ -7,10 +7,13 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 - **Keyless Storage (policy-friendly)**: The platform runs with `allowSharedKeyAccess=false` on storage accounts and uses **Managed Identity / Entra ID** + **data-plane RBAC** instead of account keys.
 - **Functions hosting**: Azure Functions is deployed on **Elastic Premium (EP1)** to avoid Linux Consumption deployment/runtime flows that implicitly depend on storage keys in some locked-down tenants.
 - **Cosmos SQL RBAC scope**: Cosmos DB SQL role assignment scope must be the fully-qualified DB scope `${cosmosDb.id}/dbs/${cosmosDbDatabaseName}`.
+- **Cosmos RBAC for GitHub OIDC**: The deploy-infra workflow extracts the service principal `oid` from the ARM access token and passes it as `automationPrincipalId` to Bicep, which grants Cosmos SQL Data Contributor at the database scope. The generate-content workflow also idempotently ensures this RBAC exists before running pipeline tools.
 - **SWA deploy token**: Static Web Apps deploy token is retrieved at runtime in CI (no long-lived repo secret).
 - **Deployment sprawl control**: CI supports an optional pinned suffix secret `AZURE_UNIQUE_SUFFIX` to avoid creating a full new resource set every run.
 - **RG cleanup helper**: [scripts/cleanup-rg.sh](../scripts/cleanup-rg.sh) can delete old tagged deployment sets while keeping the active suffix.
 - **Dynamic certification list**: Frontend dropdown is populated from the API (`GET /api/certifications`) with a safe fallback that includes `dp-700`.
+- **Auto-resolved endpoints**: Generate Content workflow no longer requires endpoint secrets; it resolves them at runtime via [scripts/get-endpoints.sh](../scripts/get-endpoints.sh), which picks the newest (or pinned) deployment suffix.
+- **Workflow triggers**: Deploy Infrastructure only triggers on `infra/**` or workflow file changes—**not** on `src/**`—so you can iterate on code without full redeployments. Use manual `workflow_dispatch` when needed.
 
 ## Agents
 

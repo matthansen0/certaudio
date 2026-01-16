@@ -27,6 +27,9 @@ param uniqueSuffix string = uniqueString(resourceGroup().id)
 @allowed(['eastus', 'eastus2', 'westus', 'westus3', 'northcentralus', 'southcentralus', 'westeurope', 'swedencentral'])
 param openAiLocation string = 'eastus2'
 
+@description('Optional AAD object ID of the automation principal (e.g., GitHub OIDC service principal) that runs content-generation workflows. If provided, it is granted Cosmos SQL Data Contributor at the database scope.')
+param automationPrincipalId string = ''
+
 // ============================================================================
 // VARIABLES
 // ============================================================================
@@ -80,6 +83,7 @@ module web 'modules/web.bicep' = {
     storageAccountName: data.outputs.storageAccountName
     cosmosDbAccountName: data.outputs.cosmosDbAccountName
     cosmosDbDatabaseName: data.outputs.cosmosDbDatabaseName
+    automationPrincipalId: automationPrincipalId
     openAiEndpoint: aiServices.outputs.openAiEndpoint
     speechEndpoint: aiServices.outputs.speechEndpoint
     searchEndpoint: aiServices.outputs.searchEndpoint

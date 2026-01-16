@@ -5,11 +5,12 @@ concurrency:
   cancel-in-progress: true
 
 on:
+  # Only triggers on infra changes or manual dispatch - NOT on src/** changes.
+  # Use workflow_dispatch to manually deploy after code changes if needed.
   push:
     branches: [main]
     paths:
       - 'infra/**'
-      - 'src/**'
       - '.github/workflows/deploy-infra.yml'
   workflow_dispatch:
     inputs:
@@ -157,6 +158,32 @@ jobs:
           inlineScript: |
             set -euo pipefail
 
+            accessToken=$(az account get-access-token \
+              --resource https://management.azure.com \
+              --query accessToken -o tsv)
+            export ACCESS_TOKEN="$accessToken"
+
+            automationPrincipalId=$(python - <<'PY'
+            import os, json, base64
+            token = os.environ.get('ACCESS_TOKEN', '')
+            parts = token.split('.')
+            if len(parts) < 2:
+              print('')
+              raise SystemExit(0)
+            payload = parts[1]
+            payload += '=' * (-len(payload) % 4)
+            data = base64.urlsafe_b64decode(payload.encode('utf-8')).decode('utf-8')
+            claims = json.loads(data)
+            print(claims.get('oid') or claims.get('objectId') or '')
+            PY
+            )
+
+            if [[ -z "$automationPrincipalId" ]]; then
+              echo "::warning::Could not determine automation principal objectId from access token; Cosmos SQL RBAC for automation will not be applied."
+            else
+              echo "Automation principal objectId: $automationPrincipalId"
+            fi
+
             deploymentName="certaudio-${{ github.run_id }}-${{ github.run_attempt }}"
 
             az deployment group validate \
@@ -169,7 +196,8 @@ jobs:
                 enableB2C=${{ inputs.enableB2C || false }} \
                 uniqueSuffix=$UNIQUE_SUFFIX \
                 location=$LOCATION \
-                openAiLocation=$OPENAI_LOCATION
+                openAiLocation=$OPENAI_LOCATION \
+                automationPrincipalId=$automationPrincipalId
 
   deploy:
     name: Deploy Infrastructure
@@ -198,6 +226,32 @@ jobs:
           inlineScript: |
             set -euo pipefail
 
+            accessToken=$(az account get-access-token \
+              --resource https://management.azure.com \
+              --query accessToken -o tsv)
+            export ACCESS_TOKEN="$accessToken"
+
+            automationPrincipalId=$(python - <<'PY'
+            import os, json, base64
+            token = os.environ.get('ACCESS_TOKEN', '')
+            parts = token.split('.')
+            if len(parts) < 2:
+              print('')
+              raise SystemExit(0)
+            payload = parts[1]
+            payload += '=' * (-len(payload) % 4)
+            data = base64.urlsafe_b64decode(payload.encode('utf-8')).decode('utf-8')
+            claims = json.loads(data)
+            print(claims.get('oid') or claims.get('objectId') or '')
+            PY
+            )
+
+            if [[ -z "$automationPrincipalId" ]]; then
+              echo "::warning::Could not determine automation principal objectId from access token; Cosmos SQL RBAC for automation will not be applied."
+            else
+              echo "Automation principal objectId: $automationPrincipalId"
+            fi
+
             deploymentName="certaudio-${{ github.run_id }}-${{ github.run_attempt }}"
 
             if ! az deployment group create \
@@ -211,6 +265,7 @@ jobs:
                 uniqueSuffix=$UNIQUE_SUFFIX \
                 location=$LOCATION \
                 openAiLocation=$OPENAI_LOCATION \
+                automationPrincipalId=$automationPrincipalId \
               --only-show-errors; then
               echo "::group::Deployment error (properties.error)"
               az deployment group show \
