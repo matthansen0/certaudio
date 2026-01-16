@@ -99,9 +99,38 @@ env:
   AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
   LOCATION: 'canadacentral'
 
+# =============================================================================
+# REQUIRED SECRETS (configure in GitHub Settings > Secrets > Actions):
+# - AZURE_CLIENT_ID:        Service principal/app registration client ID
+# - AZURE_TENANT_ID:        Azure AD tenant ID  
+# - AZURE_SUBSCRIPTION_ID:  Azure subscription ID
+# - AZURE_RESOURCE_GROUP:   Resource group name (e.g., rg-certaudio-dev)
+# =============================================================================
+
 jobs:
+  check-secrets:
+    name: Validate Required Secrets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check required secrets are configured
+        run: |
+          missing=""
+          if [ -z "${{ secrets.AZURE_CLIENT_ID }}" ]; then missing="$missing AZURE_CLIENT_ID"; fi
+          if [ -z "${{ secrets.AZURE_TENANT_ID }}" ]; then missing="$missing AZURE_TENANT_ID"; fi
+          if [ -z "${{ secrets.AZURE_SUBSCRIPTION_ID }}" ]; then missing="$missing AZURE_SUBSCRIPTION_ID"; fi
+          if [ -z "${{ secrets.AZURE_RESOURCE_GROUP }}" ]; then missing="$missing AZURE_RESOURCE_GROUP"; fi
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required secrets:$missing"
+            echo ""
+            echo "Configure these secrets in GitHub: Settings > Secrets and variables > Actions"
+            echo "See README.md for setup instructions."
+            exit 1
+          fi
+          echo "✅ All required secrets are configured"
+
   validate:
     name: Validate Bicep
+    needs: check-secrets
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
