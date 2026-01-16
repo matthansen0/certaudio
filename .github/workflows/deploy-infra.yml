@@ -287,41 +287,29 @@ jobs:
             fi
 
       - name: Get deployment outputs
-        id: deploy
-        uses: azure/cli@v2
+        id: outputs
         env:
           DEPLOYMENT_NAME: certaudio-${{ github.run_id }}-${{ github.run_attempt }}
-        with:
-          inlineScript: |
-            set -euo pipefail
-            
-            staticWebAppUrl=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.staticWebAppUrl.value" -o tsv 2>/dev/null || echo "")
-            staticWebAppName=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.staticWebAppName.value" -o tsv 2>/dev/null || echo "")
-            functionsAppName=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.functionsAppName.value" -o tsv 2>/dev/null || echo "")
-            storageAccountName=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.storageAccountName.value" -o tsv 2>/dev/null || echo "")
-            cosmosDbAccountName=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.cosmosDbAccountName.value" -o tsv 2>/dev/null || echo "")
-
-            echo "Resolved output names: functionsAppName='$functionsAppName', staticWebAppName='$staticWebAppName'"
-            if [[ -z "$functionsAppName" || -z "$staticWebAppName" ]]; then
-              echo "::error::Unable to resolve deployment outputs for Functions/SWA. Aborting before downstream deploy steps."
-              exit 1
-            fi
-
-            # Write outputs to file that will be read by the next step (outside container)
-            echo "$staticWebAppUrl" > /github/workspace/.staticWebAppUrl
-            echo "$staticWebAppName" > /github/workspace/.staticWebAppName
-            echo "$functionsAppName" > /github/workspace/.functionsAppName
-            echo "$storageAccountName" > /github/workspace/.storageAccountName
-            echo "$cosmosDbAccountName" > /github/workspace/.cosmosDbAccountName
-
-      - name: Set job outputs
-        id: outputs
         run: |
-          echo "staticWebAppUrl=$(cat .staticWebAppUrl)" >> "$GITHUB_OUTPUT"
-          echo "staticWebAppName=$(cat .staticWebAppName)" >> "$GITHUB_OUTPUT"
-          echo "functionsAppName=$(cat .functionsAppName)" >> "$GITHUB_OUTPUT"
-          echo "storageAccountName=$(cat .storageAccountName)" >> "$GITHUB_OUTPUT"
-          echo "cosmosDbAccountName=$(cat .cosmosDbAccountName)" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          
+          staticWebAppUrl=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.staticWebAppUrl.value" -o tsv 2>/dev/null || echo "")
+          staticWebAppName=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.staticWebAppName.value" -o tsv 2>/dev/null || echo "")
+          functionsAppName=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.functionsAppName.value" -o tsv 2>/dev/null || echo "")
+          storageAccountName=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.storageAccountName.value" -o tsv 2>/dev/null || echo "")
+          cosmosDbAccountName=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.cosmosDbAccountName.value" -o tsv 2>/dev/null || echo "")
+
+          echo "Resolved output names: functionsAppName='$functionsAppName', staticWebAppName='$staticWebAppName'"
+          if [[ -z "$functionsAppName" || -z "$staticWebAppName" ]]; then
+            echo "::error::Unable to resolve deployment outputs for Functions/SWA. Aborting before downstream deploy steps."
+            exit 1
+          fi
+
+          echo "staticWebAppUrl=$staticWebAppUrl" >> "$GITHUB_OUTPUT"
+          echo "staticWebAppName=$staticWebAppName" >> "$GITHUB_OUTPUT"
+          echo "functionsAppName=$functionsAppName" >> "$GITHUB_OUTPUT"
+          echo "storageAccountName=$storageAccountName" >> "$GITHUB_OUTPUT"
+          echo "cosmosDbAccountName=$cosmosDbAccountName" >> "$GITHUB_OUTPUT"
 
       - name: Output deployment results
         run: |
