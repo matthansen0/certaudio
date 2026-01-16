@@ -94,6 +94,8 @@ env:
   LOCATION: 'centralus'
   # OpenAI location - separate region since centralus doesn't support GPT-4o GlobalStandard
   OPENAI_LOCATION: 'eastus'
+  # Ensures globally-unique resource names per workflow run to avoid collisions with soft-deleted Cognitive Services subdomains.
+  UNIQUE_SUFFIX: '${{ github.run_id }}'
 
 # =============================================================================
 # REQUIRED SECRETS (configure in GitHub Settings > Secrets > Actions):
@@ -149,6 +151,7 @@ jobs:
             certificationId=${{ inputs.certificationId || 'ai-102' }}
             audioFormat=${{ inputs.audioFormat || 'instructional' }}
             enableB2C=${{ inputs.enableB2C || false }}
+            uniqueSuffix=${{ env.UNIQUE_SUFFIX }}
             location=${{ env.LOCATION }}
             openAiLocation=${{ env.OPENAI_LOCATION }}
           deploymentMode: Validate
@@ -184,6 +187,7 @@ jobs:
             certificationId=${{ inputs.certificationId || 'ai-102' }}
             audioFormat=${{ inputs.audioFormat || 'instructional' }}
             enableB2C=${{ inputs.enableB2C || false }}
+            uniqueSuffix=${{ env.UNIQUE_SUFFIX }}
             location=${{ env.LOCATION }}
             openAiLocation=${{ env.OPENAI_LOCATION }}
           deploymentName: 'certaudio-${{ github.run_number }}'
