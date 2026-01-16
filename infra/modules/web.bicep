@@ -218,7 +218,9 @@ resource cosmosDbSqlDataContributorRole 'Microsoft.DocumentDB/databaseAccounts/s
   properties: {
     roleDefinitionId: cosmosSqlDataContributorRoleDefinitionId
     principalId: functionsApp.identity.principalId
-    scope: '/'
+    // Cosmos SQL RBAC expects a fully-qualified scope path (starts with /subscriptions)
+    // and uses the data-plane database segment (/dbs/<dbName>).
+    scope: '${cosmosDb.id}/dbs/${cosmosDbDatabaseName}'
   }
 }
 
