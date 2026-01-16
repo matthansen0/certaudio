@@ -70,7 +70,8 @@ resource embeddingDeployment 'Microsoft.CognitiveServices/accounts/deployments@2
   name: 'text-embedding-3-large'
   sku: {
     name: 'Standard'
-    capacity: 30
+    // Keep this conservative to avoid subscription TPM quota validation failures.
+    capacity: 10
   }
   properties: {
     model: {
