@@ -1,15 +1,89 @@
-# Azure AI Certification Audio Learning Platform
+# CertAudio - Microsoft Certification Audio Learning Platform
 
-A fully automated Azure-native system that generates podcast-style or instructional audio content from Microsoft Learn documentation for any Microsoft certification exam.
+A fully automated Azure-native system that generates podcast-style or instructional audio content from Microsoft Learn documentation for **all 50+ Microsoft certification exams**.
 
 ## Features
 
 - 🎧 **Auto-generated audio episodes** from official Microsoft Learn documentation
-- 📚 **Any Microsoft certification** - parameterized for AI-102, AZ-204, AZ-104, and more
+- 📚 **All Microsoft certifications** - Azure, AI, Data, Security, M365, Power Platform, Dynamics 365
 - 🎙️ **Two formats**: Instructional (single authoritative voice) or Podcast (two-voice dialogue)
 - 🔄 **Amendment episodes** when Microsoft updates exam content
 - 📊 **Progress tracking** with optional Azure AD B2C authentication
 - 🚀 **One-click deployment** with Bicep IaC
+
+## Supported Certifications
+
+### Azure
+| Exam | Certification |
+|------|---------------|
+| AZ-900 | Azure Fundamentals |
+| AZ-104 | Azure Administrator Associate |
+| AZ-204 | Azure Developer Associate |
+| AZ-305 | Azure Solutions Architect Expert |
+| AZ-400 | DevOps Engineer Expert |
+| AZ-500 | Azure Security Engineer Associate |
+| AZ-700 | Azure Network Engineer Associate |
+| AZ-140 | Azure Virtual Desktop Specialty |
+| AZ-800/801 | Windows Server Hybrid Administrator |
+
+### AI & Data
+| Exam | Certification |
+|------|---------------|
+| AI-900 | Azure AI Fundamentals |
+| AI-102 | Azure AI Engineer Associate |
+| DP-900 | Azure Data Fundamentals |
+| DP-100 | Azure Data Scientist Associate |
+| DP-203 | Azure Data Engineer Associate |
+| DP-300 | Azure Database Administrator Associate |
+| DP-600 | Microsoft Fabric Analytics Engineer |
+| DP-700 | Microsoft Fabric Data Engineer |
+
+### Security, Compliance & Identity
+| Exam | Certification |
+|------|---------------|
+| SC-900 | Security, Compliance, Identity Fundamentals |
+| SC-100 | Cybersecurity Architect Expert |
+| SC-200 | Security Operations Analyst Associate |
+| SC-300 | Identity and Access Administrator Associate |
+| SC-400 | Information Protection Administrator |
+
+### Microsoft 365
+| Exam | Certification |
+|------|---------------|
+| MS-900 | Microsoft 365 Fundamentals |
+| MS-102 | Microsoft 365 Administrator |
+| MS-700 | Microsoft Teams Administrator |
+| MD-102 | Endpoint Administrator |
+
+### Power Platform
+| Exam | Certification |
+|------|---------------|
+| PL-900 | Power Platform Fundamentals |
+| PL-100 | Power Platform App Maker |
+| PL-200 | Power Platform Functional Consultant |
+| PL-300 | Power BI Data Analyst Associate |
+| PL-400 | Power Platform Developer |
+| PL-500 | Power Automate RPA Developer |
+| PL-600 | Power Platform Solution Architect Expert |
+
+### Dynamics 365
+| Exam | Certification |
+|------|---------------|
+| MB-910 | Dynamics 365 Fundamentals (CRM) |
+| MB-920 | Dynamics 365 Fundamentals (ERP) |
+| MB-210 | Dynamics 365 Sales Functional Consultant |
+| MB-220 | Dynamics 365 Customer Insights - Journeys |
+| MB-230 | Dynamics 365 Customer Service |
+| MB-240 | Dynamics 365 Field Service |
+| MB-260 | Dynamics 365 Customer Insights - Data |
+| MB-300 | Dynamics 365 Core Finance and Operations |
+| MB-310 | Dynamics 365 Finance Functional Consultant |
+| MB-330 | Dynamics 365 Supply Chain Management |
+| MB-335 | Dynamics 365 Supply Chain Management Expert |
+| MB-500 | Dynamics 365 Finance & Operations Developer |
+| MB-700 | Dynamics 365 Finance & Operations Solution Architect |
+| MB-800 | Dynamics 365 Business Central Functional Consultant |
+| MB-820 | Dynamics 365 Business Central Developer |
 
 ## Architecture
 
@@ -47,8 +121,8 @@ A fully automated Azure-native system that generates podcast-style or instructio
 ### 1. Fork and Clone
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/ai102-audio.git
-cd ai102-audio
+git clone https://github.com/YOUR_USERNAME/certaudio.git
+cd certaudio
 ```
 
 ### 2. Create Azure Resources
@@ -100,23 +174,10 @@ Run the **Generate Content** workflow to create audio episodes.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `certificationId` | `ai-102` | Microsoft certification ID |
+| `certificationId` | `ai-102` | Microsoft certification ID (see supported list above) |
 | `audioFormat` | `instructional` | `instructional` or `podcast` |
 | `enableB2C` | `false` | Enable Azure AD B2C authentication |
 | `location` | `canadacentral` | Azure region |
-
-### Supported Certifications
-
-- **AI-102**: Azure AI Engineer Associate
-- **AZ-204**: Azure Developer Associate
-- **AZ-104**: Azure Administrator Associate
-- **AZ-900**: Azure Fundamentals
-- **AZ-400**: DevOps Engineer Expert
-- **AZ-305**: Solutions Architect Expert
-- **AZ-500**: Security Engineer Associate
-- **DP-900**: Azure Data Fundamentals
-- **DP-100**: Azure Data Scientist Associate
-- **DP-203**: Azure Data Engineer Associate
 
 ## Project Structure
 
