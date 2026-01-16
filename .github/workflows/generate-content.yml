@@ -261,7 +261,7 @@ jobs:
 
           echo "$out" | awk -F= '/^(OPENAI_ENDPOINT|SPEECH_ENDPOINT|DOCUMENT_INTELLIGENCE_ENDPOINT|SEARCH_ENDPOINT|COSMOS_DB_ENDPOINT|STORAGE_ACCOUNT_NAME)=/ {print $0}' >> "$GITHUB_ENV"
 
-      - name: Ensure Cosmos and Search RBAC for this workflow principal
+      - name: Ensure Cosmos, Search, and OpenAI RBAC for this workflow principal
         run: |
           set -euo pipefail
 
@@ -355,6 +355,46 @@ jobs:
             sleep 30
           else
             echo "Search RBAC already exists."
+          fi
+
+          # --- Azure OpenAI RBAC ---
+          openAiName=$(echo "$OPENAI_ENDPOINT" | sed -E 's#^https?://([^./]+)\..*$#\1#')
+          if [[ -z "$openAiName" ]]; then
+            echo "::error::Could not parse OpenAI account name from OPENAI_ENDPOINT=$OPENAI_ENDPOINT"
+            exit 1
+          fi
+
+          openAiId=$(az resource show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$openAiName" \
+            --resource-type "Microsoft.CognitiveServices/accounts" \
+            --query id -o tsv)
+
+          if [[ -z "$openAiId" ]]; then
+            echo "::error::Could not resolve OpenAI resource ID for $openAiName"
+            exit 1
+          fi
+
+          existing=$(az role assignment list \
+            --assignee "$principalObjectId" \
+            --scope "$openAiId" \
+            --query "[?roleDefinitionName=='Cognitive Services OpenAI User'] | length(@)" \
+            -o tsv || echo "0")
+
+          if [[ "$existing" == "0" ]]; then
+            echo "Creating Cognitive Services OpenAI User role assignment..."
+            az role assignment create \
+              --assignee-object-id "$principalObjectId" \
+              --assignee-principal-type ServicePrincipal \
+              --role "Cognitive Services OpenAI User" \
+              --scope "$openAiId" \
+              --only-show-errors
+
+            # Role assignments can take a short time to propagate.
+            echo "Waiting 30s for RBAC propagation..."
+            sleep 30
+          else
+            echo "OpenAI RBAC already exists."
           fi
 
       - name: Index content in AI Search

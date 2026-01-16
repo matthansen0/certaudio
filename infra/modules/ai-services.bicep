@@ -153,6 +153,18 @@ resource searchIndexDataContributorRole 'Microsoft.Authorization/roleAssignments
   }
 }
 
+// Data-plane RBAC: allow automation principal to call OpenAI embeddings and completions.
+resource openAiUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (automationPrincipalId != '') {
+  name: guid(openAi.id, automationPrincipalId, 'Cognitive Services OpenAI User')
+  scope: openAi
+  properties: {
+    // Built-in role: Cognitive Services OpenAI User
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd')
+    principalId: automationPrincipalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
 // ============================================================================
 // OUTPUTS
 // ============================================================================
