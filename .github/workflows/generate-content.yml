@@ -436,6 +436,20 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Resolve endpoints for latest deployment
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/get-endpoints.sh
+
+          suffix="${{ secrets.AZURE_UNIQUE_SUFFIX }}"
+          if [[ -n "$suffix" ]]; then
+            out=$(./scripts/get-endpoints.sh "$AZURE_RESOURCE_GROUP" "$suffix")
+          else
+            out=$(./scripts/get-endpoints.sh "$AZURE_RESOURCE_GROUP")
+          fi
+
+          echo "$out" | awk -F= '/^(OPENAI_ENDPOINT|SPEECH_ENDPOINT|DOCUMENT_INTELLIGENCE_ENDPOINT|SEARCH_ENDPOINT|COSMOS_DB_ENDPOINT|STORAGE_ACCOUNT_NAME)=/ {print $0}' >> "$GITHUB_ENV"
+
       - name: Generate episode batch
         env:
           CERTIFICATION_ID: ${{ inputs.certificationId }}
