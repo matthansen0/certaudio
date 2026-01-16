@@ -12,17 +12,61 @@ on:
         required: true
         type: choice
         options:
-          - ai-102    # Azure AI Engineer
-          - dp-600    # Microsoft Fabric Analytics Engineer
-          - az-204    # Azure Developer
-          - az-104    # Azure Administrator
-          - az-305    # Azure Solutions Architect
-          - az-400    # Azure DevOps Engineer
-          - az-500    # Azure Security Engineer
-          - dp-203    # Azure Data Engineer
-          - dp-300    # Azure Database Administrator
-          - pl-300    # Power BI Data Analyst
-          - sc-300    # Identity and Access Administrator
+          # === AZURE ===
+          - az-900     # Azure Fundamentals
+          - az-104     # Azure Administrator
+          - az-204     # Azure Developer
+          - az-305     # Azure Solutions Architect Expert
+          - az-400     # Azure DevOps Engineer Expert
+          - az-500     # Azure Security Engineer
+          - az-700     # Azure Network Engineer
+          - az-140     # Azure Virtual Desktop Specialty
+          - az-800     # Windows Server Hybrid Administrator (exam 1)
+          - az-801     # Windows Server Hybrid Administrator (exam 2)
+          # === AI & DATA ===
+          - ai-900     # Azure AI Fundamentals
+          - ai-102     # Azure AI Engineer
+          - dp-900     # Azure Data Fundamentals
+          - dp-100     # Azure Data Scientist
+          - dp-203     # Azure Data Engineer
+          - dp-300     # Azure Database Administrator
+          - dp-600     # Microsoft Fabric Analytics Engineer
+          - dp-700     # Microsoft Fabric Data Engineer (if available)
+          # === SECURITY ===
+          - sc-900     # Security, Compliance, Identity Fundamentals
+          - sc-100     # Cybersecurity Architect Expert
+          - sc-200     # Security Operations Analyst
+          - sc-300     # Identity and Access Administrator
+          - sc-400     # Information Protection and Compliance Admin
+          # === MICROSOFT 365 ===
+          - ms-900     # Microsoft 365 Fundamentals
+          - ms-102     # Microsoft 365 Administrator
+          - ms-700     # Microsoft Teams Administrator
+          - md-102     # Endpoint Administrator
+          # === POWER PLATFORM ===
+          - pl-900     # Power Platform Fundamentals
+          - pl-100     # Power Platform App Maker
+          - pl-200     # Power Platform Functional Consultant
+          - pl-300     # Power BI Data Analyst
+          - pl-400     # Power Platform Developer
+          - pl-500     # Power Automate RPA Developer
+          - pl-600     # Power Platform Solution Architect Expert
+          # === DYNAMICS 365 ===
+          - mb-910     # Dynamics 365 Fundamentals (CRM)
+          - mb-920     # Dynamics 365 Fundamentals (ERP)
+          - mb-210     # Dynamics 365 Sales Functional Consultant
+          - mb-220     # Dynamics 365 Customer Insights - Journeys
+          - mb-230     # Dynamics 365 Customer Service
+          - mb-240     # Dynamics 365 Field Service
+          - mb-260     # Dynamics 365 Customer Insights - Data
+          - mb-300     # Dynamics 365 Core Finance and Operations
+          - mb-310     # Dynamics 365 Finance Functional Consultant
+          - mb-330     # Dynamics 365 Supply Chain Management
+          - mb-335     # Dynamics 365 Supply Chain Management Expert
+          - mb-500     # Dynamics 365 Finance & Operations Apps Developer
+          - mb-700     # Dynamics 365 Finance & Operations Solution Architect
+          - mb-800     # Dynamics 365 Business Central Functional Consultant
+          - mb-820     # Dynamics 365 Business Central Developer
         default: 'ai-102'
       audioFormat:
         description: 'Audio format'
