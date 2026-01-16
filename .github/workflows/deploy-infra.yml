@@ -254,7 +254,7 @@ jobs:
 
             deploymentName="certaudio-${{ github.run_id }}-${{ github.run_attempt }}"
 
-            if ! deploymentResult=$(az deployment group create \
+            if ! deploymentOutputs=$(az deployment group create \
               --name "$deploymentName" \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --template-file ./infra/main.bicep \
@@ -266,7 +266,9 @@ jobs:
                 location=$LOCATION \
                 openAiLocation=$OPENAI_LOCATION \
                 automationPrincipalId=$automationPrincipalId \
-              -o json); then
+              --query "properties.outputs" \
+              -o json \
+              --only-show-errors); then
               echo "::group::Deployment error (properties.error)"
               az deployment group show \
                 --name "$deploymentName" \
@@ -288,44 +290,84 @@ jobs:
 
             # Read outputs from the deployment create response to avoid timing issues where
             # `az deployment group show` can briefly return empty outputs.
-            staticWebAppUrl=$(echo "$deploymentResult" | python3 - <<'PY'
+            if [[ -z "${deploymentOutputs// }" || "$deploymentOutputs" == "null" ]]; then
+              deploymentOutputs='{}'
+            fi
+
+            staticWebAppUrl=$(echo "$deploymentOutputs" | python3 - <<'PY'
             import json, sys
             d = json.load(sys.stdin)
-            print(d.get('properties', {}).get('outputs', {}).get('staticWebAppUrl', {}).get('value', '') or '')
+            print(d.get('staticWebAppUrl', {}).get('value', '') or '')
             PY
             )
-            staticWebAppName=$(echo "$deploymentResult" | python3 - <<'PY'
+            staticWebAppName=$(echo "$deploymentOutputs" | python3 - <<'PY'
             import json, sys
             d = json.load(sys.stdin)
-            print(d.get('properties', {}).get('outputs', {}).get('staticWebAppName', {}).get('value', '') or '')
+            print(d.get('staticWebAppName', {}).get('value', '') or '')
             PY
             )
-            functionsAppName=$(echo "$deploymentResult" | python3 - <<'PY'
+            functionsAppName=$(echo "$deploymentOutputs" | python3 - <<'PY'
             import json, sys
             d = json.load(sys.stdin)
-            print(d.get('properties', {}).get('outputs', {}).get('functionsAppName', {}).get('value', '') or '')
+            print(d.get('functionsAppName', {}).get('value', '') or '')
             PY
             )
-            storageAccountName=$(echo "$deploymentResult" | python3 - <<'PY'
+            storageAccountName=$(echo "$deploymentOutputs" | python3 - <<'PY'
             import json, sys
             d = json.load(sys.stdin)
-            print(d.get('properties', {}).get('outputs', {}).get('storageAccountName', {}).get('value', '') or '')
+            print(d.get('storageAccountName', {}).get('value', '') or '')
             PY
             )
-            cosmosDbAccountName=$(echo "$deploymentResult" | python3 - <<'PY'
+            cosmosDbAccountName=$(echo "$deploymentOutputs" | python3 - <<'PY'
             import json, sys
             d = json.load(sys.stdin)
-            print(d.get('properties', {}).get('outputs', {}).get('cosmosDbAccountName', {}).get('value', '') or '')
+            print(d.get('cosmosDbAccountName', {}).get('value', '') or '')
             PY
             )
 
             if [[ -z "$functionsAppName" || -z "$staticWebAppName" ]]; then
               echo "::warning::Deployment outputs missing from create response; falling back to deployment show."
-              staticWebAppUrl=$(az deployment group show --name "$deploymentName" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.staticWebAppUrl.value" -o tsv)
-              staticWebAppName=$(az deployment group show --name "$deploymentName" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.staticWebAppName.value" -o tsv)
-              functionsAppName=$(az deployment group show --name "$deploymentName" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.functionsAppName.value" -o tsv)
-              storageAccountName=$(az deployment group show --name "$deploymentName" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.storageAccountName.value" -o tsv)
-              cosmosDbAccountName=$(az deployment group show --name "$deploymentName" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.cosmosDbAccountName.value" -o tsv)
+              deploymentOutputs=$(az deployment group show \
+                --name "$deploymentName" \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
+                --query "properties.outputs" \
+                -o json \
+                --only-show-errors)
+
+              if [[ -z "${deploymentOutputs// }" || "$deploymentOutputs" == "null" ]]; then
+                deploymentOutputs='{}'
+              fi
+
+              staticWebAppUrl=$(echo "$deploymentOutputs" | python3 - <<'PY'
+              import json, sys
+              d = json.load(sys.stdin)
+              print(d.get('staticWebAppUrl', {}).get('value', '') or '')
+              PY
+              )
+              staticWebAppName=$(echo "$deploymentOutputs" | python3 - <<'PY'
+              import json, sys
+              d = json.load(sys.stdin)
+              print(d.get('staticWebAppName', {}).get('value', '') or '')
+              PY
+              )
+              functionsAppName=$(echo "$deploymentOutputs" | python3 - <<'PY'
+              import json, sys
+              d = json.load(sys.stdin)
+              print(d.get('functionsAppName', {}).get('value', '') or '')
+              PY
+              )
+              storageAccountName=$(echo "$deploymentOutputs" | python3 - <<'PY'
+              import json, sys
+              d = json.load(sys.stdin)
+              print(d.get('storageAccountName', {}).get('value', '') or '')
+              PY
+              )
+              cosmosDbAccountName=$(echo "$deploymentOutputs" | python3 - <<'PY'
+              import json, sys
+              d = json.load(sys.stdin)
+              print(d.get('cosmosDbAccountName', {}).get('value', '') or '')
+              PY
+              )
             fi
 
             echo "Resolved output names: functionsAppName='$functionsAppName', staticWebAppName='$staticWebAppName'"
