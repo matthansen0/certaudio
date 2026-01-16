@@ -261,7 +261,7 @@ jobs:
 
           echo "$out" | awk -F= '/^(OPENAI_ENDPOINT|SPEECH_ENDPOINT|DOCUMENT_INTELLIGENCE_ENDPOINT|SEARCH_ENDPOINT|COSMOS_DB_ENDPOINT|STORAGE_ACCOUNT_NAME)=/ {print $0}' >> "$GITHUB_ENV"
 
-      - name: Ensure Cosmos, Search, and OpenAI RBAC for this workflow principal
+      - name: Ensure Cosmos, Search, OpenAI, and Storage RBAC for this workflow principal
         run: |
           set -euo pipefail
 
@@ -395,6 +395,40 @@ jobs:
             sleep 30
           else
             echo "OpenAI RBAC already exists."
+          fi
+
+          # --- Azure Storage Blob RBAC ---
+          storageId=$(az resource show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$STORAGE_ACCOUNT_NAME" \
+            --resource-type "Microsoft.Storage/storageAccounts" \
+            --query id -o tsv)
+
+          if [[ -z "$storageId" ]]; then
+            echo "::error::Could not resolve Storage resource ID for $STORAGE_ACCOUNT_NAME"
+            exit 1
+          fi
+
+          existing=$(az role assignment list \
+            --assignee "$principalObjectId" \
+            --scope "$storageId" \
+            --query "[?roleDefinitionName=='Storage Blob Data Contributor'] | length(@)" \
+            -o tsv || echo "0")
+
+          if [[ "$existing" == "0" ]]; then
+            echo "Creating Storage Blob Data Contributor role assignment..."
+            az role assignment create \
+              --assignee-object-id "$principalObjectId" \
+              --assignee-principal-type ServicePrincipal \
+              --role "Storage Blob Data Contributor" \
+              --scope "$storageId" \
+              --only-show-errors
+
+            # Role assignments can take a short time to propagate.
+            echo "Waiting 30s for RBAC propagation..."
+            sleep 30
+          else
+            echo "Storage RBAC already exists."
           fi
 
       - name: Index content in AI Search

@@ -11,6 +11,8 @@ param uniqueSuffix string
 param certificationId string
 param audioFormat string
 param tags object
+@description('Optional AAD object ID of an automation principal (e.g., GitHub OIDC service principal) that runs content-generation workflows. If provided, it is granted Storage Blob Data Contributor on the storage account.')
+param automationPrincipalId string = ''
 
 // ============================================================================
 // VARIABLES
@@ -191,6 +193,18 @@ resource scriptsContainer 'Microsoft.Storage/storageAccounts/blobServices/contai
   name: 'scripts-${certificationId}-${audioFormat}'
   properties: {
     publicAccess: 'None'
+  }
+}
+
+// Data-plane RBAC: allow automation principal to upload/download blobs.
+resource storageBlobDataContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (automationPrincipalId != '') {
+  name: guid(storageAccount.id, automationPrincipalId, 'Storage Blob Data Contributor')
+  scope: storageAccount
+  properties: {
+    // Built-in role: Storage Blob Data Contributor
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
+    principalId: automationPrincipalId
+    principalType: 'ServicePrincipal'
   }
 }
 

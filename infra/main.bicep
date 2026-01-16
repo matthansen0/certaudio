@@ -70,6 +70,7 @@ module data 'modules/data.bicep' = {
     uniqueSuffix: uniqueSuffix
     certificationId: certificationId
     audioFormat: audioFormat
+    automationPrincipalId: automationPrincipalId
     tags: tags
   }
 }
