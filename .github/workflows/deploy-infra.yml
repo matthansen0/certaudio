@@ -203,11 +203,8 @@ jobs:
     name: Deploy Infrastructure
     runs-on: ubuntu-latest
     needs: validate
-    outputs:
-      staticWebAppUrl: ${{ steps.outputs.outputs.staticWebAppUrl }}
-      staticWebAppName: ${{ steps.outputs.outputs.staticWebAppName }}
-      functionsAppName: ${{ steps.outputs.outputs.functionsAppName }}
-      storageAccountName: ${{ steps.outputs.outputs.storageAccountName }}
+    # NOTE: We don't pass app names as job outputs because GitHub Actions masks them
+    # (they contain the UNIQUE_SUFFIX secret). Downstream jobs construct names directly.
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -305,27 +302,20 @@ jobs:
             exit 1
           fi
 
-          echo "staticWebAppUrl=$staticWebAppUrl" >> "$GITHUB_OUTPUT"
-          echo "staticWebAppName=$staticWebAppName" >> "$GITHUB_OUTPUT"
-          echo "functionsAppName=$functionsAppName" >> "$GITHUB_OUTPUT"
-          echo "storageAccountName=$storageAccountName" >> "$GITHUB_OUTPUT"
-          echo "cosmosDbAccountName=$cosmosDbAccountName" >> "$GITHUB_OUTPUT"
-
-      - name: Output deployment results
-        run: |
-          echo "## Deployment Complete! :rocket:" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Resource | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Static Web App URL | ${{ steps.deploy.outputs.staticWebAppUrl }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Functions App | ${{ steps.deploy.outputs.functionsAppName }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Storage Account | ${{ steps.deploy.outputs.storageAccountName }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Cosmos DB | ${{ steps.deploy.outputs.cosmosDbAccountName }} |" >> $GITHUB_STEP_SUMMARY
+          # Write to step summary (no longer passing as job outputs due to secret masking)
+          echo "## Deployment Complete! :rocket:" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Resource | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|----------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Static Web App URL | $staticWebAppUrl |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Functions App | $functionsAppName |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Storage Account | $storageAccountName |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Cosmos DB | $cosmosDbAccountName |" >> "$GITHUB_STEP_SUMMARY"
 
   deploy-functions:
     name: Deploy Functions App
     runs-on: ubuntu-latest
-    needs: deploy
+    needs: deploy  # Wait for infra to be deployed
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -359,15 +349,18 @@ jobs:
         with:
           inlineScript: |
             set -euo pipefail
+            # Construct name directly (can't use job outputs - they contain secrets and get masked)
+            FUNCTIONS_APP_NAME="certaudio-dev-func-$UNIQUE_SUFFIX"
+            echo "Deploying to Functions App: $FUNCTIONS_APP_NAME"
             az functionapp deployment source config-zip \
               --resource-group "$AZURE_RESOURCE_GROUP" \
-              --name "${{ needs.deploy.outputs.functionsAppName }}" \
+              --name "$FUNCTIONS_APP_NAME" \
               --src "functions.zip"
 
   deploy-static-web-app:
     name: Deploy Static Web App
     runs-on: ubuntu-latest
-    needs: deploy
+    needs: deploy  # Wait for infra to be deployed
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -381,15 +374,16 @@ jobs:
 
       - name: Get Static Web App deployment token
         id: swaToken
-        uses: azure/cli@v2
-        with:
-          inlineScript: |
-            set -euo pipefail
-            token=$(az staticwebapp secrets list \
-              --name "${{ needs.deploy.outputs.staticWebAppName }}" \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --query properties.apiKey -o tsv)
-            echo "token=$token" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          # Construct name directly (can't use job outputs - they contain secrets and get masked)
+          SWA_NAME="certaudio-dev-swa-$UNIQUE_SUFFIX"
+          echo "Getting deployment token for SWA: $SWA_NAME"
+          token=$(az staticwebapp secrets list \
+            --name "$SWA_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query properties.apiKey -o tsv)
+          echo "token=$token" >> "$GITHUB_OUTPUT"
 
       - name: Deploy Static Web App
         uses: azure/static-web-apps-deploy@v1
