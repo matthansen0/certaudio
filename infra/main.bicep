@@ -20,10 +20,6 @@ param enableB2C bool = false
 @description('Azure region for resources')
 param location string = resourceGroup().location
 
-@description('Environment name for resource naming')
-@allowed(['dev', 'prod'])
-param environment string = 'dev'
-
 @description('Unique suffix for globally unique resource names')
 param uniqueSuffix string = uniqueString(resourceGroup().id)
 
@@ -36,6 +32,7 @@ param openAiLocation string = 'eastus2'
 // ============================================================================
 
 var baseName = 'certaudio'
+var environment = 'dev'
 var resourcePrefix = '${baseName}-${environment}'
 var tags = {
   project: 'certification-audio-platform'

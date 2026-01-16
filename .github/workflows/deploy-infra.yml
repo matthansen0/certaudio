@@ -81,14 +81,6 @@ on:
         required: false
         type: boolean
         default: false
-      environment:
-        description: 'Deployment environment'
-        required: true
-        type: choice
-        options:
-          - dev
-          - prod
-        default: 'dev'
 
 permissions:
   id-token: write
@@ -157,7 +149,6 @@ jobs:
             certificationId=${{ inputs.certificationId || 'ai-102' }}
             audioFormat=${{ inputs.audioFormat || 'instructional' }}
             enableB2C=${{ inputs.enableB2C || false }}
-            environment=${{ inputs.environment || 'dev' }}
             location=${{ env.LOCATION }}
             openAiLocation=${{ env.OPENAI_LOCATION }}
           deploymentMode: Validate
@@ -193,7 +184,6 @@ jobs:
             certificationId=${{ inputs.certificationId || 'ai-102' }}
             audioFormat=${{ inputs.audioFormat || 'instructional' }}
             enableB2C=${{ inputs.enableB2C || false }}
-            environment=${{ inputs.environment || 'dev' }}
             location=${{ env.LOCATION }}
             openAiLocation=${{ env.OPENAI_LOCATION }}
           deploymentName: 'certaudio-${{ github.run_number }}'
