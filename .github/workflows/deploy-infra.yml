@@ -166,7 +166,6 @@ jobs:
     name: Deploy Infrastructure
     runs-on: ubuntu-latest
     needs: validate
-    environment: ${{ inputs.environment || 'dev' }}
     outputs:
       staticWebAppUrl: ${{ steps.deploy.outputs.staticWebAppUrl }}
       functionsAppName: ${{ steps.deploy.outputs.functionsAppName }}
