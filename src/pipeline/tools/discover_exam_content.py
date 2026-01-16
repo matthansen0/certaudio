@@ -76,7 +76,21 @@ def fetch_page_content(url: str) -> str:
     }
     response = requests.get(url, headers=headers, timeout=30)
     response.raise_for_status()
+    # Force UTF-8 decoding; Microsoft Learn pages are UTF-8 but sometimes lack charset header
+    response.encoding = 'utf-8'
     return response.text
+
+
+def fetch_page_content_with_effective_url(url: str) -> tuple[str, str]:
+    """Fetch HTML content and return the effective URL after redirects."""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+    response = requests.get(url, headers=headers, timeout=30, allow_redirects=True)
+    response.raise_for_status()
+    # Force UTF-8 decoding; Microsoft Learn pages are UTF-8 but sometimes lack charset header
+    response.encoding = 'utf-8'
+    return response.text, response.url
 
 
 def extract_skills_outline(html: str, base_url: str) -> list[SkillDomain]:
@@ -104,7 +118,8 @@ def extract_skills_outline(html: str, base_url: str) -> list[SkillDomain]:
 
     # Parse skill domains - they're typically in expandable sections or lists
     # Look for domain headings (usually have percentage weights)
-    domain_pattern = re.compile(r"(.+?)\s*\((\d+[-–]\d+%)\)")
+    # Match various dash characters: hyphen (-), en-dash (–), em-dash (—), and Unicode variants
+    domain_pattern = re.compile(r"(.+?)\s*\((\d+[\-\u2010-\u2015]\d+%)\)")
 
     current_domain = None
     current_topics = []
@@ -243,13 +258,31 @@ def discover_exam_content(
     Returns:
         DiscoveryResult with all discovered content
     """
-    # Get the exam page URL
+    # Get the exam page URL (or override)
     url = get_exam_page_url(certification_id, exam_page_url)
     print(f"Discovering content from: {url}")
 
-    # Fetch and parse the exam page
-    html = fetch_page_content(url)
-    skill_domains = extract_skills_outline(html, url)
+    # Fetch and parse the exam page (use effective URL after redirects for correct link resolution)
+    html, effective_url = fetch_page_content_with_effective_url(url)
+    skill_domains = extract_skills_outline(html, effective_url)
+
+    # Some newer certifications (e.g., dp-700) redirect exam URLs to certification pages
+    # that do not contain a "Skills measured" outline. In that case, fall back to the
+    # official study guide page for the certification.
+    if not skill_domains and not exam_page_url:
+        study_guide_url = (
+            f"https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/"
+            f"{certification_id.lower()}"
+        )
+        print(
+            "Warning: No skills outline found on exam page; "
+            f"trying study guide: {study_guide_url}"
+        )
+        html, effective_url = fetch_page_content_with_effective_url(study_guide_url)
+        skill_domains = extract_skills_outline(html, effective_url)
+
+    # Track the final source page used for discovery
+    url = effective_url
 
     print(f"Found {len(skill_domains)} skill domains")
     for domain in skill_domains:

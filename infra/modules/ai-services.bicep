@@ -11,6 +11,8 @@ param uniqueSuffix string
 param tags object
 @description('Location for Azure OpenAI (may differ from main location due to model availability)')
 param openAiLocation string = 'eastus2'
+@description('Optional AAD object ID of an automation principal (e.g., GitHub OIDC service principal) that runs content-generation workflows. If provided, it is granted Azure AI Search Index Data Contributor on the Search service.')
+param automationPrincipalId string = ''
 // ============================================================================
 // VARIABLES
 // ============================================================================
@@ -130,6 +132,18 @@ resource search 'Microsoft.Search/searchServices@2024-03-01-preview' = {
     hostingMode: 'default'
     publicNetworkAccess: 'enabled'
     semanticSearch: 'free'
+  }
+}
+
+// Data-plane RBAC: allow automation principal to create/update indexes and upload documents.
+resource searchIndexDataContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (automationPrincipalId != '') {
+  name: guid(search.id, automationPrincipalId, 'Search Index Data Contributor')
+  scope: search
+  properties: {
+    // Built-in role: Search Index Data Contributor
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '8ebe5a00-799e-43f5-93ac-243d3dce84a7')
+    principalId: automationPrincipalId
+    principalType: 'ServicePrincipal'
   }
 }
 

@@ -8,6 +8,7 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 - **Functions hosting**: Azure Functions is deployed on **Elastic Premium (EP1)** to avoid Linux Consumption deployment/runtime flows that implicitly depend on storage keys in some locked-down tenants.
 - **Cosmos SQL RBAC scope**: Cosmos DB SQL role assignment scope must be the fully-qualified DB scope `${cosmosDb.id}/dbs/${cosmosDbDatabaseName}`.
 - **Cosmos RBAC for GitHub OIDC**: The deploy-infra workflow extracts the service principal `oid` from the ARM access token and passes it as `automationPrincipalId` to Bicep, which grants Cosmos SQL Data Contributor at the database scope. The generate-content workflow also idempotently ensures this RBAC exists before running pipeline tools.
+- **Search RBAC for GitHub OIDC**: Azure AI Search data-plane operations (create/update indexes, upload documents) require RBAC. Infra grants the automation principal **Search Index Data Contributor** on the Search service, and the generate-content workflow also idempotently ensures this role assignment to prevent `Forbidden` failures during indexing.
 - **SWA deploy token**: Static Web Apps deploy token is retrieved at runtime in CI (no long-lived repo secret).
 - **Deployment sprawl control**: CI supports an optional pinned suffix secret `AZURE_UNIQUE_SUFFIX` to avoid creating a full new resource set every run.
 - **RG cleanup helper**: [scripts/cleanup-rg.sh](../scripts/cleanup-rg.sh) can delete old tagged deployment sets while keeping the active suffix.

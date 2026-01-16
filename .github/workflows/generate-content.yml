@@ -165,7 +165,7 @@ jobs:
             --query accessToken -o tsv)
           export ACCESS_TOKEN="$accessToken"
 
-          principalObjectId=$(python - <<'PY'
+          principalObjectId=$(python3 - <<'PY'
           import os, json, base64
           token = os.environ.get('ACCESS_TOKEN', '')
           parts = token.split('.')
@@ -191,73 +191,6 @@ jobs:
             exit 1
           fi
 
-          existing=$(az cosmosdb sql role assignment list \
-            --account-name "$cosmosName" \
-            --resource-group "$AZURE_RESOURCE_GROUP" \
-            --query "[?principalId=='$principalObjectId' && scope=='/dbs/certaudio'] | length(@)" \
-            -o tsv || echo "0")
-
-          if [[ "$existing" == "0" ]]; then
-            az cosmosdb sql role assignment create \
-              --account-name "$cosmosName" \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --principal-id "$principalObjectId" \
-              --scope "/dbs/certaudio" \
-              --role-definition-id "00000000-0000-0000-0000-000000000002" \
-              --only-show-errors
-          fi
-
-      - name: Resolve endpoints for latest deployment
-        run: |
-          set -euo pipefail
-          chmod +x ./scripts/get-endpoints.sh
-
-          # Prefer a pinned environment if AZURE_UNIQUE_SUFFIX is set; otherwise pick newest SWA suffix.
-          suffix="${{ secrets.AZURE_UNIQUE_SUFFIX }}"
-          if [[ -n "$suffix" ]]; then
-            out=$(./scripts/get-endpoints.sh "$AZURE_RESOURCE_GROUP" "$suffix")
-          else
-            out=$(./scripts/get-endpoints.sh "$AZURE_RESOURCE_GROUP")
-          fi
-
-          echo "$out" | awk -F= '/^(OPENAI_ENDPOINT|SPEECH_ENDPOINT|DOCUMENT_INTELLIGENCE_ENDPOINT|SEARCH_ENDPOINT|COSMOS_DB_ENDPOINT|STORAGE_ACCOUNT_NAME)=/ {print $0}' >> "$GITHUB_ENV"
-
-      - name: Ensure Cosmos SQL RBAC for this workflow principal
-        run: |
-          set -euo pipefail
-
-          accessToken=$(az account get-access-token \
-            --resource https://management.azure.com \
-            --query accessToken -o tsv)
-          export ACCESS_TOKEN="$accessToken"
-
-          principalObjectId=$(python - <<'PY'
-          import os, json, base64
-          token = os.environ.get('ACCESS_TOKEN', '')
-          parts = token.split('.')
-          if len(parts) < 2:
-            print('')
-            raise SystemExit(0)
-          payload = parts[1]
-          payload += '=' * (-len(payload) % 4)
-          data = base64.urlsafe_b64decode(payload.encode('utf-8')).decode('utf-8')
-          claims = json.loads(data)
-          print(claims.get('oid') or claims.get('objectId') or '')
-          PY
-          )
-
-          if [[ -z "$principalObjectId" ]]; then
-            echo "::warning::Could not determine automation principal objectId; skipping Cosmos SQL RBAC check."
-            exit 0
-          fi
-
-          cosmosName=$(echo "$COSMOS_DB_ENDPOINT" | sed -E 's#^https?://([^./]+)\..*$#\1#')
-          if [[ -z "$cosmosName" ]]; then
-            echo "::error::Could not parse Cosmos account name from COSMOS_DB_ENDPOINT=$COSMOS_DB_ENDPOINT"
-            exit 1
-          fi
-
-          # Idempotently ensure the principal can read/write at the database scope.
           existing=$(az cosmosdb sql role assignment list \
             --account-name "$cosmosName" \
             --resource-group "$AZURE_RESOURCE_GROUP" \
@@ -281,7 +214,7 @@ jobs:
           EXAM_PAGE_URL: ${{ inputs.examPageUrl }}
         run: |
           cd src/pipeline
-          python -m tools.discover_exam_content \
+          python3 -m tools.discover_exam_content \
             --certification-id "$CERTIFICATION_ID" \
             --exam-page-url "$EXAM_PAGE_URL" \
             --output-file /tmp/discovery_results.json
@@ -337,7 +270,7 @@ jobs:
             --query accessToken -o tsv)
           export ACCESS_TOKEN="$accessToken"
 
-          principalObjectId=$(python - <<'PY'
+          principalObjectId=$(python3 - <<'PY'
           import os, json, base64
           token = os.environ.get('ACCESS_TOKEN', '')
           parts = token.split('.')
@@ -379,13 +312,77 @@ jobs:
               --only-show-errors
           fi
 
+      - name: Ensure Azure AI Search RBAC for this workflow principal
+        run: |
+          set -euo pipefail
+
+          accessToken=$(az account get-access-token \
+            --resource https://management.azure.com \
+            --query accessToken -o tsv)
+          export ACCESS_TOKEN="$accessToken"
+
+          principalObjectId=$(python3 - <<'PY'
+          import os, json, base64
+          token = os.environ.get('ACCESS_TOKEN', '')
+          parts = token.split('.')
+          if len(parts) < 2:
+            print('')
+            raise SystemExit(0)
+          payload = parts[1]
+          payload += '=' * (-len(payload) % 4)
+          data = base64.urlsafe_b64decode(payload.encode('utf-8')).decode('utf-8')
+          claims = json.loads(data)
+          print(claims.get('oid') or claims.get('objectId') or '')
+          PY
+          )
+
+          if [[ -z "$principalObjectId" ]]; then
+            echo "::warning::Could not determine automation principal objectId; skipping Search RBAC check."
+            exit 0
+          fi
+
+          searchName=$(echo "$SEARCH_ENDPOINT" | sed -E 's#^https?://([^./]+)\..*$#\1#')
+          if [[ -z "$searchName" ]]; then
+            echo "::error::Could not parse Search service name from SEARCH_ENDPOINT=$SEARCH_ENDPOINT"
+            exit 1
+          fi
+
+          searchId=$(az resource show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$searchName" \
+            --resource-type "Microsoft.Search/searchServices" \
+            --query id -o tsv)
+
+          if [[ -z "$searchId" ]]; then
+            echo "::error::Could not resolve Search resource ID for $searchName"
+            exit 1
+          fi
+
+          existing=$(az role assignment list \
+            --assignee "$principalObjectId" \
+            --scope "$searchId" \
+            --query "[?roleDefinitionName=='Search Index Data Contributor'] | length(@)" \
+            -o tsv || echo "0")
+
+          if [[ "$existing" == "0" ]]; then
+            az role assignment create \
+              --assignee-object-id "$principalObjectId" \
+              --assignee-principal-type ServicePrincipal \
+              --role "Search Index Data Contributor" \
+              --scope "$searchId" \
+              --only-show-errors
+
+            # Role assignments can take a short time to propagate to the Search data plane.
+            sleep 30
+          fi
+
       - name: Index content in AI Search
         env:
           SOURCE_URLS: ${{ needs.discover-content.outputs.sourceUrls }}
           CERTIFICATION_ID: ${{ inputs.certificationId }}
         run: |
           cd src/pipeline
-          python -m tools.index_content \
+          python3 -m tools.index_content \
             --certification-id "$CERTIFICATION_ID" \
             --source-urls "$SOURCE_URLS"
 
@@ -426,7 +423,7 @@ jobs:
           BATCH_INDEX: ${{ matrix.batch }}
         run: |
           cd src/pipeline
-          python -m tools.generate_episodes \
+          python3 -m tools.generate_episodes \
             --certification-id "$CERTIFICATION_ID" \
             --audio-format "$AUDIO_FORMAT" \
             --skills-outline "$SKILLS_OUTLINE" \
@@ -476,7 +473,7 @@ jobs:
             --query accessToken -o tsv)
           export ACCESS_TOKEN="$accessToken"
 
-          principalObjectId=$(python - <<'PY'
+          principalObjectId=$(python3 - <<'PY'
           import os, json, base64
           token = os.environ.get('ACCESS_TOKEN', '')
           parts = token.split('.')
@@ -525,7 +522,7 @@ jobs:
         run: |
           cd src/pipeline
           pip install -r requirements.txt
-          python -m tools.generate_index \
+          python3 -m tools.generate_index \
             --certification-id "$CERTIFICATION_ID" \
             --audio-format "$AUDIO_FORMAT"
 

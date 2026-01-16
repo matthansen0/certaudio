@@ -56,6 +56,7 @@ module aiServices 'modules/ai-services.bicep' = {
     location: location
     openAiLocation: openAiLocation
     uniqueSuffix: uniqueSuffix
+    automationPrincipalId: automationPrincipalId
     tags: tags
   }
 }
