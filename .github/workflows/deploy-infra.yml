@@ -142,20 +142,21 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Validate Bicep template
-        uses: azure/arm-deploy@v2
+        uses: azure/cli@v2
         with:
-          subscriptionId: ${{ env.AZURE_SUBSCRIPTION_ID }}
-          resourceGroupName: ${{ env.AZURE_RESOURCE_GROUP }}
-          template: ./infra/main.bicep
-          parameters: >-
-            certificationId=${{ inputs.certificationId || 'ai-102' }}
-            audioFormat=${{ inputs.audioFormat || 'instructional' }}
-            enableB2C=${{ inputs.enableB2C || false }}
-            uniqueSuffix=${{ env.UNIQUE_SUFFIX }}
-            location=${{ env.LOCATION }}
-            openAiLocation=${{ env.OPENAI_LOCATION }}
-          deploymentMode: Validate
-          failOnStdErr: false
+          inlineScript: |
+            set -euo pipefail
+
+            az deployment group validate \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --template-file ./infra/main.bicep \
+              --parameters \
+                certificationId=${{ inputs.certificationId || 'ai-102' }} \
+                audioFormat=${{ inputs.audioFormat || 'instructional' }} \
+                enableB2C=${{ inputs.enableB2C || false }} \
+                uniqueSuffix=$UNIQUE_SUFFIX \
+                location=$LOCATION \
+                openAiLocation=$OPENAI_LOCATION
 
   deploy:
     name: Deploy Infrastructure
@@ -178,20 +179,36 @@ jobs:
 
       - name: Deploy Bicep template
         id: deploy
-        uses: azure/arm-deploy@v2
+        uses: azure/cli@v2
         with:
-          subscriptionId: ${{ env.AZURE_SUBSCRIPTION_ID }}
-          resourceGroupName: ${{ env.AZURE_RESOURCE_GROUP }}
-          template: ./infra/main.bicep
-          parameters: >-
-            certificationId=${{ inputs.certificationId || 'ai-102' }}
-            audioFormat=${{ inputs.audioFormat || 'instructional' }}
-            enableB2C=${{ inputs.enableB2C || false }}
-            uniqueSuffix=${{ env.UNIQUE_SUFFIX }}
-            location=${{ env.LOCATION }}
-            openAiLocation=${{ env.OPENAI_LOCATION }}
-          deploymentName: 'certaudio-${{ github.run_number }}'
-          failOnStdErr: false
+          inlineScript: |
+            set -euo pipefail
+
+            deploymentName="certaudio-${{ github.run_number }}"
+
+            az deployment group create \
+              --name "$deploymentName" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --template-file ./infra/main.bicep \
+              --parameters \
+                certificationId=${{ inputs.certificationId || 'ai-102' }} \
+                audioFormat=${{ inputs.audioFormat || 'instructional' }} \
+                enableB2C=${{ inputs.enableB2C || false }} \
+                uniqueSuffix=$UNIQUE_SUFFIX \
+                location=$LOCATION \
+                openAiLocation=$OPENAI_LOCATION \
+              --only-show-errors
+
+            outputsJson=$(az deployment group show \
+              --name "$deploymentName" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query properties.outputs \
+              -o json)
+
+            echo "staticWebAppUrl=$(echo "$outputsJson" | jq -r '.staticWebAppUrl.value')" >> "$GITHUB_OUTPUT"
+            echo "functionsAppName=$(echo "$outputsJson" | jq -r '.functionsAppName.value')" >> "$GITHUB_OUTPUT"
+            echo "storageAccountName=$(echo "$outputsJson" | jq -r '.storageAccountName.value')" >> "$GITHUB_OUTPUT"
+            echo "cosmosDbAccountName=$(echo "$outputsJson" | jq -r '.cosmosDbAccountName.value')" >> "$GITHUB_OUTPUT"
 
       - name: Output deployment results
         run: |
