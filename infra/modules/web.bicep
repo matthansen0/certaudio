@@ -186,6 +186,22 @@ resource functionsApp 'Microsoft.Web/sites@2023-12-01' = {
   }
 }
 
+// Ensure App Service Authentication/Authorization (EasyAuth) is disabled for this API.
+// This prevents unexpected 401s if auth settings get toggled in the portal or by policy.
+resource functionsAuth 'Microsoft.Web/sites/config@2023-12-01' = {
+  parent: functionsApp
+  name: 'authsettingsV2'
+  properties: {
+    platform: {
+      enabled: false
+    }
+    globalValidation: {
+      requireAuthentication: false
+      unauthenticatedClientAction: 'AllowAnonymous'
+    }
+  }
+}
+
 // Data-plane permissions for AzureWebJobsStorage using managed identity
 resource funcStorageBlobContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(funcStorageAccount.id, functionsApp.id, 'Storage Blob Data Contributor')

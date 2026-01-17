@@ -37,6 +37,9 @@ resource cosmosDb 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
   tags: tags
   kind: 'GlobalDocumentDB'
   properties: {
+    // Required for the Function App to reach Cosmos DB over the public endpoint.
+    // For production, prefer Private Endpoints + VNet integration instead.
+    publicNetworkAccess: 'Enabled'
     databaseAccountOfferType: 'Standard'
     locations: [
       {

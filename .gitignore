@@ -18,3 +18,18 @@ node_modules/
 # OS/editor
 .DS_Store
 .vscode/
+
+# Functions build/deploy artifacts
+functions.zip
+functions-src.zip
+
+# Azure Functions Python deployment dependencies (created by CI zip packaging)
+src/functions/.python_packages/
+
+# Common local Python tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+pip-wheel-metadata/
+dist/
+build/
