@@ -166,6 +166,18 @@ resource openAiUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = i
   }
 }
 
+// Data-plane RBAC: allow automation principal to synthesize speech.
+resource speechUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (automationPrincipalId != '') {
+  name: guid(speech.id, automationPrincipalId, 'Cognitive Services Speech User')
+  scope: speech
+  properties: {
+    // Built-in role: Cognitive Services Speech User
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'f2dc8367-1007-4938-bd23-fe263f013447')
+    principalId: automationPrincipalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
 // ============================================================================
 // OUTPUTS
 // ============================================================================
