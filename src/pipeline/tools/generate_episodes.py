@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import sys
+import re
 from pathlib import Path
 
 from azure.cosmos import CosmosClient
@@ -184,7 +185,60 @@ def generate_ssml(
         lines = ssml.split("\n")
         ssml = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
 
+    # The Speech service can reject SSML that mixes languages/locales.
+    # We enforce a single language (en-US) and restrict voices to the ones we support.
+    ssml = sanitize_ssml(ssml, audio_format)
+
     return ssml
+
+
+def sanitize_ssml(ssml: str, audio_format: str) -> str:
+    ssml_out = ssml.strip()
+
+    # Remove any <lang> wrappers entirely (keep inner content).
+    ssml_out = re.sub(r"</?lang\b[^>]*>", "", ssml_out, flags=re.IGNORECASE)
+
+    # Force speak root to en-US.
+    # If xml:lang exists, normalize it. If not, add it.
+    if re.search(r"<speak\b[^>]*\bxml:lang=", ssml_out, flags=re.IGNORECASE):
+        ssml_out = re.sub(
+            r"(<speak\b[^>]*\bxml:lang=)(['\"]).*?\2",
+            r"\1\2en-US\2",
+            ssml_out,
+            flags=re.IGNORECASE,
+        )
+    else:
+        ssml_out = re.sub(
+            r"<speak\b",
+            '<speak xml:lang="en-US"',
+            ssml_out,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+
+    allowed_voices = {"en-US-GuyNeural"}
+    if audio_format == "podcast":
+        allowed_voices = {"en-US-GuyNeural", "en-US-TonyNeural"}
+
+    # Replace any unexpected voice with the default.
+    default_voice = "en-US-GuyNeural"
+
+    def _voice_repl(match: re.Match) -> str:
+        prefix = match.group(1)
+        quote = match.group(2)
+        voice_name = match.group(3)
+        if voice_name in allowed_voices:
+            return match.group(0)
+        return f"{prefix}{quote}{default_voice}{quote}"
+
+    ssml_out = re.sub(
+        r"(<voice\b[^>]*\bname=)(['\"])([^'\"]+)(\2)",
+        _voice_repl,
+        ssml_out,
+        flags=re.IGNORECASE,
+    )
+
+    return ssml_out
 
 
 def get_next_episode_number(
