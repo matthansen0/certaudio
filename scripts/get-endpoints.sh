@@ -50,6 +50,7 @@ storage="certaudiodevst$short"
 
 OPENAI_ENDPOINT=$(az cognitiveservices account show -g "$rg" -n "$openai" --query properties.endpoint -o tsv)
 SPEECH_ENDPOINT=$(az cognitiveservices account show -g "$rg" -n "$speech" --query properties.endpoint -o tsv)
+SPEECH_REGION=$(az cognitiveservices account show -g "$rg" -n "$speech" --query location -o tsv)
 DOCUMENT_INTELLIGENCE_ENDPOINT=$(az cognitiveservices account show -g "$rg" -n "$docintel" --query properties.endpoint -o tsv)
 SEARCH_NAME=$(az search service show -g "$rg" -n "$search" --query name -o tsv)
 SEARCH_ENDPOINT="https://${SEARCH_NAME}.search.windows.net"
@@ -62,6 +63,7 @@ SHORT_SUFFIX=$short
 
 OPENAI_ENDPOINT=$OPENAI_ENDPOINT
 SPEECH_ENDPOINT=$SPEECH_ENDPOINT
+SPEECH_REGION=$SPEECH_REGION
 DOCUMENT_INTELLIGENCE_ENDPOINT=$DOCUMENT_INTELLIGENCE_ENDPOINT
 SEARCH_ENDPOINT=$SEARCH_ENDPOINT
 COSMOS_DB_ENDPOINT=$COSMOS_DB_ENDPOINT

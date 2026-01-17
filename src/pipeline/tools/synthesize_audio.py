@@ -16,7 +16,25 @@ def get_speech_config() -> speechsdk.SpeechConfig:
     """Create Speech SDK config using managed identity or key."""
     speech_endpoint = os.environ.get("SPEECH_ENDPOINT")
     speech_key = os.environ.get("SPEECH_KEY")
-    speech_region = os.environ.get("SPEECH_REGION", "canadacentral")
+    speech_region = os.environ.get("SPEECH_REGION")
+
+    # Extract region from endpoint if not provided
+    # Endpoint format: https://<name>.cognitiveservices.azure.com/
+    # We need to get the region from Azure - the name doesn't contain region
+    if not speech_region and speech_endpoint:
+        # For regional endpoints like https://<region>.api.cognitive.microsoft.com/
+        # extract the region. For custom domain endpoints, default to env var.
+        import re
+        # Check if endpoint contains region in URL
+        match = re.match(r"https://([^.]+)\.api\.cognitive\.microsoft\.com", speech_endpoint)
+        if match:
+            speech_region = match.group(1)
+
+    # Default fallback
+    if not speech_region:
+        speech_region = "centralus"
+
+    print(f"Using Speech region: {speech_region}")
 
     if speech_key:
         # Use API key authentication
