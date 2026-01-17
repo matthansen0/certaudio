@@ -38,16 +38,16 @@ def get_speech_config() -> speechsdk.SpeechConfig:
         # Get token for Cognitive Services
         token = credential.get_token("https://cognitiveservices.azure.com/.default")
         
-        # For custom domain endpoints, use endpoint + auth_token
-        # The endpoint should be like: https://<resource-name>.cognitiveservices.azure.com/
-        # Speech SDK needs the speech-specific endpoint format
+        # For custom domain endpoints:
+        # 1. Create SpeechConfig with just the host
+        # 2. Set authorization_token separately (cannot pass both to constructor)
         speech_host = speech_endpoint.rstrip('/')
         
-        # Create config with endpoint and authorization token
-        config = speechsdk.SpeechConfig(
-            host=speech_host,
-            auth_token=f"aad#{speech_endpoint.rstrip('/')}#{token.token}"
-        )
+        # Create config with endpoint only
+        config = speechsdk.SpeechConfig(host=speech_host)
+        
+        # Set authorization token separately using aad# format for custom domains
+        config.authorization_token = f"aad#{speech_host}#{token.token}"
     else:
         # Fallback to region-based with token
         print("Using managed identity with region-based authentication")
