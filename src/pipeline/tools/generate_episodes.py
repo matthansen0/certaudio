@@ -409,6 +409,7 @@ def main():
 
     # Process each skill in the batch
     generated_episodes = []
+    errors: list[str] = []
     for i, skill in enumerate(batch_skills):
         episode_number = next_episode + i
         try:
@@ -426,9 +427,9 @@ def main():
             )
             generated_episodes.append(episode)
         except Exception as e:
-            print(f"\nError processing skill '{skill['name']}': {e}", file=sys.stderr)
-            # Continue with next skill rather than failing entire batch
-            continue
+            msg = f"Error processing skill '{skill.get('name', '<unknown>')}' (episode {episode_number}): {e}"
+            print(f"\n{msg}", file=sys.stderr)
+            errors.append(msg)
 
     # Summary
     print(f"\n{'='*60}")
@@ -437,6 +438,14 @@ def main():
     for ep in generated_episodes:
         print(f"  - {ep['id']}: {ep['title']} ({ep['durationSeconds']:.0f}s)")
     print(f"{'='*60}")
+
+    if errors:
+        print(f"\nBatch failed with {len(errors)} error(s).", file=sys.stderr)
+        sys.exit(1)
+
+    if len(generated_episodes) == 0:
+        print("\nBatch produced 0 episodes (unexpected).", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

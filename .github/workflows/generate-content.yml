@@ -84,6 +84,7 @@ permissions:
 env:
   AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+  EPISODE_BATCH_SIZE: 10
 
 # =============================================================================
 # REQUIRED SECRETS (configure in GitHub Settings > Secrets > Actions):
@@ -121,6 +122,8 @@ jobs:
     outputs:
       skillsOutline: ${{ steps.discover.outputs.skillsOutline }}
       sourceUrls: ${{ steps.discover.outputs.sourceUrls }}
+      batchIndices: ${{ steps.batches.outputs.batchIndices }}
+      mainSkillCount: ${{ steps.batches.outputs.mainSkillCount }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -129,6 +132,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: src/pipeline/requirements.txt
 
       - name: Install dependencies
         run: |
@@ -222,6 +227,28 @@ jobs:
           echo "skillsOutline=$(cat /tmp/discovery_results.json | jq -c '.skillsOutline')" >> $GITHUB_OUTPUT
           echo "sourceUrls=$(cat /tmp/discovery_results.json | jq -c '.sourceUrls')" >> $GITHUB_OUTPUT
 
+      - name: Compute episode batch matrix
+        id: batches
+        env:
+          SKILLS_OUTLINE: ${{ steps.discover.outputs.skillsOutline }}
+          BATCH_SIZE: ${{ env.EPISODE_BATCH_SIZE }}
+        run: |
+          python3 - <<'PY'
+          import json, math, os
+          skills_outline = os.environ.get('SKILLS_OUTLINE', '[]')
+          batch_size = int(os.environ.get('BATCH_SIZE', '10'))
+          skills = json.loads(skills_outline)
+          main_skills = [s for s in skills if s.get('topics') and len(s['topics']) > 0]
+          count = len(main_skills)
+          batches = max(1, math.ceil(count / batch_size))
+          indices = list(range(batches))
+          out_path = os.environ['GITHUB_OUTPUT']
+          with open(out_path, 'a', encoding='utf-8') as f:
+            f.write(f"mainSkillCount={count}\n")
+            f.write(f"batchIndices={json.dumps(indices)}\n")
+          print(f"Main skills: {count}; batch_size: {batch_size}; batches: {batches}; indices: {indices}")
+          PY
+
   index-content:
     name: Index Content for RAG
     runs-on: ubuntu-latest
@@ -234,6 +261,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: src/pipeline/requirements.txt
 
       - name: Install dependencies
         run: |
@@ -261,7 +290,7 @@ jobs:
 
           echo "$out" | awk -F= '/^(OPENAI_ENDPOINT|SPEECH_ENDPOINT|SPEECH_REGION|DOCUMENT_INTELLIGENCE_ENDPOINT|SEARCH_ENDPOINT|COSMOS_DB_ENDPOINT|STORAGE_ACCOUNT_NAME)=/ {print $0}' >> "$GITHUB_ENV"
 
-      - name: Ensure Cosmos, Search, OpenAI, and Storage RBAC for this workflow principal
+      - name: Ensure Cosmos, Search, Speech, OpenAI, and Storage RBAC for this workflow principal
         run: |
           set -euo pipefail
 
@@ -431,88 +460,6 @@ jobs:
             echo "Storage RBAC already exists."
           fi
 
-      - name: Index content in AI Search
-        env:
-          SOURCE_URLS: ${{ needs.discover-content.outputs.sourceUrls }}
-          CERTIFICATION_ID: ${{ inputs.certificationId }}
-        run: |
-          cd src/pipeline
-          python3 -m tools.index_content \
-            --certification-id "$CERTIFICATION_ID" \
-            --source-urls "$SOURCE_URLS"
-
-  generate-episodes:
-    name: Generate Episodes
-    runs-on: ubuntu-latest
-    needs: [discover-content, index-content]
-    strategy:
-      matrix:
-        batch: [0, 1, 2, 3, 4]  # Process in batches to avoid timeouts
-      max-parallel: 2
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: |
-          cd src/pipeline
-          pip install -r requirements.txt
-
-      - name: Azure Login
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Resolve endpoints for latest deployment
-        run: |
-          set -euo pipefail
-          chmod +x ./scripts/get-endpoints.sh
-
-          suffix="${{ secrets.AZURE_UNIQUE_SUFFIX }}"
-          if [[ -n "$suffix" ]]; then
-            out=$(./scripts/get-endpoints.sh "$AZURE_RESOURCE_GROUP" "$suffix")
-          else
-            out=$(./scripts/get-endpoints.sh "$AZURE_RESOURCE_GROUP")
-          fi
-
-          echo "$out" | awk -F= '/^(OPENAI_ENDPOINT|SPEECH_ENDPOINT|SPEECH_REGION|DOCUMENT_INTELLIGENCE_ENDPOINT|SEARCH_ENDPOINT|COSMOS_DB_ENDPOINT|STORAGE_ACCOUNT_NAME)=/ {print $0}' >> "$GITHUB_ENV"
-      - name: Ensure Speech, OpenAI, Cosmos, and Storage RBAC for this workflow principal
-        run: |
-          set -euo pipefail
-
-          accessToken=$(az account get-access-token \
-            --resource https://management.azure.com \
-            --query accessToken -o tsv)
-          export ACCESS_TOKEN="$accessToken"
-
-          principalObjectId=$(python3 - <<'PY'
-          import os, json, base64
-          token = os.environ.get('ACCESS_TOKEN', '')
-          parts = token.split('.')
-          if len(parts) < 2:
-            print('')
-            raise SystemExit(0)
-          payload = parts[1]
-          payload += '=' * (-len(payload) % 4)
-          data = base64.urlsafe_b64decode(payload.encode('utf-8')).decode('utf-8')
-          claims = json.loads(data)
-          print(claims.get('oid') or claims.get('objectId') or '')
-          PY
-          )
-
-          if [[ -z "$principalObjectId" ]]; then
-            echo "::warning::Could not determine automation principal objectId; skipping RBAC checks."
-            exit 0
-          fi
-          echo "Principal objectId: $principalObjectId"
-
           # --- Azure Speech RBAC ---
           speechName=$(echo "$SPEECH_ENDPOINT" | sed -E 's#^https?://([^./]+)\..*$#\1#')
           if [[ -z "$speechName" ]]; then
@@ -546,62 +493,66 @@ jobs:
               --scope "$speechId" \
               --only-show-errors
 
-            # Role assignments can take a short time to propagate.
             echo "Waiting 30s for RBAC propagation..."
             sleep 30
           else
             echo "Speech RBAC already exists."
           fi
 
-          # --- Cosmos SQL RBAC ---
-          cosmosName=$(echo "$COSMOS_DB_ENDPOINT" | sed -E 's#^https?://([^./]+)\..*$#\1#')
-          if [[ -n "$cosmosName" ]]; then
-            existing=$(az cosmosdb sql role assignment list \
-              --account-name "$cosmosName" \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --query "[?principalId=='$principalObjectId' && scope=='/dbs/certaudio'] | length(@)" \
-              -o tsv || echo "0")
+      - name: Index content in AI Search
+        env:
+          SOURCE_URLS: ${{ needs.discover-content.outputs.sourceUrls }}
+          CERTIFICATION_ID: ${{ inputs.certificationId }}
+        run: |
+          cd src/pipeline
+          python3 -m tools.index_content \
+            --certification-id "$CERTIFICATION_ID" \
+            --source-urls "$SOURCE_URLS"
 
-            if [[ "$existing" == "0" ]]; then
-              echo "Creating Cosmos SQL role assignment..."
-              az cosmosdb sql role assignment create \
-                --account-name "$cosmosName" \
-                --resource-group "$AZURE_RESOURCE_GROUP" \
-                --principal-id "$principalObjectId" \
-                --scope "/dbs/certaudio" \
-                --role-definition-id "00000000-0000-0000-0000-000000000002" \
-                --only-show-errors
-            else
-              echo "Cosmos SQL RBAC already exists."
-            fi
+  generate-episodes:
+    name: Generate Episodes
+    runs-on: ubuntu-latest
+    needs: [discover-content, index-content]
+    strategy:
+      matrix:
+        batch: ${{ fromJson(needs.discover-content.outputs.batchIndices) }}
+      max-parallel: 2
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: src/pipeline/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          cd src/pipeline
+          pip install -r requirements.txt
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve endpoints for latest deployment
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/get-endpoints.sh
+
+          suffix="${{ secrets.AZURE_UNIQUE_SUFFIX }}"
+          if [[ -n "$suffix" ]]; then
+            out=$(./scripts/get-endpoints.sh "$AZURE_RESOURCE_GROUP" "$suffix")
+          else
+            out=$(./scripts/get-endpoints.sh "$AZURE_RESOURCE_GROUP")
           fi
 
-          # --- Azure Storage Blob RBAC ---
-          storageId=$(az resource show \
-            --resource-group "$AZURE_RESOURCE_GROUP" \
-            --name "$STORAGE_ACCOUNT_NAME" \
-            --resource-type "Microsoft.Storage/storageAccounts" \
-            --query id -o tsv 2>/dev/null || echo "")
-
-          if [[ -n "$storageId" ]]; then
-            existing=$(az role assignment list \
-              --assignee "$principalObjectId" \
-              --scope "$storageId" \
-              --query "[?roleDefinitionName=='Storage Blob Data Contributor'] | length(@)" \
-              -o tsv || echo "0")
-
-            if [[ "$existing" == "0" ]]; then
-              echo "Creating Storage Blob Data Contributor role assignment..."
-              az role assignment create \
-                --assignee-object-id "$principalObjectId" \
-                --assignee-principal-type ServicePrincipal \
-                --role "Storage Blob Data Contributor" \
-                --scope "$storageId" \
-                --only-show-errors
-            else
-              echo "Storage RBAC already exists."
-            fi
-          fi
+          echo "$out" | awk -F= '/^(OPENAI_ENDPOINT|SPEECH_ENDPOINT|SPEECH_REGION|DOCUMENT_INTELLIGENCE_ENDPOINT|SEARCH_ENDPOINT|COSMOS_DB_ENDPOINT|STORAGE_ACCOUNT_NAME)=/ {print $0}' >> "$GITHUB_ENV"
       - name: Generate episode batch
         env:
           CERTIFICATION_ID: ${{ inputs.certificationId }}
@@ -615,7 +566,7 @@ jobs:
             --audio-format "$AUDIO_FORMAT" \
             --skills-outline "$SKILLS_OUTLINE" \
             --batch-index "$BATCH_INDEX" \
-            --batch-size 10
+            --batch-size "$EPISODE_BATCH_SIZE"
 
   finalize:
     name: Finalize Content Generation
@@ -629,6 +580,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: src/pipeline/requirements.txt
 
       - name: Azure Login
         uses: azure/login@v2
@@ -744,7 +697,8 @@ jobs:
           pip install -r requirements.txt
           python3 -m tools.generate_index \
             --certification-id "$CERTIFICATION_ID" \
-            --audio-format "$AUDIO_FORMAT"
+            --audio-format "$AUDIO_FORMAT" \
+            --min-episodes 1
 
       - name: Output generation summary
         run: |

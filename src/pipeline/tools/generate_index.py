@@ -18,6 +18,7 @@ def generate_index(
     cosmos_endpoint: str,
     storage_account_name: str,
     database_name: str = "certaudio",
+    min_episodes: int = 1,
 ) -> dict:
     """
     Generate episode index from Cosmos DB and upload to blob storage.
@@ -89,6 +90,11 @@ def generate_index(
         "domains": domains,
         "generatedAt": datetime.now(timezone.utc).isoformat(),
     }
+
+    if len(episodes) < min_episodes:
+        raise RuntimeError(
+            f"Refusing to publish index: found {len(episodes)} episode(s) for {certification_id}/{audio_format} (min required: {min_episodes})."
+        )
     
     # Upload to blob storage
     blob_service = BlobServiceClient(
@@ -123,6 +129,12 @@ def main():
     parser = argparse.ArgumentParser(description="Generate episode index")
     parser.add_argument("--certification-id", required=True)
     parser.add_argument("--audio-format", required=True)
+    parser.add_argument(
+        "--min-episodes",
+        type=int,
+        default=1,
+        help="Fail if fewer than this many episodes exist (default: 1)",
+    )
     
     args = parser.parse_args()
     
@@ -137,6 +149,7 @@ def main():
         audio_format=args.audio_format,
         cosmos_endpoint=cosmos_endpoint,
         storage_account_name=storage_account,
+        min_episodes=args.min_episodes,
     )
 
 
