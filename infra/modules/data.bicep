@@ -149,7 +149,10 @@ resource userProgressContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabas
   }
 }
 
-// Storage Account (private access only)
+// Storage Account
+// NOTE: Tenant policy enforces allowSharedKeyAccess=false and allowBlobPublicAccess=false via modify effects.
+// Set these explicitly to avoid policy-driven drift.
+// publicNetworkAccess must be Enabled for GitHub Actions runners to access the storage account.
 #disable-next-line BCP334
 resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: storageAccountName
@@ -162,9 +165,12 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   properties: {
     accessTier: 'Hot'
     allowBlobPublicAccess: false
-    allowSharedKeyAccess: true
+    // Tenant policy enforces allowSharedKeyAccess=false (modify effect)
+    allowSharedKeyAccess: false
     minimumTlsVersion: 'TLS1_2'
     supportsHttpsTrafficOnly: true
+    // Required for GitHub Actions access - runners are public
+    publicNetworkAccess: 'Enabled'
     networkAcls: {
       defaultAction: 'Allow'
       bypass: 'AzureServices'
