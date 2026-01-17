@@ -256,7 +256,9 @@ resource staticWebApp 'Microsoft.Web/staticSites@2023-12-01' = {
 // Link Functions to Static Web App as backend
 resource staticWebAppBackend 'Microsoft.Web/staticSites/linkedBackends@2023-12-01' = {
   parent: staticWebApp
-  name: 'backend'
+  // Static Web Apps allows only a single linked backend.
+  // Use the Function App name to avoid creating a second backend.
+  name: functionsApp.name
   properties: {
     backendResourceId: functionsApp.id
     region: location
