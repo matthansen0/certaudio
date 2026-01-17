@@ -113,6 +113,50 @@ def synthesize_ssml(ssml_content: str, output_path: str) -> tuple[bool, float]:
     return False, 0
 
 
+def synthesize_audio_segments(
+    ssml_segments: list[str],
+    output_path: str,
+) -> tuple[bool, float]:
+    """Synthesize multiple SSML segments and concatenate resulting MP3 files.
+
+    This avoids the Speech service max media duration limit (~10 minutes) per request.
+    """
+    if not ssml_segments:
+        return False, 0
+
+    temp_paths: list[str] = []
+    total_duration = 0.0
+
+    base = Path(output_path)
+    for idx, segment in enumerate(ssml_segments, start=1):
+        part_path = str(base.with_name(f"{base.stem}.part{idx:02d}{base.suffix}"))
+        ok, dur = synthesize_ssml(segment, part_path)
+        if not ok:
+            # Best-effort cleanup
+            for p in temp_paths:
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
+            return False, 0
+        temp_paths.append(part_path)
+        total_duration += dur
+
+    # Concatenate MP3 parts. MP3 frames are typically concat-safe when encoded consistently.
+    with open(output_path, "wb") as out_f:
+        for p in temp_paths:
+            with open(p, "rb") as in_f:
+                out_f.write(in_f.read())
+
+    for p in temp_paths:
+        try:
+            os.remove(p)
+        except Exception:
+            pass
+
+    return True, total_duration
+
+
 @tool
 def synthesize_audio(
     ssml_content: str,

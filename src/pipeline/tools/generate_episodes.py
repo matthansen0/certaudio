@@ -29,7 +29,7 @@ from jinja2 import Environment, FileSystemLoader
 from openai import AzureOpenAI
 
 # Import sibling tools
-from .synthesize_audio import synthesize_audio
+from .synthesize_audio import synthesize_audio, synthesize_audio_segments
 from .upload_to_blob import upload_to_blob
 from .save_episode import save_episode
 
@@ -415,8 +415,9 @@ def process_skill_domain(
 
     # 4. Synthesize audio
     print("Step 4: Synthesizing audio...")
-    audio_result = synthesize_audio(
-        ssml_content=ssml,
+    audio_result = synthesize_audio_with_chunking(
+        narration=narration,
+        ssml=ssml,
         episode_number=episode_number,
         certification_id=certification_id,
         audio_format=audio_format,
@@ -458,6 +459,68 @@ def process_skill_domain(
     print(f"  - Episode ID: {episode_doc['id']}")
 
     return episode_doc
+
+
+def split_narration_for_tts(narration: str, max_words_per_segment: int = 850) -> list[str]:
+    """Split narration into segments to keep each TTS request under the Speech service limit."""
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", narration) if p.strip()]
+    segments: list[str] = []
+    current: list[str] = []
+    current_words = 0
+
+    for p in paragraphs:
+        words = len(p.split())
+        if current and current_words + words > max_words_per_segment:
+            segments.append("\n\n".join(current).strip())
+            current = []
+            current_words = 0
+        current.append(p)
+        current_words += words
+
+    if current:
+        segments.append("\n\n".join(current).strip())
+
+    return segments
+
+
+def synthesize_audio_with_chunking(
+    narration: str,
+    ssml: str,
+    episode_number: int,
+    certification_id: str,
+    audio_format: str,
+) -> dict:
+    """Synthesize audio, splitting into multiple Speech requests when narration is long."""
+    # If the SSML is already short, use the simple path.
+    narration_words = len(narration.split())
+    if narration_words <= 900:
+        return synthesize_audio(
+            ssml_content=ssml,
+            episode_number=episode_number,
+            certification_id=certification_id,
+            audio_format=audio_format,
+        )
+
+    segments = split_narration_for_tts(narration)
+    ssml_segments = [build_ssml_from_narration(seg, audio_format) for seg in segments]
+
+    # Build output path consistent with synthesize_audio.
+    import tempfile
+    temp_dir = tempfile.mkdtemp()
+    filename = f"{certification_id}_{audio_format}_{episode_number:03d}.mp3"
+    output_path = os.path.join(temp_dir, filename)
+
+    print(f"Narration is long ({narration_words} words); synthesizing in {len(ssml_segments)} segment(s)...")
+
+    ok, duration = synthesize_audio_segments(ssml_segments, output_path)
+    if not ok:
+        raise RuntimeError(f"Audio synthesis failed for episode {episode_number}")
+
+    return {
+        "audio_path": output_path,
+        "duration_seconds": duration,
+        "filename": filename,
+    }
 
 
 def main():
