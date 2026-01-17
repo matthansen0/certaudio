@@ -240,6 +240,8 @@ jobs:
           skills = json.loads(skills_outline)
           main_skills = [s for s in skills if s.get('topics') and len(s['topics']) > 0]
           count = len(main_skills)
+          if count == 0:
+            raise SystemExit('No main skills discovered (skills with topics). Refusing to continue.')
           batches = max(1, math.ceil(count / batch_size))
           indices = list(range(batches))
           out_path = os.environ['GITHUB_OUTPUT']
@@ -516,7 +518,7 @@ jobs:
     strategy:
       matrix:
         batch: ${{ fromJson(needs.discover-content.outputs.batchIndices) }}
-      max-parallel: 2
+      max-parallel: 5
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -571,7 +573,7 @@ jobs:
   finalize:
     name: Finalize Content Generation
     runs-on: ubuntu-latest
-    needs: generate-episodes
+    needs: [discover-content, generate-episodes]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -698,7 +700,7 @@ jobs:
           python3 -m tools.generate_index \
             --certification-id "$CERTIFICATION_ID" \
             --audio-format "$AUDIO_FORMAT" \
-            --min-episodes 1
+            --min-episodes "${{ needs.discover-content.outputs.mainSkillCount }}"
 
       - name: Output generation summary
         run: |

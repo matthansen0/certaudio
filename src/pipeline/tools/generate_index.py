@@ -57,6 +57,25 @@ def generate_index(
             enable_cross_partition_query=True,
         )
     )
+
+    # Validation gate: require a complete base set of episodes when min_episodes is provided.
+    # This avoids "success" when only a subset was generated (or when gaps exist due to
+    # partial failures/overwrites).
+    base_episodes = [ep for ep in episodes if not ep.get("isAmendment", False)]
+    base_sequence_numbers = {int(ep.get("sequenceNumber", 0)) for ep in base_episodes}
+
+    if min_episodes and len(base_episodes) < min_episodes:
+        raise RuntimeError(
+            f"Refusing to publish index: found {len(base_episodes)} base episode(s) for {certification_id}/{audio_format} "
+            f"(min required: {min_episodes})."
+        )
+
+    if min_episodes:
+        missing = [n for n in range(1, min_episodes + 1) if n not in base_sequence_numbers]
+        if missing:
+            raise RuntimeError(
+                f"Refusing to publish index: missing base episode sequenceNumber(s) {missing} for {certification_id}/{audio_format}."
+            )
     
     # Group by skill domain
     domains = {}
@@ -91,10 +110,7 @@ def generate_index(
         "generatedAt": datetime.now(timezone.utc).isoformat(),
     }
 
-    if len(episodes) < min_episodes:
-        raise RuntimeError(
-            f"Refusing to publish index: found {len(episodes)} episode(s) for {certification_id}/{audio_format} (min required: {min_episodes})."
-        )
+
     
     # Upload to blob storage
     blob_service = BlobServiceClient(

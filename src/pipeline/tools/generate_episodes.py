@@ -399,19 +399,17 @@ def main():
     prompts_dir = Path(__file__).parent.parent / "prompts"
     jinja_env = Environment(loader=FileSystemLoader(prompts_dir))
 
-    # Get starting episode number
-    next_episode = get_next_episode_number(
-        args.certification_id,
-        args.audio_format,
-        cosmos_client,
-    )
-    print(f"\nStarting from episode number: {next_episode}")
+    # Deterministic episode numbering to support parallel batch generation.
+    # Episode numbers are based on the global index of the skill domain within the
+    # discovered main_skills list.
+    base_episode_number = start_idx + 1
+    print(f"\nBatch base episode number: {base_episode_number}")
 
     # Process each skill in the batch
     generated_episodes = []
     errors: list[str] = []
     for i, skill in enumerate(batch_skills):
-        episode_number = next_episode + i
+        episode_number = base_episode_number + i
         try:
             episode = process_skill_domain(
                 episode_number=episode_number,

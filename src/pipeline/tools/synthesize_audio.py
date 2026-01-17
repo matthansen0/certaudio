@@ -30,34 +30,39 @@ def get_speech_config() -> speechsdk.SpeechConfig:
         print("Using API key authentication")
         config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
     elif speech_endpoint:
-        # Use managed identity with endpoint
-        # Speech SDK requires endpoint-based auth for AAD tokens
-        print("Using managed identity with endpoint authentication")
-        credential = DefaultAzureCredential()
-        
-        # Get token for Cognitive Services
-        token = credential.get_token("https://cognitiveservices.azure.com/.default")
-        
-        # For custom domain endpoints:
-        # 1. Create SpeechConfig with just the host
-        # 2. Set authorization_token separately (cannot pass both to constructor)
-        speech_host = speech_endpoint.rstrip('/')
-        
-        # Create config with endpoint only
-        config = speechsdk.SpeechConfig(host=speech_host)
-        
-        # Set authorization token separately using aad# format for custom domains
-        config.authorization_token = f"aad#{speech_host}#{token.token}"
-    else:
-        # Fallback to region-based with token
-        print("Using managed identity with region-based authentication")
-        credential = DefaultAzureCredential()
-        token = credential.get_token("https://cognitiveservices.azure.com/.default")
-        
-        config = speechsdk.SpeechConfig(
-            auth_token=token.token,
-            region=speech_region,
+        # Use Microsoft Entra authentication for SpeechSynthesizer.
+        # Per Microsoft docs, SpeechSynthesizer requires an auth token in the form:
+        #   aad#<resourceId>#<entraAccessToken>
+        # and SpeechConfig must be created with auth_token + region (not endpoint/host).
+        print("Using managed identity with Entra authentication")
+
+        subscription_id = os.environ.get("AZURE_SUBSCRIPTION_ID")
+        resource_group = os.environ.get("AZURE_RESOURCE_GROUP")
+        if not subscription_id or not resource_group:
+            raise ValueError(
+                "AZURE_SUBSCRIPTION_ID and AZURE_RESOURCE_GROUP are required for Entra Speech auth."
+            )
+
+        # Speech endpoint is typically like:
+        #   https://<speech-resource-name>.cognitiveservices.azure.com/
+        speech_host = speech_endpoint.rstrip("/")
+        host_no_scheme = speech_host.split("//", 1)[-1]
+        resource_name = host_no_scheme.split(".", 1)[0]
+        if not resource_name:
+            raise ValueError(f"Could not parse Speech resource name from SPEECH_ENDPOINT={speech_endpoint}")
+
+        resource_id = (
+            f"/subscriptions/{subscription_id}/resourceGroups/{resource_group}"
+            f"/providers/Microsoft.CognitiveServices/accounts/{resource_name}"
         )
+
+        credential = DefaultAzureCredential()
+        aad_token = credential.get_token("https://cognitiveservices.azure.com/.default")
+        authorization_token = f"aad#{resource_id}#{aad_token.token}"
+
+        config = speechsdk.SpeechConfig(auth_token=authorization_token, region=speech_region)
+    else:
+        raise ValueError("SPEECH_ENDPOINT or SPEECH_KEY must be set")
 
     # Configure audio output format
     config.set_speech_synthesis_output_format(
