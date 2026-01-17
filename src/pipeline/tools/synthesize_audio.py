@@ -18,32 +18,42 @@ def get_speech_config() -> speechsdk.SpeechConfig:
     speech_key = os.environ.get("SPEECH_KEY")
     speech_region = os.environ.get("SPEECH_REGION")
 
-    # Extract region from endpoint if not provided
-    # Endpoint format: https://<name>.cognitiveservices.azure.com/
-    # We need to get the region from Azure - the name doesn't contain region
-    if not speech_region and speech_endpoint:
-        # For regional endpoints like https://<region>.api.cognitive.microsoft.com/
-        # extract the region. For custom domain endpoints, default to env var.
-        import re
-        # Check if endpoint contains region in URL
-        match = re.match(r"https://([^.]+)\.api\.cognitive\.microsoft\.com", speech_endpoint)
-        if match:
-            speech_region = match.group(1)
-
-    # Default fallback
+    # Default fallback for region
     if not speech_region:
         speech_region = "centralus"
 
     print(f"Using Speech region: {speech_region}")
+    print(f"Speech endpoint: {speech_endpoint}")
 
     if speech_key:
         # Use API key authentication
+        print("Using API key authentication")
         config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
+    elif speech_endpoint:
+        # Use managed identity with endpoint
+        # Speech SDK requires endpoint-based auth for AAD tokens
+        print("Using managed identity with endpoint authentication")
+        credential = DefaultAzureCredential()
+        
+        # Get token for Cognitive Services
+        token = credential.get_token("https://cognitiveservices.azure.com/.default")
+        
+        # For custom domain endpoints, use endpoint + auth_token
+        # The endpoint should be like: https://<resource-name>.cognitiveservices.azure.com/
+        # Speech SDK needs the speech-specific endpoint format
+        speech_host = speech_endpoint.rstrip('/')
+        
+        # Create config with endpoint and authorization token
+        config = speechsdk.SpeechConfig(
+            host=speech_host,
+            auth_token=f"aad#{speech_endpoint.rstrip('/')}#{token.token}"
+        )
     else:
-        # Use managed identity
+        # Fallback to region-based with token
+        print("Using managed identity with region-based authentication")
         credential = DefaultAzureCredential()
         token = credential.get_token("https://cognitiveservices.azure.com/.default")
-
+        
         config = speechsdk.SpeechConfig(
             auth_token=token.token,
             region=speech_region,
