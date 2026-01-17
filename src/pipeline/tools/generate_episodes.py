@@ -17,6 +17,7 @@ import json
 import os
 import sys
 import re
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from azure.cosmos import CosmosClient
@@ -195,6 +196,9 @@ def generate_ssml(
 def sanitize_ssml(ssml: str, audio_format: str) -> str:
     ssml_out = ssml.strip()
 
+    # Remove ASCII control chars not allowed in XML.
+    ssml_out = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F]", "", ssml_out)
+
     # Remove any <lang> wrappers entirely (keep inner content).
     ssml_out = re.sub(r"</?lang\b[^>]*>", "", ssml_out, flags=re.IGNORECASE)
 
@@ -237,6 +241,20 @@ def sanitize_ssml(ssml: str, audio_format: str) -> str:
         ssml_out,
         flags=re.IGNORECASE,
     )
+
+    # Escape stray '&' that aren't part of XML entities.
+    ssml_out = re.sub(
+        r"&(?!amp;|lt;|gt;|quot;|apos;|#\d+;|#x[0-9A-Fa-f]+;)",
+        "&amp;",
+        ssml_out,
+    )
+
+    # Best-effort XML validation so we fail fast with a clearer local error if SSML is malformed.
+    try:
+        ET.fromstring(ssml_out)
+    except ET.ParseError as e:
+        snippet = ssml_out[:500].replace("\n", " ")
+        raise ValueError(f"Generated SSML is not well-formed XML: {e}. Snippet: {snippet}")
 
     return ssml_out
 
