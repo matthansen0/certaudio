@@ -181,6 +181,16 @@ resource functionsApp 'Microsoft.Web/sites@2023-12-01' = {
           name: 'ENABLE_B2C'
           value: string(enableB2C)
         }
+        // Python v2 programming model requires worker indexing
+        {
+          name: 'AzureWebJobsFeatureFlags'
+          value: 'EnableWorkerIndexing'
+        }
+        // Enable remote build so pip installs dependencies during deployment
+        {
+          name: 'SCM_DO_BUILD_DURING_DEPLOYMENT'
+          value: 'true'
+        }
       ]
     }
   }
