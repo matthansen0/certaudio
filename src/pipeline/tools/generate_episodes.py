@@ -18,6 +18,7 @@ import os
 import sys
 import re
 import xml.etree.ElementTree as ET
+from xml.sax.saxutils import escape
 from pathlib import Path
 
 from azure.cosmos import CosmosClient
@@ -157,14 +158,15 @@ def generate_ssml(
     jinja_env: Environment,
 ) -> str:
     """Convert narration script to SSML."""
+    # LLM-generated SSML has proven brittle (Speech rejects it with SSML parsing errors).
+    # Default to deterministic SSML generation; keep LLM path for experimentation.
+    use_llm = os.environ.get("USE_LLM_SSML", "false").lower() == "true"
+    if not use_llm:
+        return build_ssml_from_narration(narration, audio_format)
+
     template = jinja_env.get_template("ssml.jinja2")
+    prompt = template.render(narration=narration, audio_format=audio_format)
 
-    prompt = template.render(
-        narration=narration,
-        audio_format=audio_format,
-    )
-
-    # Split system and user parts
     parts = prompt.split("user:")
     system_prompt = parts[0].replace("system:", "").strip()
     user_prompt = parts[1].strip() if len(parts) > 1 else ""
@@ -175,21 +177,85 @@ def generate_ssml(
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        temperature=0.3,  # Lower temperature for more consistent SSML
+        temperature=0.3,
         max_tokens=8000,
     )
 
     ssml = response.choices[0].message.content
-
-    # Clean up any markdown code blocks if present
     if ssml.startswith("```"):
         lines = ssml.split("\n")
         ssml = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
 
-    # The Speech service can reject SSML that mixes languages/locales.
-    # We enforce a single language (en-US) and restrict voices to the ones we support.
-    ssml = sanitize_ssml(ssml, audio_format)
+    return sanitize_ssml(ssml, audio_format)
 
+
+def build_ssml_from_narration(narration: str, audio_format: str) -> str:
+    """Generate conservative, Speech-compatible SSML from plain narration text."""
+
+    def _normalize_text(text: str) -> str:
+        # Remove speaker markers if they appear in instructional.
+        text = text.replace("[HOST]", "").replace("[EXPERT]", "")
+        # Normalize pause markers.
+        text = text.replace("[PAUSE]", "<break time=\"500ms\"/>")
+        # Convert blank lines into slightly longer pauses.
+        lines = [ln.rstrip() for ln in text.splitlines()]
+        out_parts: list[str] = []
+        for ln in lines:
+            if not ln.strip():
+                out_parts.append('<break time="300ms"/>')
+                continue
+            out_parts.append(escape(ln))
+            out_parts.append('<break time="200ms"/>')
+        return " ".join(out_parts).strip()
+
+    speak_open = (
+        '<speak version="1.0" '
+        'xmlns="http://www.w3.org/2001/10/synthesis" '
+        'xmlns:mstts="http://www.w3.org/2001/mstts" '
+        'xml:lang="en-US">'
+    )
+    speak_close = "</speak>"
+
+    if audio_format == "podcast":
+        # Two voices, switched by [HOST]/[EXPERT] markers.
+        host_voice = "en-US-GuyNeural"
+        expert_voice = "en-US-TonyNeural"
+
+        # Split while keeping markers.
+        tokens = re.split(r"(\[HOST\]|\[EXPERT\])", narration)
+        current = "HOST"
+        chunks: list[str] = []
+        for tok in tokens:
+            if tok == "[HOST]":
+                current = "HOST"
+                continue
+            if tok == "[EXPERT]":
+                current = "EXPERT"
+                continue
+            if not tok.strip():
+                continue
+            voice = host_voice if current == "HOST" else expert_voice
+            inner = _normalize_text(tok)
+            if current == "EXPERT":
+                inner = f'<prosody rate="-5%">{inner}</prosody>'
+            chunks.append(f'<voice name="{voice}">{inner}</voice>')
+
+        ssml = speak_open + " ".join(chunks) + speak_close
+        ET.fromstring(ssml)  # validate
+        return ssml
+
+    # Instructional: single voice with a conservative expressive style wrapper.
+    voice = "en-US-GuyNeural"
+    inner = _normalize_text(narration)
+    inner = (
+        '<mstts:express-as style="newscast-casual" styledegree="0.75">'
+        '<prosody rate="-8%" pitch="-2%">'
+        f"{inner}"
+        "</prosody>"
+        "</mstts:express-as>"
+    )
+    ssml = speak_open + f'<voice name="{voice}">{inner}</voice>' + speak_close
+    ET.fromstring(ssml)  # validate
     return ssml
 
 
