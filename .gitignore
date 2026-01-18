@@ -33,3 +33,6 @@ src/functions/.python_packages/
 pip-wheel-metadata/
 dist/
 build/
+
+# Generated discovery results
+deep_discovery_results.json

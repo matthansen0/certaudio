@@ -58,6 +58,63 @@ A fully automated Azure-native system that auto-discovers Microsoft Learn conten
 | Azure Blob Storage | Audio files, scripts, SSML (private access) |
 | Azure Static Web Apps | Frontend hosting with built-in auth |
 | Azure Functions | Backend API for audio proxy, progress sync |
+
+## Content Discovery
+
+The system uses a **deep discovery** approach to ensure comprehensive coverage of certification content:
+
+### Two Discovery Modes
+
+| Mode | Purpose | Cost | Content |
+|------|---------|------|---------|
+| **Skills Outline** | Quick structure analysis | ~$2 | Exam skills (bullet points only) |
+| **Deep Discovery** | Full learning content | ~$15+ | Complete learning paths, modules, units |
+
+### Deep Discovery Architecture
+
+```
+Exam Page
+    ↓
+Certification Skills (for outline mode)
+    ↓
+Microsoft Learn Catalog API
+    ↓
+Learning Paths → Modules → Units
+    ↓
+Unit Content Extraction (text from HTML)
+    ↓
+Content Indexing for RAG
+```
+
+### Content Scope (Example: DP-700)
+
+| Level | Count | Content |
+|-------|-------|---------|
+| Learning Paths | 6 | High-level curriculum areas |
+| Modules | ~30 | Individual topics |
+| Units | ~230 | Actual pages with content |
+| Words | ~100,000 | Full text of all units |
+| Episodes | ~70 | Generated audio episodes |
+| Duration | ~18 hours | Total audio content |
+
+### Test Mode
+
+For development and testing, use `--test` flag to generate a single episode from one unit (~$0.15):
+
+```bash
+python3 -m tools.deep_discover --test
+```
+
+### CLI Options
+
+```bash
+python3 -m tools.deep_discover \
+    --certification-id dp-700 \    # Target certification
+    --max-paths 2 \                # Limit learning paths (dev/test)
+    --max-modules 3 \              # Limit modules per path
+    --max-units 5 \                # Limit units per module
+    --skip-content                 # Structure only (fast)
+```
 | Azure AD B2C (optional) | User authentication for progress sync |
 
 ## File Structure
@@ -101,7 +158,8 @@ A fully automated Azure-native system that auto-discovers Microsoft Learn conten
 │       │   ├── system_ssml.txt
 │       │   └── ...
 │       └── tools/
-│           ├── discover_exam_content.py
+│           ├── discover_exam_content.py     # Skills outline discovery
+│           ├── deep_discover.py             # Full learning path discovery
 │           ├── check_content_delta.py
 │           ├── synthesize_audio.py
 │           └── upload_to_blob.py
