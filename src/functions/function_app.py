@@ -143,27 +143,45 @@ def get_episodes(req: func.HttpRequest) -> func.HttpResponse:
             )
         )
 
-        # Group by skill domain
+        # Group by skill domain with metrics
         domains = {}
+        total_duration_seconds = 0
+        
         for ep in episodes:
             domain = ep.get("skillDomain", "Other")
+            duration = ep.get("durationSeconds", 0)
+            total_duration_seconds += duration
+            
             if domain not in domains:
-                domains[domain] = []
-            domains[domain].append({
+                domains[domain] = {
+                    "episodes": [],
+                    "totalDurationSeconds": 0,
+                    "episodeCount": 0,
+                }
+            
+            domains[domain]["episodes"].append({
                 "id": ep["id"],
                 "sequenceNumber": ep["sequenceNumber"],
                 "title": ep["title"],
-                "durationSeconds": ep.get("durationSeconds", 0),
+                "durationSeconds": duration,
+                "skillDomain": domain,
                 "isAmendment": ep.get("isAmendment", False),
                 "amendmentOf": ep.get("amendmentOf"),
                 "skillTopics": ep.get("skillTopics", []),
             })
+            domains[domain]["totalDurationSeconds"] += duration
+            domains[domain]["episodeCount"] += 1
+
+        # Calculate hours
+        total_hours = total_duration_seconds / 3600
 
         return func.HttpResponse(
             json.dumps({
                 "certificationId": cert_id,
                 "format": audio_format,
                 "totalEpisodes": len(episodes),
+                "totalDurationSeconds": total_duration_seconds,
+                "totalHours": round(total_hours, 1),
                 "domains": domains,
             }),
             mimetype="application/json",

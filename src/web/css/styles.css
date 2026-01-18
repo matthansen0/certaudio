@@ -207,21 +207,123 @@ body {
 }
 
 .episode-list {
-    padding: 1rem;
+    padding: 0.5rem;
+}
+
+/* ============================================
+   Domain Sections (Collapsible)
+   ============================================ */
+.domain-section {
+    margin-bottom: 0.5rem;
+    border-radius: var(--radius-md);
+    background: var(--color-bg-card);
+    border: 1px solid var(--color-border-light);
+    overflow: hidden;
+}
+
+.domain-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    background: var(--color-bg-sidebar);
+    border-bottom: 1px solid var(--color-border-light);
+    transition: background var(--transition-fast);
+}
+
+.domain-header:hover {
+    background: var(--color-border-light);
+}
+
+.domain-header-left {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex: 1;
+    min-width: 0;
+}
+
+.domain-chevron {
+    width: 16px;
+    height: 16px;
+    color: var(--color-text-muted);
+    transition: transform var(--transition-fast);
+    flex-shrink: 0;
+}
+
+.domain-section.collapsed .domain-chevron {
+    transform: rotate(-90deg);
+}
+
+.domain-header .domain-title {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--color-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-transform: none;
+    letter-spacing: normal;
+    padding: 0;
+    margin: 0;
+}
+
+.domain-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-shrink: 0;
+    margin-left: 0.5rem;
+}
+
+.domain-progress {
+    font-size: 0.6875rem;
+    color: var(--color-text-muted);
+    font-weight: 500;
+}
+
+.domain-duration {
+    font-size: 0.6875rem;
+    color: var(--color-primary);
+    font-weight: 600;
+    min-width: 35px;
+    text-align: right;
+}
+
+.domain-progress-bar {
+    width: 40px;
+    height: 4px;
+    background: var(--color-border);
+    border-radius: var(--radius-full);
+    overflow: hidden;
+}
+
+.domain-progress-fill {
+    height: 100%;
+    background: var(--color-success);
+    border-radius: var(--radius-full);
+    transition: width var(--transition-normal);
+}
+
+.domain-episodes {
+    padding: 0.25rem 0.5rem;
+    max-height: 1000px;
+    overflow: hidden;
+    transition: max-height 0.3s ease, padding 0.3s ease;
+}
+
+.domain-section.collapsed .domain-episodes {
+    max-height: 0;
+    padding: 0 0.5rem;
+}
+
+.domain-section.collapsed .domain-header {
+    border-bottom-color: transparent;
 }
 
 .domain-group {
     margin-bottom: 1.5rem;
-}
-
-.domain-title {
-    font-size: 0.75rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--color-text-muted);
-    padding: 0.5rem;
-    margin-bottom: 0.5rem;
 }
 
 .episode-item {

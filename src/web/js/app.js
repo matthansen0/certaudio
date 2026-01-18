@@ -23,10 +23,14 @@ let state = {
     audioFormat: 'instructional',
     episodes: {},
     domains: {},
+    domainMeta: {},  // Domain-level metadata (totalDurationSeconds, episodeCount)
+    totalHours: 0,
+    totalDurationSeconds: 0,
     currentEpisode: null,
     userId: null,
     progress: {},
     isPlaying: false,
+    collapsedDomains: {},  // Track which domains are collapsed
 };
 
 // DOM Elements
@@ -202,11 +206,24 @@ async function loadEpisodes() {
         
         const data = await response.json();
         state.domains = data.domains || {};
+        state.totalHours = data.totalHours || 0;
+        state.totalDurationSeconds = data.totalDurationSeconds || 0;
         
-        // Flatten episodes for easy lookup
+        // Process domains and flatten episodes for easy lookup
         state.episodes = {};
-        Object.values(state.domains).forEach(episodes => {
+        state.domainMeta = {};
+        
+        Object.entries(state.domains).forEach(([domainName, domainData]) => {
+            // Handle both old format (array) and new format (object with episodes)
+            const episodes = Array.isArray(domainData) ? domainData : domainData.episodes || [];
+            
+            state.domainMeta[domainName] = {
+                totalDurationSeconds: domainData.totalDurationSeconds || 0,
+                episodeCount: domainData.episodeCount || episodes.length,
+            };
+            
             episodes.forEach(ep => {
+                ep.skillDomain = domainName;  // Ensure domain is set
                 state.episodes[ep.id] = ep;
             });
         });
@@ -280,23 +297,89 @@ async function syncProgressToServer() {
 // ============================================
 
 function renderEpisodeList() {
-    // Flatten and sort all episodes by sequence number for proper ordering
-    const allEpisodes = Object.values(state.episodes)
-        .sort((a, b) => a.sequenceNumber - b.sequenceNumber);
+    // Group episodes by domain
+    const domainNames = Object.keys(state.domainMeta).sort((a, b) => {
+        // Get first episode sequence number for each domain to determine order
+        const getFirstSeq = (domain) => {
+            const domainData = state.domains[domain];
+            const episodes = Array.isArray(domainData) ? domainData : domainData?.episodes || [];
+            return episodes.length > 0 ? Math.min(...episodes.map(e => e.sequenceNumber)) : 999;
+        };
+        return getFirstSeq(a) - getFirstSeq(b);
+    });
     
-    const html = allEpisodes.length > 0
-        ? allEpisodes.map(ep => renderEpisodeItem(ep)).join('')
-        : '<div class="loading">No episodes found.</div>';
+    if (domainNames.length === 0) {
+        elements.episodeList.innerHTML = '<div class="loading">No episodes found.</div>';
+        return;
+    }
+    
+    const html = domainNames.map(domainName => {
+        const domainData = state.domains[domainName];
+        const episodes = Array.isArray(domainData) ? domainData : domainData?.episodes || [];
+        const meta = state.domainMeta[domainName] || {};
+        const isCollapsed = state.collapsedDomains[domainName];
+        
+        // Calculate domain progress
+        const domainProgress = calculateDomainProgress(domainName, episodes);
+        const domainHours = (meta.totalDurationSeconds || 0) / 3600;
+        
+        return `
+            <div class="domain-section ${isCollapsed ? 'collapsed' : ''}">
+                <div class="domain-header" data-domain="${domainName}">
+                    <div class="domain-header-left">
+                        <svg class="domain-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                        <span class="domain-title">${domainName}</span>
+                    </div>
+                    <div class="domain-meta">
+                        <span class="domain-progress">${domainProgress.completed}/${domainProgress.total}</span>
+                        <span class="domain-duration">${formatHours(domainHours)}</span>
+                        <div class="domain-progress-bar">
+                            <div class="domain-progress-fill" style="width: ${domainProgress.percentage}%"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="domain-episodes">
+                    ${episodes
+                        .sort((a, b) => a.sequenceNumber - b.sequenceNumber)
+                        .map(ep => renderEpisodeItem(ep)).join('')}
+                </div>
+            </div>
+        `;
+    }).join('');
     
     elements.episodeList.innerHTML = html;
     
-    // Add click handlers
+    // Add click handlers for episodes
     document.querySelectorAll('.episode-item').forEach(item => {
         item.addEventListener('click', () => {
             const episodeId = item.dataset.episodeId;
             playEpisode(state.episodes[episodeId]);
         });
     });
+    
+    // Add click handlers for domain headers (collapse/expand)
+    document.querySelectorAll('.domain-header').forEach(header => {
+        header.addEventListener('click', () => {
+            const domainName = header.dataset.domain;
+            state.collapsedDomains[domainName] = !state.collapsedDomains[domainName];
+            header.closest('.domain-section').classList.toggle('collapsed');
+        });
+    });
+}
+
+function calculateDomainProgress(domainName, episodes) {
+    const total = episodes.length;
+    const completed = episodes.filter(ep => state.progress[ep.id]?.completed).length;
+    const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
+    
+    // Calculate completed duration
+    const completedDuration = episodes
+        .filter(ep => state.progress[ep.id]?.completed)
+        .reduce((sum, ep) => sum + (ep.durationSeconds || 0), 0);
+    
+    return { total, completed, percentage, completedDuration };
 }
 
 function renderEpisodeItem(episode) {
@@ -321,15 +404,25 @@ function renderEpisodeItem(episode) {
 
 function updateProgressSummary() {
     const totalEpisodes = Object.keys(state.episodes).length;
-    const completedEpisodes = Object.values(state.progress)
-        .filter(p => p.completed).length;
+    const completedEpisodes = Object.keys(state.episodes)
+        .filter(id => state.progress[id]?.completed).length;
+    
+    // Calculate completed hours
+    const completedSeconds = Object.keys(state.episodes)
+        .filter(id => state.progress[id]?.completed)
+        .reduce((sum, id) => sum + (state.episodes[id]?.durationSeconds || 0), 0);
+    const completedHours = completedSeconds / 3600;
     
     const percentage = totalEpisodes > 0 
         ? Math.round((completedEpisodes / totalEpisodes) * 100) 
         : 0;
     
-    elements.progressSummary.querySelector('.progress-text').textContent = 
-        `${completedEpisodes} / ${totalEpisodes} completed`;
+    // Show hours if we have duration data, otherwise just episode count
+    const progressText = state.totalHours > 0
+        ? `${formatHours(completedHours)} / ${formatHours(state.totalHours)} (${completedEpisodes}/${totalEpisodes} episodes)`
+        : `${completedEpisodes} / ${totalEpisodes} completed`;
+    
+    elements.progressSummary.querySelector('.progress-text').textContent = progressText;
     elements.progressFill.style.width = `${percentage}%`;
 }
 
@@ -480,6 +573,16 @@ function formatDuration(seconds) {
     if (!seconds) return '';
     const mins = Math.floor(seconds / 60);
     return `${mins} min`;
+}
+
+function formatHours(hours) {
+    if (!hours || hours < 0.1) return '0h';
+    if (hours < 1) {
+        const mins = Math.round(hours * 60);
+        return `${mins}m`;
+    }
+    // Show one decimal place for hours
+    return `${hours.toFixed(1)}h`;
 }
 
 // ============================================
