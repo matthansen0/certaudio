@@ -184,7 +184,40 @@ def extract_skills_outline(html: str, base_url: str) -> list[SkillDomain]:
             )
         )
 
-    return skill_domains
+    # Deduplicate domains by normalized name (handles dash variants and whitespace)
+    # Keep only the version with the most topics for each domain
+    def normalize_name(name: str) -> str:
+        # Normalize dashes and whitespace
+        import unicodedata
+        normalized = unicodedata.normalize("NFKC", name.lower().strip())
+        # Replace various dashes with standard hyphen
+        for dash in ["\u2010", "\u2011", "\u2012", "\u2013", "\u2014", "\u2015"]:
+            normalized = normalized.replace(dash, "-")
+        return normalized
+
+    best_domains: dict[str, SkillDomain] = {}
+    for domain in skill_domains:
+        key = normalize_name(domain.name)
+        if key not in best_domains or len(domain.topics) > len(best_domains[key].topics):
+            best_domains[key] = domain
+
+    # Filter out domains with no real topics (likely parsing artifacts)
+    # A real topic should not match the domain pattern (contain percentage weight)
+    domain_pattern = re.compile(r"\(\d+[\-\u2010-\u2015]\d+%\)")
+    deduplicated = []
+    for domain in best_domains.values():
+        real_topics = [t for t in domain.topics if not domain_pattern.search(t)]
+        if real_topics:
+            deduplicated.append(
+                SkillDomain(
+                    name=domain.name,
+                    weight=domain.weight,
+                    topics=real_topics,
+                    source_urls=domain.source_urls,
+                )
+            )
+
+    return deduplicated
 
 
 def discover_linked_content(skill_domains: list[SkillDomain]) -> list[str]:

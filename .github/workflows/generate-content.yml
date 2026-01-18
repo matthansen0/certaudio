@@ -232,23 +232,35 @@ jobs:
         env:
           SKILLS_OUTLINE: ${{ steps.discover.outputs.skillsOutline }}
           BATCH_SIZE: ${{ env.EPISODE_BATCH_SIZE }}
+          TOPICS_PER_EPISODE: 5
         run: |
           python3 - <<'PY'
           import json, math, os
           skills_outline = os.environ.get('SKILLS_OUTLINE', '[]')
           batch_size = int(os.environ.get('BATCH_SIZE', '10'))
+          topics_per_ep = int(os.environ.get('TOPICS_PER_EPISODE', '5'))
           skills = json.loads(skills_outline)
           main_skills = [s for s in skills if s.get('topics') and len(s['topics']) > 0]
-          count = len(main_skills)
-          if count == 0:
+          
+          if len(main_skills) == 0:
             raise SystemExit('No main skills discovered (skills with topics). Refusing to continue.')
-          batches = max(1, math.ceil(count / batch_size))
+          
+          # Calculate total episode units (groups of ~5 topics)
+          episode_units = 0
+          for skill in main_skills:
+            n_topics = len(skill.get('topics', []))
+            units_for_skill = max(1, math.ceil(n_topics / topics_per_ep))
+            episode_units += units_for_skill
+          
+          batches = max(1, math.ceil(episode_units / batch_size))
           indices = list(range(batches))
           out_path = os.environ['GITHUB_OUTPUT']
           with open(out_path, 'a', encoding='utf-8') as f:
-            f.write(f"mainSkillCount={count}\n")
+            # mainSkillCount now represents total episode units for proper validation
+            f.write(f"mainSkillCount={episode_units}\n")
             f.write(f"batchIndices={json.dumps(indices)}\n")
-          print(f"Main skills: {count}; batch_size: {batch_size}; batches: {batches}; indices: {indices}")
+          print(f"Domains: {len(main_skills)}; Episode units (~{topics_per_ep} topics each): {episode_units}")
+          print(f"Batch size: {batch_size}; Batches needed: {batches}; Indices: {indices}")
           PY
 
   index-content:

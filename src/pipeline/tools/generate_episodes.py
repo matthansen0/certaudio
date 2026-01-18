@@ -529,7 +529,8 @@ def main():
     parser.add_argument("--audio-format", default="instructional", choices=["instructional", "podcast"])
     parser.add_argument("--skills-outline", required=True, help="JSON skills outline from discover step")
     parser.add_argument("--batch-index", type=int, default=0, help="Batch index for parallel processing")
-    parser.add_argument("--batch-size", type=int, default=10, help="Number of skills per batch")
+    parser.add_argument("--batch-size", type=int, default=10, help="Number of episode units per batch")
+    parser.add_argument("--topics-per-episode", type=int, default=5, help="Target topics per episode for optimal length")
 
     args = parser.parse_args()
 
@@ -543,20 +544,41 @@ def main():
     # Filter to only skills with topics (main skill domains)
     main_skills = [s for s in skills if s.get("topics") and len(s["topics"]) > 0]
 
+    # Expand domains into episode units (groups of topics for ~8-10 min episodes)
+    # Each episode unit = (domain_name, topic_subset, source_urls)
+    episode_units = []
+    for skill in main_skills:
+        domain_name = skill["name"]
+        topics = skill.get("topics", [])
+        source_urls = skill.get("sourceUrls", [])
+        
+        # Split topics into chunks of args.topics_per_episode
+        for chunk_idx in range(0, len(topics), args.topics_per_episode):
+            chunk_topics = topics[chunk_idx:chunk_idx + args.topics_per_episode]
+            episode_units.append({
+                "domain": domain_name,
+                "topics": chunk_topics,
+                "sourceUrls": source_urls,
+                "part": (chunk_idx // args.topics_per_episode) + 1,
+                "total_parts": (len(topics) + args.topics_per_episode - 1) // args.topics_per_episode,
+            })
+
+    print(f"Expanded {len(main_skills)} domains into {len(episode_units)} episode units")
+
     # Calculate batch slice
     start_idx = args.batch_index * args.batch_size
     end_idx = start_idx + args.batch_size
-    batch_skills = main_skills[start_idx:end_idx]
+    batch_units = episode_units[start_idx:end_idx]
 
-    if not batch_skills:
-        print(f"No skills in batch {args.batch_index} (indices {start_idx}-{end_idx})")
-        print(f"Total main skills: {len(main_skills)}")
+    if not batch_units:
+        print(f"No episode units in batch {args.batch_index} (indices {start_idx}-{end_idx})")
+        print(f"Total episode units: {len(episode_units)}")
         return
 
     print(f"\n{'#'*60}")
     print(f"# Episode Generation: {args.certification_id.upper()}")
     print(f"# Format: {args.audio_format}")
-    print(f"# Batch: {args.batch_index} (skills {start_idx+1}-{min(end_idx, len(main_skills))} of {len(main_skills)})")
+    print(f"# Batch: {args.batch_index} (units {start_idx+1}-{min(end_idx, len(episode_units))} of {len(episode_units)})")
     print(f"{'#'*60}")
 
     # Get configuration from environment
@@ -600,22 +622,27 @@ def main():
     jinja_env = Environment(loader=FileSystemLoader(prompts_dir))
 
     # Deterministic episode numbering to support parallel batch generation.
-    # Episode numbers are based on the global index of the skill domain within the
-    # discovered main_skills list.
+    # Episode numbers are based on the global index of the episode unit.
     base_episode_number = start_idx + 1
     print(f"\nBatch base episode number: {base_episode_number}")
 
-    # Process each skill in the batch
+    # Process each episode unit in the batch
     generated_episodes = []
     errors: list[str] = []
-    for i, skill in enumerate(batch_skills):
+    for i, unit in enumerate(batch_units):
         episode_number = base_episode_number + i
+        # Build episode title with part number if multi-part domain
+        if unit["total_parts"] > 1:
+            episode_title = f"{unit['domain']} (Part {unit['part']})"
+        else:
+            episode_title = unit["domain"]
+        
         try:
             episode = process_skill_domain(
                 episode_number=episode_number,
-                skill_domain=skill["name"],
-                skill_topics=skill.get("topics", []),
-                source_urls=skill.get("sourceUrls", []),
+                skill_domain=episode_title,
+                skill_topics=unit["topics"],
+                source_urls=unit.get("sourceUrls", []),
                 certification_id=args.certification_id,
                 audio_format=args.audio_format,
                 search_client=search_client,
@@ -625,14 +652,14 @@ def main():
             )
             generated_episodes.append(episode)
         except Exception as e:
-            msg = f"Error processing skill '{skill.get('name', '<unknown>')}' (episode {episode_number}): {e}"
+            msg = f"Error processing '{episode_title}' (episode {episode_number}): {e}"
             print(f"\n{msg}", file=sys.stderr)
             errors.append(msg)
 
     # Summary
     print(f"\n{'='*60}")
     print(f"BATCH COMPLETE")
-    print(f"Generated {len(generated_episodes)} of {len(batch_skills)} episodes")
+    print(f"Generated {len(generated_episodes)} of {len(batch_units)} episodes")
     for ep in generated_episodes:
         print(f"  - {ep['id']}: {ep['title']} ({ep['durationSeconds']:.0f}s)")
     print(f"{'='*60}")
