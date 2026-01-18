@@ -606,9 +606,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: [discover-content, index-content]
     strategy:
+      fail-fast: false  # Continue other batches even if one fails
       matrix:
         batch: ${{ fromJson(needs.discover-content.outputs.batchIndices) }}
-      max-parallel: 5
+      max-parallel: 3  # Reduce parallelism to avoid rate limits
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
