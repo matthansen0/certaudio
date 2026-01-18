@@ -15,7 +15,8 @@ param cosmosDbDatabaseName string
 param automationPrincipalId string = ''
 param openAiEndpoint string
 param speechEndpoint string
-param searchEndpoint string
+@description('AI Search endpoint - optional since Search is deployed ephemerally during content generation')
+param searchEndpoint string = ''
 param enableB2C bool
 param tags object
 

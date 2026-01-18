@@ -149,6 +149,10 @@ env:
   AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
   EPISODE_BATCH_SIZE: 10
+  # Use pinned suffix or fallback to run_id for resource naming
+  UNIQUE_SUFFIX: ${{ secrets.AZURE_UNIQUE_SUFFIX || github.run_id }}
+  # Location for ephemeral AI Search
+  LOCATION: 'centralus'
 
 # =============================================================================
 # REQUIRED SECRETS (configure in GitHub Settings > Secrets > Actions):
@@ -179,9 +183,112 @@ jobs:
           fi
           echo "✅ All required secrets are configured"
 
+  # =========================================================================
+  # EPHEMERAL AI SEARCH - Deploy on-demand, delete after generation
+  # Saves ~$250/month by not keeping Search running when not generating content
+  # =========================================================================
+  deploy-search:
+    name: Deploy Ephemeral AI Search
+    needs: check-secrets
+    runs-on: ubuntu-latest
+    outputs:
+      searchEndpoint: ${{ steps.deploy.outputs.searchEndpoint }}
+      searchName: ${{ steps.deploy.outputs.searchName }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get automation principal ID
+        id: principal
+        run: |
+          accessToken=$(az account get-access-token \
+            --resource https://management.azure.com \
+            --query accessToken -o tsv)
+          
+          principalId=$(python3 - <<'PY'
+          import os, json, base64
+          token = os.environ.get('ACCESS_TOKEN', '')
+          parts = token.split('.')
+          if len(parts) < 2:
+            print('')
+            raise SystemExit(0)
+          payload = parts[1]
+          payload += '=' * (-len(payload) % 4)
+          data = base64.urlsafe_b64decode(payload.encode('utf-8')).decode('utf-8')
+          claims = json.loads(data)
+          print(claims.get('oid') or claims.get('objectId') or '')
+          PY
+          )
+          echo "principalId=$principalId" >> $GITHUB_OUTPUT
+        env:
+          ACCESS_TOKEN: ${{ steps.principal.outputs.accessToken }}
+
+      - name: Deploy AI Search
+        id: deploy
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            set -euo pipefail
+            
+            # Get principal ID for RBAC
+            accessToken=$(az account get-access-token \
+              --resource https://management.azure.com \
+              --query accessToken -o tsv)
+            
+            principalId=$(python3 - "$accessToken" <<'PY'
+            import sys, json, base64
+            token = sys.argv[1] if len(sys.argv) > 1 else ''
+            parts = token.split('.')
+            if len(parts) < 2:
+              print('')
+              raise SystemExit(0)
+            payload = parts[1]
+            payload += '=' * (-len(payload) % 4)
+            data = base64.urlsafe_b64decode(payload.encode('utf-8')).decode('utf-8')
+            claims = json.loads(data)
+            print(claims.get('oid') or claims.get('objectId') or '')
+            PY
+            )
+            
+            echo "Deploying ephemeral AI Search with principal ID: $principalId"
+            
+            deploymentName="search-ephemeral-${{ github.run_id }}"
+            
+            result=$(az deployment group create \
+              --name "$deploymentName" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --template-file ./infra/modules/search-ephemeral.bicep \
+              --parameters \
+                resourcePrefix="certaudio-dev" \
+                location="$LOCATION" \
+                uniqueSuffix="$UNIQUE_SUFFIX" \
+                automationPrincipalId="$principalId" \
+              --query 'properties.outputs' \
+              -o json)
+            
+            searchEndpoint=$(echo "$result" | jq -r '.searchEndpoint.value')
+            searchName=$(echo "$result" | jq -r '.searchName.value')
+            
+            echo "searchEndpoint=$searchEndpoint" >> $GITHUB_OUTPUT
+            echo "searchName=$searchName" >> $GITHUB_OUTPUT
+            
+            echo "✅ AI Search deployed: $searchName"
+            echo "   Endpoint: $searchEndpoint"
+            
+            # Wait for RBAC to propagate
+            echo "Waiting 30s for RBAC propagation..."
+            sleep 30
+
   discover-content:
     name: Discover Exam Content
-    needs: check-secrets
+    needs: [check-secrets, deploy-search]
     runs-on: ubuntu-latest
     outputs:
       skillsOutline: ${{ steps.discover.outputs.skillsOutline }}
@@ -344,7 +451,7 @@ jobs:
   index-content:
     name: Index Content for RAG
     runs-on: ubuntu-latest
-    needs: discover-content
+    needs: [discover-content, deploy-search]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -380,9 +487,13 @@ jobs:
             out=$(./scripts/get-endpoints.sh "$AZURE_RESOURCE_GROUP")
           fi
 
-          echo "$out" | awk -F= '/^(OPENAI_ENDPOINT|SPEECH_ENDPOINT|SPEECH_REGION|DOCUMENT_INTELLIGENCE_ENDPOINT|SEARCH_ENDPOINT|COSMOS_DB_ENDPOINT|STORAGE_ACCOUNT_NAME)=/ {print $0}' >> "$GITHUB_ENV"
+          # Get endpoints from always-on infra (excludes Search which is ephemeral)
+          echo "$out" | awk -F= '/^(OPENAI_ENDPOINT|SPEECH_ENDPOINT|SPEECH_REGION|DOCUMENT_INTELLIGENCE_ENDPOINT|COSMOS_DB_ENDPOINT|STORAGE_ACCOUNT_NAME)=/ {print $0}' >> "$GITHUB_ENV"
+          
+          # Use Search endpoint from ephemeral deployment
+          echo "SEARCH_ENDPOINT=${{ needs.deploy-search.outputs.searchEndpoint }}" >> "$GITHUB_ENV"
 
-      - name: Ensure Cosmos, Search, Speech, OpenAI, and Storage RBAC for this workflow principal
+      - name: Ensure Cosmos, Speech, OpenAI, and Storage RBAC for this workflow principal
         run: |
           set -euo pipefail
 
@@ -438,45 +549,7 @@ jobs:
             echo "Cosmos SQL RBAC already exists."
           fi
 
-          # --- Azure AI Search RBAC ---
-          searchName=$(echo "$SEARCH_ENDPOINT" | sed -E 's#^https?://([^./]+)\..*$#\1#')
-          if [[ -z "$searchName" ]]; then
-            echo "::error::Could not parse Search service name from SEARCH_ENDPOINT=$SEARCH_ENDPOINT"
-            exit 1
-          fi
-
-          searchId=$(az resource show \
-            --resource-group "$AZURE_RESOURCE_GROUP" \
-            --name "$searchName" \
-            --resource-type "Microsoft.Search/searchServices" \
-            --query id -o tsv)
-
-          if [[ -z "$searchId" ]]; then
-            echo "::error::Could not resolve Search resource ID for $searchName"
-            exit 1
-          fi
-
-          existing=$(az role assignment list \
-            --assignee "$principalObjectId" \
-            --scope "$searchId" \
-            --query "[?roleDefinitionName=='Search Index Data Contributor'] | length(@)" \
-            -o tsv || echo "0")
-
-          if [[ "$existing" == "0" ]]; then
-            echo "Creating Search Index Data Contributor role assignment..."
-            az role assignment create \
-              --assignee-object-id "$principalObjectId" \
-              --assignee-principal-type ServicePrincipal \
-              --role "Search Index Data Contributor" \
-              --scope "$searchId" \
-              --only-show-errors
-
-            # Role assignments can take a short time to propagate to the Search data plane.
-            echo "Waiting 30s for RBAC propagation..."
-            sleep 30
-          else
-            echo "Search RBAC already exists."
-          fi
+          # NOTE: Azure AI Search RBAC is handled in deploy-search job via Bicep
 
           # --- Azure OpenAI RBAC ---
           openAiName=$(echo "$OPENAI_ENDPOINT" | sed -E 's#^https?://([^./]+)\..*$#\1#')
@@ -604,7 +677,7 @@ jobs:
   generate-episodes:
     name: Generate Episodes
     runs-on: ubuntu-latest
-    needs: [discover-content, index-content]
+    needs: [discover-content, deploy-search, index-content]
     strategy:
       fail-fast: false  # Continue other batches even if one fails
       matrix:
@@ -645,7 +718,12 @@ jobs:
             out=$(./scripts/get-endpoints.sh "$AZURE_RESOURCE_GROUP")
           fi
 
-          echo "$out" | awk -F= '/^(OPENAI_ENDPOINT|SPEECH_ENDPOINT|SPEECH_REGION|DOCUMENT_INTELLIGENCE_ENDPOINT|SEARCH_ENDPOINT|COSMOS_DB_ENDPOINT|STORAGE_ACCOUNT_NAME)=/ {print $0}' >> "$GITHUB_ENV"
+          # Get endpoints from always-on infra (excludes Search which is ephemeral)
+          echo "$out" | awk -F= '/^(OPENAI_ENDPOINT|SPEECH_ENDPOINT|SPEECH_REGION|DOCUMENT_INTELLIGENCE_ENDPOINT|COSMOS_DB_ENDPOINT|STORAGE_ACCOUNT_NAME)=/ {print $0}' >> "$GITHUB_ENV"
+          
+          # Use Search endpoint from ephemeral deployment
+          echo "SEARCH_ENDPOINT=${{ needs.deploy-search.outputs.searchEndpoint }}" >> "$GITHUB_ENV"
+
       - name: Generate episode batch
         env:
           CERTIFICATION_ID: ${{ inputs.certificationId }}
@@ -816,3 +894,62 @@ jobs:
           echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| Certification | ${{ inputs.certificationId }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Format | ${{ inputs.audioFormat }} |" >> $GITHUB_STEP_SUMMARY
+
+  # =========================================================================
+  # CLEANUP - Delete ephemeral AI Search to save ~$250/month
+  # Always runs, even if generation failed, to avoid leaving resources behind
+  # =========================================================================
+  cleanup-search:
+    name: Delete Ephemeral AI Search
+    needs: [deploy-search, generate-episodes, finalize]
+    if: always() && needs.deploy-search.outputs.searchName != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Delete AI Search service
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            set -euo pipefail
+            
+            searchName="${{ needs.deploy-search.outputs.searchName }}"
+            
+            echo "Deleting ephemeral AI Search: $searchName"
+            
+            # Check if it exists first
+            exists=$(az search service show \
+              --name "$searchName" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query name -o tsv 2>/dev/null || echo "")
+            
+            if [[ -n "$exists" ]]; then
+              az search service delete \
+                --name "$searchName" \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
+                --yes
+              
+              echo "✅ AI Search deleted: $searchName"
+              echo "   Monthly savings: ~\$250"
+            else
+              echo "⚠️ AI Search not found (may have been deleted already): $searchName"
+            fi
+      
+      - name: Summary
+        run: |
+          echo "## 🧹 Cleanup Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Ephemeral AI Search service deleted to save ~\$250/month." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The following always-on resources remain:" >> $GITHUB_STEP_SUMMARY
+          echo "- Storage Account (audio files)" >> $GITHUB_STEP_SUMMARY
+          echo "- Cosmos DB (episode metadata)" >> $GITHUB_STEP_SUMMARY
+          echo "- Azure Functions (API)" >> $GITHUB_STEP_SUMMARY
+          echo "- Static Web App (website)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Estimated monthly cost: ~\$5-10" >> $GITHUB_STEP_SUMMARY

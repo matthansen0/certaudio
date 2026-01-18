@@ -20,7 +20,7 @@ param automationPrincipalId string = ''
 var openAiName = '${resourcePrefix}-openai-${uniqueSuffix}'
 var speechName = '${resourcePrefix}-speech-${uniqueSuffix}'
 var docIntelName = '${resourcePrefix}-docintel-${uniqueSuffix}'
-var searchName = '${resourcePrefix}-search-${uniqueSuffix}'
+// Note: searchName removed - AI Search is now deployed separately as ephemeral resource
 
 // ============================================================================
 // RESOURCES
@@ -119,40 +119,8 @@ resource documentIntelligence 'Microsoft.CognitiveServices/accounts@2024-04-01-p
   }
 }
 
-// Azure AI Search
-resource search 'Microsoft.Search/searchServices@2024-03-01-preview' = {
-  name: searchName
-  location: location
-  tags: tags
-  sku: {
-    name: 'basic'
-  }
-  properties: {
-    replicaCount: 1
-    partitionCount: 1
-    hostingMode: 'default'
-    publicNetworkAccess: 'enabled'
-    semanticSearch: 'free'
-    // Enable RBAC authentication for data-plane operations (index management, document upload)
-    authOptions: {
-      aadOrApiKey: {
-        aadAuthFailureMode: 'http401WithBearerChallenge'
-      }
-    }
-  }
-}
-
-// Data-plane RBAC: allow automation principal to create/update indexes and upload documents.
-resource searchIndexDataContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (automationPrincipalId != '') {
-  name: guid(search.id, automationPrincipalId, 'Search Index Data Contributor')
-  scope: search
-  properties: {
-    // Built-in role: Search Index Data Contributor
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '8ebe5a00-799e-43f5-93ac-243d3dce84a7')
-    principalId: automationPrincipalId
-    principalType: 'ServicePrincipal'
-  }
-}
+// NOTE: Azure AI Search is deployed separately as an ephemeral resource
+// during content generation to save ~$250/month. See search-ephemeral.bicep.
 
 // Data-plane RBAC: allow automation principal to call OpenAI embeddings and completions.
 resource openAiUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (automationPrincipalId != '') {
@@ -194,6 +162,5 @@ output documentIntelligenceName string = documentIntelligence.name
 output documentIntelligenceEndpoint string = documentIntelligence.properties.endpoint
 output documentIntelligenceId string = documentIntelligence.id
 
-output searchName string = search.name
-output searchEndpoint string = 'https://${search.name}.search.windows.net'
-output searchId string = search.id
+// Search endpoint placeholder - actual value comes from ephemeral deployment
+output searchEndpoint string = ''
