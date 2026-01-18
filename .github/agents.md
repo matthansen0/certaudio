@@ -4,6 +4,12 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 
 ## Recent Implementation Notes (Post v1 Plan)
 
+- **Deep Discovery Mode**: Content generation now supports `discoveryMode=deep` which uses the Microsoft Learn Catalog API to discover all learning paths, modules, and units for a certification. This provides comprehensive coverage (~24-30 hours for DP-700) vs the basic skills outline scraping.
+- **Hierarchy API for URLs**: Unit URLs are fetched from `/api/hierarchy/modules/{uid}` because the catalog API doesn't provide actual URLs, and URL patterns can be non-sequential (e.g., `3b-optimize` instead of `4-optimize`).
+- **Voice Selection**: Generate Content workflow allows choosing voices for instructional, podcast host, and podcast expert formats from 11 Azure Neural voices.
+- **Episode Resumption**: Episodes that already exist in Cosmos DB are skipped by default. Use `forceRegenerate=true` to regenerate all episodes (e.g., after changing voices).
+- **Longer Episodes**: Target episode length is 2,500-3,500 words (~20-25 minutes) for comprehensive coverage.
+- **No Markdown in Narration**: Prompts explicitly prohibit markdown to prevent TTS from saying "hashtag" for headers.
 - **Keyless Storage (policy-friendly)**: The platform runs with `allowSharedKeyAccess=false` on storage accounts and uses **Managed Identity / Entra ID** + **data-plane RBAC** instead of account keys.
 - **Functions hosting**: Azure Functions is deployed on **Elastic Premium (EP1)** to avoid Linux Consumption deployment/runtime flows that implicitly depend on storage keys in some locked-down tenants.
 - **Cosmos SQL RBAC scope**: Cosmos DB SQL role assignment scope must be the fully-qualified DB scope `${cosmosDb.id}/dbs/${cosmosDbDatabaseName}`.
@@ -14,7 +20,7 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 - **RG cleanup helper**: [scripts/cleanup-rg.sh](../scripts/cleanup-rg.sh) can delete old tagged deployment sets while keeping the active suffix.
 - **Dynamic certification list**: Frontend dropdown is populated from the API (`GET /api/certifications`) with a safe fallback that includes `dp-700`.
 - **Auto-resolved endpoints**: Generate Content workflow no longer requires endpoint secrets; it resolves them at runtime via [scripts/get-endpoints.sh](../scripts/get-endpoints.sh), which picks the newest (or pinned) deployment suffix.
-- **Workflow triggers**: Deploy Infrastructure only triggers on `infra/**` or workflow file changes—**not** on `src/**`—so you can iterate on code without full redeployments. Use manual `workflow_dispatch` when needed.
+- **Workflow triggers**: Deploy Infrastructure triggers on `infra/**`, `src/web/**`, `src/functions/**`, or workflow file changes. Content generation is manual via `workflow_dispatch`.
 
 ## Agents
 
@@ -35,8 +41,10 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 
 **Key Files**:
 - `src/pipeline/flow.dag.yaml` - PromptFlow orchestration
-- `src/pipeline/tools/discover_exam_content.py` - Exam page scraping
+- `src/pipeline/tools/discover_exam_content.py` - Exam page scraping (skills mode)
+- `src/pipeline/tools/deep_discover.py` - Deep discovery via Catalog API
 - `src/pipeline/tools/check_content_delta.py` - Content change detection
+- `src/pipeline/tools/generate_episodes.py` - Episode generation with retry/skip logic
 - `src/pipeline/tools/synthesize_audio.py` - Azure AI Speech synthesis
 - `src/pipeline/tools/upload_to_blob.py` - Blob storage upload
 - `src/pipeline/prompts/*` - LLM prompt templates
@@ -45,9 +53,10 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 - Uses Azure AI Document Intelligence for content extraction
 - Uses Azure AI Search for RAG indexing and retrieval
 - Uses Azure OpenAI GPT-4o for script generation
-- Uses Azure AI Speech with `en-US-GuyNeural` (instructional) or dual-voice (podcast)
-- Target episode length: ~10 minutes (~1,200-1,500 words)
+- Uses Azure AI Speech with configurable neural voices (default: `en-US-AndrewNeural`)
+- Target episode length: ~20-25 minutes (~2,500-3,500 words)
 - SSML includes 500ms pauses after key concepts, -8% rate for comprehension
+- Retry with exponential backoff for OpenAI rate limits (429 errors)
 
 **Auth & Access (no keys)**:
 - GitHub Actions uses OIDC via `azure/login@v2`; Python tools use `DefaultAzureCredential()`.
@@ -63,7 +72,10 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 **Description**: Audio player web interface with progress tracking.
 
 **Responsibilities**:
-- Display episode list grouped by skill domain
+- Display episode list grouped by skill domain (exam outline sections)
+- Show course-level metrics: total content hours, completed hours, percentage
+- Show domain-level metrics: episode count, progress, duration per section
+- Collapsible domain sections for navigation
 - HTML5 audio player with playback speed control
 - Track listening progress (completion, position)
 - Sync progress to Cosmos DB (authenticated) or localStorage (anonymous)

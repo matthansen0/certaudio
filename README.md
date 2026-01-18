@@ -176,6 +176,11 @@ Run the **Generate Content** workflow to create audio episodes.
 |-----------|---------|-------------|
 | `certificationId` | `ai-102` | Microsoft certification ID (see supported list above) |
 | `audioFormat` | `instructional` | `instructional` or `podcast` |
+| `discoveryMode` | `skills` | `skills` (outline only) or `deep` (full learning paths) |
+| `instructionalVoice` | `en-US-AndrewNeural` | Voice for instructional format |
+| `podcastHostVoice` | `en-US-BrianNeural` | Host voice for podcast format |
+| `podcastExpertVoice` | `en-US-AvaNeural` | Expert voice for podcast format |
+| `forceRegenerate` | `false` | Regenerate episodes that already exist |
 | `enableB2C` | `false` | Enable Azure AD B2C authentication |
 | `location` | `canadacentral` | Azure region |
 
@@ -200,18 +205,27 @@ Run the **Generate Content** workflow to create audio episodes.
 
 ## Audio Generation
 
+### Discovery Modes
+
+- **Skills Mode** (default): Scrapes exam skills outline page for topics
+- **Deep Mode**: Uses Microsoft Learn Catalog API to discover all learning paths, modules, and units for comprehensive coverage (~24-30 hours for DP-700)
+
 ### Instructional Format
 
-- Single voice: `en-US-GuyNeural` with `newscast-casual` style
+- Single voice: Configurable (default `en-US-AndrewNeural`)
 - Research-backed prosody: -8% rate, 500ms pauses after key concepts
-- ~10 minute episodes targeting 1,200-1,500 words
+- ~20-25 minute episodes targeting 2,500-3,500 words
 
 ### Podcast Format
 
 - Two voices for natural dialogue:
-  - Host: `en-US-GuyNeural` (friendly, conversational)
-  - Expert: `en-US-TonyNeural` (authoritative, detailed)
+  - Host: Configurable (default `en-US-BrianNeural`) - friendly, conversational
+  - Expert: Configurable (default `en-US-AvaNeural`) - authoritative, detailed
 - Back-and-forth Q&A style
+
+### Voice Options
+
+Available voices: `en-US-AndrewNeural`, `en-US-BrianNeural`, `en-US-AvaNeural`, `en-US-EmmaNeural`, `en-US-JennyNeural`, `en-US-GuyNeural`, `en-US-AriaNeural`, `en-US-DavisNeural`, `en-US-TonyNeural`, `en-US-SaraNeural`, `en-US-JaneNeural`
 
 ## Content Updates
 
