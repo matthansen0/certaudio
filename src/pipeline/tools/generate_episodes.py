@@ -17,6 +17,7 @@ import json
 import os
 import sys
 import re
+import time
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
 from pathlib import Path
@@ -26,12 +27,42 @@ from azure.identity import DefaultAzureCredential
 from azure.search.documents import SearchClient
 from azure.search.documents.models import VectorizedQuery
 from jinja2 import Environment, FileSystemLoader
-from openai import AzureOpenAI
+from openai import AzureOpenAI, RateLimitError
 
 # Import sibling tools
 from .synthesize_audio import synthesize_audio, synthesize_audio_segments
 from .upload_to_blob import upload_to_blob
 from .save_episode import save_episode
+
+
+def call_openai_with_retry(openai_client: AzureOpenAI, max_retries: int = 5, **kwargs):
+    """
+    Call OpenAI API with exponential backoff retry for rate limits.
+    
+    Args:
+        openai_client: The Azure OpenAI client
+        max_retries: Maximum number of retry attempts
+        **kwargs: Arguments to pass to chat.completions.create
+    
+    Returns:
+        The API response
+    """
+    base_delay = 2  # Start with 2 second delay
+    
+    for attempt in range(max_retries):
+        try:
+            return openai_client.chat.completions.create(**kwargs)
+        except RateLimitError as e:
+            if attempt == max_retries - 1:
+                raise  # Re-raise on final attempt
+            
+            # Extract retry-after if available, otherwise use exponential backoff
+            delay = base_delay * (2 ** attempt)  # 2, 4, 8, 16, 32 seconds
+            print(f"  Rate limit hit, retrying in {delay}s (attempt {attempt + 1}/{max_retries})...")
+            time.sleep(delay)
+    
+    # Should not reach here, but just in case
+    raise Exception("Max retries exceeded for OpenAI API call")
 
 
 def get_embedding(text: str, openai_client: AzureOpenAI) -> list[float]:
@@ -138,7 +169,8 @@ def generate_narration(
     system_prompt = parts[0].replace("system:", "").strip()
     user_prompt = parts[1].strip() if len(parts) > 1 else ""
 
-    response = openai_client.chat.completions.create(
+    response = call_openai_with_retry(
+        openai_client,
         model="gpt-4o",
         messages=[
             {"role": "system", "content": system_prompt},
@@ -179,7 +211,8 @@ def generate_ssml(
     system_prompt = parts[0].replace("system:", "").strip()
     user_prompt = parts[1].strip() if len(parts) > 1 else ""
 
-    response = openai_client.chat.completions.create(
+    response = call_openai_with_retry(
+        openai_client,
         model="gpt-4o",
         messages=[
             {"role": "system", "content": system_prompt},
