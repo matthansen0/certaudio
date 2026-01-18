@@ -280,16 +280,15 @@ async function syncProgressToServer() {
 // ============================================
 
 function renderEpisodeList() {
-    const html = Object.entries(state.domains)
-        .map(([domain, episodes]) => `
-            <div class="domain-group">
-                <div class="domain-title">${domain}</div>
-                ${episodes.map(ep => renderEpisodeItem(ep)).join('')}
-            </div>
-        `)
-        .join('');
+    // Flatten and sort all episodes by sequence number for proper ordering
+    const allEpisodes = Object.values(state.episodes)
+        .sort((a, b) => a.sequenceNumber - b.sequenceNumber);
     
-    elements.episodeList.innerHTML = html || '<div class="loading">No episodes found.</div>';
+    const html = allEpisodes.length > 0
+        ? allEpisodes.map(ep => renderEpisodeItem(ep)).join('')
+        : '<div class="loading">No episodes found.</div>';
+    
+    elements.episodeList.innerHTML = html;
     
     // Add click handlers
     document.querySelectorAll('.episode-item').forEach(item => {

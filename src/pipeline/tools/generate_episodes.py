@@ -195,8 +195,6 @@ def build_ssml_from_narration(narration: str, audio_format: str) -> str:
     def _normalize_text(text: str) -> str:
         # Remove speaker markers if they appear in instructional.
         text = text.replace("[HOST]", "").replace("[EXPERT]", "")
-        # Normalize pause markers.
-        text = text.replace("[PAUSE]", "<break time=\"500ms\"/>")
         # Convert blank lines into slightly longer pauses.
         lines = [ln.rstrip() for ln in text.splitlines()]
         out_parts: list[str] = []
@@ -204,7 +202,11 @@ def build_ssml_from_narration(narration: str, audio_format: str) -> str:
             if not ln.strip():
                 out_parts.append('<break time="300ms"/>')
                 continue
-            out_parts.append(escape(ln))
+            # Escape the line FIRST to handle special characters, then replace [PAUSE]
+            escaped_ln = escape(ln)
+            # Now convert [PAUSE] markers to SSML break tags (after escaping)
+            escaped_ln = escaped_ln.replace("[PAUSE]", '<break time="500ms"/>')
+            out_parts.append(escaped_ln)
             out_parts.append('<break time="200ms"/>')
         return " ".join(out_parts).strip()
 
