@@ -5,12 +5,13 @@ concurrency:
   cancel-in-progress: true
 
 on:
-  # Only triggers on infra changes or manual dispatch - NOT on src/** changes.
-  # Use workflow_dispatch to manually deploy after code changes if needed.
+  # Triggers on infra changes, SWA/Functions code changes, or manual dispatch
   push:
     branches: [main]
     paths:
       - 'infra/**'
+      - 'src/web/**'
+      - 'src/functions/**'
       - '.github/workflows/deploy-infra.yml'
   workflow_dispatch:
     inputs:
