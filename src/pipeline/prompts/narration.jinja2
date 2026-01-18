@@ -28,9 +28,10 @@ Guidelines:
 {% endif %}
 
 ## Content Requirements
-- Target length: 1,200-1,500 words (approximately 10 minutes of audio)
-- Cover ALL topics provided - do not skip any
-- If content would exceed 10 minutes, indicate [CONTINUE IN NEXT EPISODE] and stop at a natural break
+- Target length: 2,500-3,500 words (approximately 20-25 minutes of audio)
+- Cover ALL topics provided comprehensively - do not skip or summarize excessively
+- Include detailed explanations, multiple examples, and step-by-step walkthroughs
+- Use the full retrieved documentation content - don't leave out important details
 - Include specific Azure service names, API endpoints, and configuration details
 - Reference official Microsoft documentation patterns
 - Highlight exam-relevant information with phrases like "For the exam, remember that..."
@@ -68,10 +69,12 @@ user:
 ---
 
 Generate the narration script now. Remember:
-- Cover all listed topics thoroughly
-- Use the retrieved content as your authoritative source
-- Target 1,200-1,500 words
+- Cover all listed topics thoroughly with full detail
+- Use the retrieved content as your authoritative source - include specific details
+- Target 2,500-3,500 words for comprehensive coverage
 - Include [PAUSE] markers after key concepts
+- DO NOT use any markdown formatting (no # headers, no ** bold, no * bullets)
+- Write in plain prose suitable for audio narration
 {% if audio_format == "podcast" %}
 - Use [HOST] and [EXPERT] markers for speaker changes
 {% endif %}

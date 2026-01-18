@@ -52,6 +52,13 @@ Convert the following narration to SSML:
 
 Audio Format: {{ audio_format }}
 
+IMPORTANT: Before converting, strip ALL markdown formatting from the narration:
+- Remove # ## ### headers (do NOT say "hashtag")
+- Remove ** bold markers
+- Remove * bullet markers  
+- Remove ``` code blocks
+- Convert any markdown structure to natural spoken prose
+
 Generate complete, valid SSML that:
 1. Opens with proper `<speak>` element with all namespaces
 2. Uses the correct voice(s) for the format
