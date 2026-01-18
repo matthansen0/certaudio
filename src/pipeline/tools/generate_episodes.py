@@ -220,9 +220,9 @@ def build_ssml_from_narration(narration: str, audio_format: str) -> str:
 
     if audio_format == "podcast":
         # Two voices, switched by [HOST]/[EXPERT] markers.
-        # Using HD voices for more natural sound
-        host_voice = "en-US-Andrew:DragonHDLatestNeural"
-        expert_voice = "en-US-Brian:DragonHDLatestNeural"
+        # Using standard neural voices (widely available in all regions)
+        host_voice = "en-US-AndrewNeural"
+        expert_voice = "en-US-BrianNeural"
 
         # Split while keeping markers.
         tokens = re.split(r"(\[HOST\]|\[EXPERT\])", narration)
@@ -247,11 +247,11 @@ def build_ssml_from_narration(narration: str, audio_format: str) -> str:
         ET.fromstring(ssml)  # validate
         return ssml
 
-    # Instructional: single voice using HD neural voice for natural sound.
-    # DragonHD voices auto-adapt tone based on content, so we use lighter SSML styling.
-    voice = "en-US-Andrew:DragonHDLatestNeural"
+    # Instructional: single voice using standard neural voice.
+    # These voices are available in all Azure regions.
+    voice = "en-US-AndrewNeural"
     inner = _normalize_text(narration)
-    # HD voices handle prosody well on their own; just apply a slight rate reduction for clarity
+    # Apply slight rate reduction for clarity and comprehension
     inner = f'<prosody rate="-5%">{inner}</prosody>'
     ssml = speak_open + f'<voice name="{voice}">{inner}</voice>' + speak_close
     ET.fromstring(ssml)  # validate
@@ -285,12 +285,12 @@ def sanitize_ssml(ssml: str, audio_format: str) -> str:
             flags=re.IGNORECASE,
         )
 
-    allowed_voices = {"en-US-Andrew:DragonHDLatestNeural", "en-US-GuyNeural"}
+    allowed_voices = {"en-US-AndrewNeural", "en-US-GuyNeural"}
     if audio_format == "podcast":
-        allowed_voices = {"en-US-Andrew:DragonHDLatestNeural", "en-US-Brian:DragonHDLatestNeural", "en-US-GuyNeural", "en-US-TonyNeural"}
+        allowed_voices = {"en-US-AndrewNeural", "en-US-BrianNeural", "en-US-GuyNeural", "en-US-TonyNeural"}
 
-    # Replace any unexpected voice with the default HD voice.
-    default_voice = "en-US-Andrew:DragonHDLatestNeural"
+    # Replace any unexpected voice with the default neural voice.
+    default_voice = "en-US-AndrewNeural"
 
     def _voice_repl(match: re.Match) -> str:
         prefix = match.group(1)
