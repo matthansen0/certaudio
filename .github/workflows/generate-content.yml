@@ -82,6 +82,55 @@ on:
           - instructional
           - podcast
         default: 'instructional'
+      instructionalVoice:
+        description: 'Voice for instructional format (https://speech.microsoft.com/portal/voicegallery)'
+        required: false
+        type: choice
+        options:
+          - en-US-AndrewNeural      # Male, warm and professional
+          - en-US-BrianNeural       # Male, conversational
+          - en-US-GuyNeural         # Male, newscast style
+          - en-US-DavisNeural       # Male, calm and clear
+          - en-US-JasonNeural       # Male, friendly
+          - en-US-TonyNeural        # Male, expressive
+          - en-US-AvaNeural         # Female, warm and engaging
+          - en-US-EmmaNeural        # Female, professional
+          - en-US-JennyNeural       # Female, conversational
+          - en-US-AriaNeural        # Female, newscast style
+          - en-US-SaraNeural        # Female, friendly
+        default: 'en-US-AndrewNeural'
+      podcastHostVoice:
+        description: 'Host voice for podcast format'
+        required: false
+        type: choice
+        options:
+          - en-US-AndrewNeural
+          - en-US-BrianNeural
+          - en-US-GuyNeural
+          - en-US-DavisNeural
+          - en-US-JasonNeural
+          - en-US-TonyNeural
+          - en-US-AvaNeural
+          - en-US-EmmaNeural
+          - en-US-JennyNeural
+          - en-US-AriaNeural
+        default: 'en-US-GuyNeural'
+      podcastExpertVoice:
+        description: 'Expert voice for podcast format'
+        required: false
+        type: choice
+        options:
+          - en-US-AndrewNeural
+          - en-US-BrianNeural
+          - en-US-GuyNeural
+          - en-US-DavisNeural
+          - en-US-JasonNeural
+          - en-US-TonyNeural
+          - en-US-AvaNeural
+          - en-US-EmmaNeural
+          - en-US-JennyNeural
+          - en-US-AriaNeural
+        default: 'en-US-TonyNeural'
       examPageUrl:
         description: 'Override exam page URL (optional, auto-discovered if empty)'
         required: false
@@ -595,6 +644,9 @@ jobs:
         env:
           CERTIFICATION_ID: ${{ inputs.certificationId }}
           AUDIO_FORMAT: ${{ inputs.audioFormat }}
+          INSTRUCTIONAL_VOICE: ${{ inputs.instructionalVoice }}
+          PODCAST_HOST_VOICE: ${{ inputs.podcastHostVoice }}
+          PODCAST_EXPERT_VOICE: ${{ inputs.podcastExpertVoice }}
           SKILLS_OUTLINE: ${{ needs.discover-content.outputs.skillsOutline }}
           BATCH_INDEX: ${{ matrix.batch }}
         run: |
@@ -602,6 +654,9 @@ jobs:
           python3 -m tools.generate_episodes \
             --certification-id "$CERTIFICATION_ID" \
             --audio-format "$AUDIO_FORMAT" \
+            --instructional-voice "$INSTRUCTIONAL_VOICE" \
+            --podcast-host-voice "$PODCAST_HOST_VOICE" \
+            --podcast-expert-voice "$PODCAST_EXPERT_VOICE" \
             --skills-outline "$SKILLS_OUTLINE" \
             --batch-index "$BATCH_INDEX" \
             --batch-size "$EPISODE_BATCH_SIZE"

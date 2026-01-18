@@ -156,13 +156,21 @@ def generate_ssml(
     audio_format: str,
     openai_client: AzureOpenAI,
     jinja_env: Environment,
+    instructional_voice: str = "en-US-AndrewNeural",
+    podcast_host_voice: str = "en-US-GuyNeural",
+    podcast_expert_voice: str = "en-US-TonyNeural",
 ) -> str:
     """Convert narration script to SSML."""
     # LLM-generated SSML has proven brittle (Speech rejects it with SSML parsing errors).
     # Default to deterministic SSML generation; keep LLM path for experimentation.
     use_llm = os.environ.get("USE_LLM_SSML", "false").lower() == "true"
     if not use_llm:
-        return build_ssml_from_narration(narration, audio_format)
+        return build_ssml_from_narration(
+            narration, audio_format,
+            instructional_voice=instructional_voice,
+            podcast_host_voice=podcast_host_voice,
+            podcast_expert_voice=podcast_expert_voice,
+        )
 
     template = jinja_env.get_template("ssml.jinja2")
     prompt = template.render(narration=narration, audio_format=audio_format)
@@ -189,7 +197,13 @@ def generate_ssml(
     return sanitize_ssml(ssml, audio_format)
 
 
-def build_ssml_from_narration(narration: str, audio_format: str) -> str:
+def build_ssml_from_narration(
+    narration: str,
+    audio_format: str,
+    instructional_voice: str = "en-US-AndrewNeural",
+    podcast_host_voice: str = "en-US-GuyNeural",
+    podcast_expert_voice: str = "en-US-TonyNeural",
+) -> str:
     """Generate conservative, Speech-compatible SSML from plain narration text."""
 
     def _normalize_text(text: str) -> str:
@@ -220,9 +234,8 @@ def build_ssml_from_narration(narration: str, audio_format: str) -> str:
 
     if audio_format == "podcast":
         # Two voices, switched by [HOST]/[EXPERT] markers.
-        # Using standard neural voices (widely available in all regions)
-        host_voice = "en-US-AndrewNeural"
-        expert_voice = "en-US-BrianNeural"
+        host_voice = podcast_host_voice
+        expert_voice = podcast_expert_voice
 
         # Split while keeping markers.
         tokens = re.split(r"(\[HOST\]|\[EXPERT\])", narration)
@@ -247,9 +260,8 @@ def build_ssml_from_narration(narration: str, audio_format: str) -> str:
         ET.fromstring(ssml)  # validate
         return ssml
 
-    # Instructional: single voice using standard neural voice.
-    # These voices are available in all Azure regions.
-    voice = "en-US-AndrewNeural"
+    # Instructional: single voice using the selected neural voice.
+    voice = instructional_voice
     inner = _normalize_text(narration)
     # Apply slight rate reduction for clarity and comprehension
     inner = f'<prosody rate="-5%">{inner}</prosody>'
@@ -258,7 +270,13 @@ def build_ssml_from_narration(narration: str, audio_format: str) -> str:
     return ssml
 
 
-def sanitize_ssml(ssml: str, audio_format: str) -> str:
+def sanitize_ssml(
+    ssml: str,
+    audio_format: str,
+    instructional_voice: str = "en-US-AndrewNeural",
+    podcast_host_voice: str = "en-US-GuyNeural",
+    podcast_expert_voice: str = "en-US-TonyNeural",
+) -> str:
     ssml_out = ssml.strip()
 
     # Remove ASCII control chars not allowed in XML.
@@ -285,12 +303,13 @@ def sanitize_ssml(ssml: str, audio_format: str) -> str:
             flags=re.IGNORECASE,
         )
 
-    allowed_voices = {"en-US-AndrewNeural", "en-US-GuyNeural"}
+    # Allow the user-selected voices plus some common fallbacks
+    allowed_voices = {instructional_voice, "en-US-GuyNeural", "en-US-AndrewNeural"}
     if audio_format == "podcast":
-        allowed_voices = {"en-US-AndrewNeural", "en-US-BrianNeural", "en-US-GuyNeural", "en-US-TonyNeural"}
+        allowed_voices = {podcast_host_voice, podcast_expert_voice, "en-US-GuyNeural", "en-US-TonyNeural", "en-US-AndrewNeural", "en-US-BrianNeural"}
 
     # Replace any unexpected voice with the default neural voice.
-    default_voice = "en-US-AndrewNeural"
+    default_voice = instructional_voice
 
     def _voice_repl(match: re.Match) -> str:
         prefix = match.group(1)
@@ -369,6 +388,9 @@ def process_skill_domain(
     openai_client: AzureOpenAI,
     cosmos_client: CosmosClient,
     jinja_env: Environment,
+    instructional_voice: str = "en-US-AndrewNeural",
+    podcast_host_voice: str = "en-US-GuyNeural",
+    podcast_expert_voice: str = "en-US-TonyNeural",
 ) -> dict:
     """Process a single skill domain and generate an episode."""
     print(f"\n{'='*60}")
@@ -409,6 +431,9 @@ def process_skill_domain(
         audio_format=audio_format,
         openai_client=openai_client,
         jinja_env=jinja_env,
+        instructional_voice=instructional_voice,
+        podcast_host_voice=podcast_host_voice,
+        podcast_expert_voice=podcast_expert_voice,
     )
     print(f"  - SSML length: {len(ssml)} characters")
 
@@ -527,6 +552,12 @@ def main():
     parser = argparse.ArgumentParser(description="Generate audio episodes for certification")
     parser.add_argument("--certification-id", required=True, help="Certification ID (e.g., dp-700)")
     parser.add_argument("--audio-format", default="instructional", choices=["instructional", "podcast"])
+    parser.add_argument("--instructional-voice", default="en-US-AndrewNeural", 
+                        help="Voice for instructional format")
+    parser.add_argument("--podcast-host-voice", default="en-US-GuyNeural",
+                        help="Host voice for podcast format")
+    parser.add_argument("--podcast-expert-voice", default="en-US-TonyNeural",
+                        help="Expert voice for podcast format")
     parser.add_argument("--skills-outline", required=True, help="JSON skills outline from discover step")
     parser.add_argument("--batch-index", type=int, default=0, help="Batch index for parallel processing")
     parser.add_argument("--batch-size", type=int, default=10, help="Number of episode units per batch")
@@ -649,6 +680,9 @@ def main():
                 openai_client=openai_client,
                 cosmos_client=cosmos_client,
                 jinja_env=jinja_env,
+                instructional_voice=args.instructional_voice,
+                podcast_host_voice=args.podcast_host_voice,
+                podcast_expert_voice=args.podcast_expert_voice,
             )
             generated_episodes.append(episode)
         except Exception as e:
