@@ -453,6 +453,10 @@ def result_to_dict(result: DeepDiscoveryResult) -> dict:
     
     Output includes both detailed structure AND workflow-compatible format
     (skillsOutline, sourceUrls) for use with generate-content.yml workflow.
+    
+    Field names match discover_exam_content.py format:
+    - skill["name"] (not "skillName")
+    - skill["weight"] (not "weightPercentage")
     """
     # Build skills outline from learning paths (workflow-compatible format)
     # Each module becomes a "skill" and each unit becomes a "topic"
@@ -462,21 +466,18 @@ def result_to_dict(result: DeepDiscoveryResult) -> dict:
     for path in result.learning_paths:
         for module in path.modules:
             skill = {
-                "skillName": module.title,
-                "weightPercentage": None,  # Deep discovery doesn't have weights
+                "name": module.title,  # Match discover_exam_content format
+                "weight": None,  # Deep discovery doesn't have weights
                 "learningPath": path.title,
-                "topics": []
+                "topics": [],
+                "sourceUrls": []  # Per-skill source URLs
             }
             
             for unit in module.units:
-                skill["topics"].append({
-                    "topicName": unit.title,
-                    "content": unit.content,
-                    "wordCount": unit.word_count,
-                    "url": unit.url
-                })
+                skill["topics"].append(unit.title)  # Just the topic name string
                 if unit.url:
                     source_urls.add(unit.url)
+                    skill["sourceUrls"].append(unit.url)
             
             skills_outline.append(skill)
     
