@@ -40,6 +40,8 @@ const elements = {
     episodeList: document.getElementById('episodeList'),
     progressSummary: document.getElementById('progressSummary'),
     progressFill: document.getElementById('progressFill'),
+    totalContentTime: document.getElementById('totalContentTime'),
+    completedTime: document.getElementById('completedTime'),
     episodeTitle: document.getElementById('episodeTitle'),
     episodeDomain: document.getElementById('episodeDomain'),
     episodeTopics: document.getElementById('episodeTopics'),
@@ -417,12 +419,22 @@ function updateProgressSummary() {
         ? Math.round((completedEpisodes / totalEpisodes) * 100) 
         : 0;
     
-    // Show hours if we have duration data, otherwise just episode count
-    const progressText = state.totalHours > 0
-        ? `${formatHours(completedHours)} / ${formatHours(state.totalHours)} (${completedEpisodes}/${totalEpisodes} episodes)`
-        : `${completedEpisodes} / ${totalEpisodes} completed`;
+    // Update total content time
+    if (elements.totalContentTime) {
+        elements.totalContentTime.textContent = state.totalHours > 0
+            ? `${formatHours(state.totalHours)} (${totalEpisodes} episodes)`
+            : `${totalEpisodes} episodes`;
+    }
     
-    elements.progressSummary.querySelector('.progress-text').textContent = progressText;
+    // Update completed time
+    if (elements.completedTime) {
+        elements.completedTime.textContent = state.totalHours > 0
+            ? `${formatHours(completedHours)} (${completedEpisodes} episodes)`
+            : `${completedEpisodes} episodes`;
+    }
+    
+    // Update progress bar and percentage
+    elements.progressSummary.querySelector('.progress-text').textContent = `${percentage}% complete`;
     elements.progressFill.style.width = `${percentage}%`;
 }
 

@@ -43,11 +43,21 @@
             <aside class="sidebar" id="sidebar">
                 <div class="sidebar-header">
                     <h2>Episodes</h2>
+                    <div class="course-stats" id="courseStats">
+                        <div class="stat-row">
+                            <span class="stat-label">Total Content:</span>
+                            <span class="stat-value" id="totalContentTime">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">Completed:</span>
+                            <span class="stat-value" id="completedTime">--</span>
+                        </div>
+                    </div>
                     <div class="progress-summary" id="progressSummary">
-                        <span class="progress-text">0 / 0 completed</span>
                         <div class="progress-bar">
                             <div class="progress-fill" id="progressFill"></div>
                         </div>
+                        <span class="progress-text">0% complete</span>
                     </div>
                 </div>
                 <div class="episode-list" id="episodeList">
