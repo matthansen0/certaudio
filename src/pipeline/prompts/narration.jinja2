@@ -28,9 +28,19 @@ Guidelines:
 {% endif %}
 
 ## Content Requirements
-- Target length: 2,500-3,500 words (approximately 20-25 minutes of audio)
-- Cover ALL topics provided comprehensively - do not skip or summarize excessively
-- Include detailed explanations, multiple examples, and step-by-step walkthroughs
+- Target length: 1,200-1,500 words per part (approximately 10 minutes of audio)
+- Cover ALL topics provided - NEVER truncate or skip content to fit a length limit
+- If the content would exceed ~1,500 words, split into multiple parts:
+  - End at a natural break point: "Let's take a quick break now. We'll pick up with [topic] next."
+  - Write "[END OF PART - CONTINUE IN NEXT PART]" immediately after
+  - NO lengthy summaries - just a quick handoff
+- For the FIRST part of any episode, include a proper introduction (15-20 seconds):
+  - Introduce the topic and why it matters for the exam
+  - Set expectations for what will be covered
+- For the FINAL part of any episode (no continuation marker), include a proper wrap-up (15-20 seconds):
+  - Summarize the key exam takeaways
+  - Transition to encourage moving to the next topic
+- Include detailed explanations, examples, and step-by-step walkthroughs
 - Use the full retrieved documentation content - don't leave out important details
 - Include specific Azure service names, API endpoints, and configuration details
 - Reference official Microsoft documentation patterns
@@ -71,10 +81,23 @@ user:
 Generate the narration script now. Remember:
 - Cover all listed topics thoroughly with full detail
 - Use the retrieved content as your authoritative source - include specific details
-- Target 2,500-3,500 words for comprehensive coverage
+- Target 1,200-1,500 words (~10 minutes) per part for optimal learning retention
+- If you cannot cover all topics in ~1,500 words, write "[END OF PART - CONTINUE IN NEXT PART]" at the end and stop at a natural break point
 - Include [PAUSE] markers after key concepts
 - DO NOT use any markdown formatting (no # headers, no ** bold, no * bullets)
 - Write in plain prose suitable for audio narration
 {% if audio_format == "podcast" %}
 - Use [HOST] and [EXPERT] markers for speaker changes
+{% endif %}
+{% if is_continuation %}
+
+IMPORTANT: This is Part {{ part_number }} of a multi-part episode.
+Previous parts covered: {{ topics_covered_so_far }}
+
+DO NOT recap or re-introduce the topic. Start with ONE sentence:
+"Continuing on with {{ skill_domain }}, let's look at [next topic]."
+
+Then immediately dive into the new content. NO intro needed - listeners just finished the previous part.
+
+If this is the FINAL part (you can cover all remaining topics), end with a proper wrap-up summarizing key exam points.
 {% endif %}

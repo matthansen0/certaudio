@@ -149,6 +149,9 @@ def generate_narration(
     is_amendment: bool = False,
     amendment_of: int = None,
     prior_episode_summary: str = None,
+    is_continuation: bool = False,
+    part_number: int = 1,
+    topics_covered_so_far: str = None,
 ) -> str:
     """Generate narration script using Azure OpenAI."""
     template = jinja_env.get_template("narration.jinja2")
@@ -162,6 +165,9 @@ def generate_narration(
         is_amendment=is_amendment,
         amendment_of=amendment_of,
         prior_episode_summary=prior_episode_summary,
+        is_continuation=is_continuation,
+        part_number=part_number,
+        topics_covered_so_far=topics_covered_so_far,
     )
 
     # Split system and user parts
@@ -181,6 +187,19 @@ def generate_narration(
     )
 
     return response.choices[0].message.content
+
+
+CONTINUATION_MARKER = "[END OF PART - CONTINUE IN NEXT PART]"
+
+
+def needs_continuation(narration: str) -> bool:
+    """Check if narration indicates more content is needed."""
+    return CONTINUATION_MARKER in narration
+
+
+def clean_narration(narration: str) -> str:
+    """Remove continuation marker from narration."""
+    return narration.replace(CONTINUATION_MARKER, "").strip()
 
 
 def generate_ssml(
@@ -445,8 +464,13 @@ def process_skill_domain(
     instructional_voice: str = "en-US-AndrewNeural",
     podcast_host_voice: str = "en-US-GuyNeural",
     podcast_expert_voice: str = "en-US-TonyNeural",
-) -> dict:
-    """Process a single skill domain and generate an episode."""
+) -> list[dict]:
+    """
+    Process a single skill domain and generate episode(s).
+    
+    Returns a list of episode documents. If content requires multiple parts,
+    multiple episodes are generated with titles like "Domain (Part 1)", "Domain (Part 2)".
+    """
     print(f"\n{'='*60}")
     print(f"Episode {episode_number}: {skill_domain}")
     print(f"Topics: {len(skill_topics)}")
@@ -464,79 +488,109 @@ def process_skill_domain(
     print(f"  - Retrieved {len(retrieved_content['source_urls'])} source URLs")
     print(f"  - Content hash: {retrieved_content['content_hash']}")
 
-    # 2. Generate narration script
-    print("Step 2: Generating narration script...")
-    narration = generate_narration(
-        episode_number=episode_number,
-        skill_domain=skill_domain,
-        skill_topics=skill_topics,
-        retrieved_content=retrieved_content,
-        audio_format=audio_format,
-        openai_client=openai_client,
-        jinja_env=jinja_env,
-    )
-    word_count = len(narration.split())
-    print(f"  - Generated {word_count} words")
-
-    # 3. Convert to SSML
-    print("Step 3: Converting to SSML...")
-    ssml = generate_ssml(
-        narration=narration,
-        audio_format=audio_format,
-        openai_client=openai_client,
-        jinja_env=jinja_env,
-        instructional_voice=instructional_voice,
-        podcast_host_voice=podcast_host_voice,
-        podcast_expert_voice=podcast_expert_voice,
-    )
-    print(f"  - SSML length: {len(ssml)} characters")
-
-    # 4. Synthesize audio
-    print("Step 4: Synthesizing audio...")
-    audio_result = synthesize_audio_with_chunking(
-        narration=narration,
-        ssml=ssml,
-        episode_number=episode_number,
-        certification_id=certification_id,
-        audio_format=audio_format,
-    )
-    print(f"  - Duration: {audio_result['duration_seconds']:.1f} seconds")
-
-    # 5. Upload to blob storage
-    print("Step 5: Uploading to blob storage...")
-    upload_result = upload_to_blob(
-        audio_file_path=audio_result["audio_path"],
-        script_content=narration,
-        ssml_content=ssml,
-        certification_id=certification_id,
-        audio_format=audio_format,
-        episode_number=episode_number,
-    )
-    print(f"  - Audio URL: {upload_result['audio_url']}")
-
-    # 6. Save episode metadata to Cosmos DB
-    print("Step 6: Saving episode metadata...")
-
     # Merge source URLs from discovery and retrieval
     all_source_urls = list(set(source_urls + retrieved_content["source_urls"]))
+    
+    # Generate episode parts (may be 1 or more)
+    episode_docs = []
+    part_number = 1
+    current_episode_number = episode_number
+    topics_covered_so_far = ""
+    max_parts = 5  # Safety limit
+    
+    while part_number <= max_parts:
+        part_suffix = f" (Part {part_number})" if part_number > 1 else ""
+        domain_title = f"{skill_domain}{part_suffix}"
+        
+        print(f"\nStep 2: Generating narration script{part_suffix}...")
+        narration = generate_narration(
+            episode_number=current_episode_number,
+            skill_domain=skill_domain,
+            skill_topics=skill_topics,
+            retrieved_content=retrieved_content,
+            audio_format=audio_format,
+            openai_client=openai_client,
+            jinja_env=jinja_env,
+            is_continuation=(part_number > 1),
+            part_number=part_number,
+            topics_covered_so_far=topics_covered_so_far,
+        )
+        
+        # Check if continuation is needed
+        has_more = needs_continuation(narration)
+        narration = clean_narration(narration)
+        
+        word_count = len(narration.split())
+        print(f"  - Generated {word_count} words")
+        if has_more:
+            print(f"  - Content continues in next part...")
 
-    episode_doc = save_episode(
-        certification_id=certification_id,
-        audio_format=audio_format,
-        episode_number=episode_number,
-        skill_domain=skill_domain,
-        skill_topics=skill_topics,
-        audio_url=upload_result["audio_url"],
-        script_url=upload_result["script_url"],
-        duration_seconds=audio_result["duration_seconds"],
-        is_amendment=False,
-        amendment_of=0,
-        source_urls=all_source_urls,
-        content_hash=retrieved_content["content_hash"],
-    )
-    print(f"  - Episode ID: {episode_doc['id']}")
+        # 3. Convert to SSML
+        print(f"Step 3: Converting to SSML{part_suffix}...")
+        ssml = generate_ssml(
+            narration=narration,
+            audio_format=audio_format,
+            openai_client=openai_client,
+            jinja_env=jinja_env,
+            instructional_voice=instructional_voice,
+            podcast_host_voice=podcast_host_voice,
+            podcast_expert_voice=podcast_expert_voice,
+        )
+        print(f"  - SSML length: {len(ssml)} characters")
 
-    return episode_doc
+        # 4. Synthesize audio
+        print(f"Step 4: Synthesizing audio{part_suffix}...")
+        audio_result = synthesize_audio_with_chunking(
+            narration=narration,
+            ssml=ssml,
+            episode_number=current_episode_number,
+            certification_id=certification_id,
+            audio_format=audio_format,
+        )
+        print(f"  - Duration: {audio_result['duration_seconds']:.1f} seconds")
+
+        # 5. Upload to blob storage
+        print(f"Step 5: Uploading to blob storage{part_suffix}...")
+        upload_result = upload_to_blob(
+            audio_file_path=audio_result["audio_path"],
+            script_content=narration,
+            ssml_content=ssml,
+            certification_id=certification_id,
+            audio_format=audio_format,
+            episode_number=current_episode_number,
+        )
+        print(f"  - Audio URL: {upload_result['audio_url']}")
+
+        # 6. Save episode metadata to Cosmos DB
+        print(f"Step 6: Saving episode metadata{part_suffix}...")
+        episode_doc = save_episode(
+            certification_id=certification_id,
+            audio_format=audio_format,
+            episode_number=current_episode_number,
+            skill_domain=domain_title,
+            skill_topics=skill_topics,
+            audio_url=upload_result["audio_url"],
+            script_url=upload_result["script_url"],
+            duration_seconds=audio_result["duration_seconds"],
+            is_amendment=False,
+            amendment_of=0,
+            source_urls=all_source_urls,
+            content_hash=retrieved_content["content_hash"],
+        )
+        print(f"  - Episode ID: {episode_doc['id']}")
+        
+        episode_docs.append(episode_doc)
+        
+        if not has_more:
+            break
+            
+        # Prepare for next part
+        part_number += 1
+        current_episode_number += 1
+        # Track what we've covered (first ~100 words of previous narration as context)
+        topics_covered_so_far = narration[:500] + "..."
+    
+    return episode_docs
 
 
 def split_narration_for_tts(narration: str, max_words_per_segment: int = 850) -> list[str]:
@@ -736,7 +790,8 @@ def main():
             continue
         
         try:
-            episode = process_skill_domain(
+            # process_skill_domain returns a list (may generate multiple parts)
+            episodes = process_skill_domain(
                 episode_number=episode_number,
                 skill_domain=episode_title,
                 skill_topics=unit["topics"],
@@ -751,7 +806,11 @@ def main():
                 podcast_host_voice=args.podcast_host_voice,
                 podcast_expert_voice=args.podcast_expert_voice,
             )
-            generated_episodes.append(episode)
+            generated_episodes.extend(episodes)
+            
+            # If multiple parts were generated, adjust the episode counter for subsequent domains
+            if len(episodes) > 1:
+                print(f"  - Generated {len(episodes)} parts for this domain")
         except Exception as e:
             msg = f"Error processing '{episode_title}' (episode {episode_number}): {e}"
             print(f"\n{msg}", file=sys.stderr)
