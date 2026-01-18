@@ -177,14 +177,48 @@ def extract_text_content(html: str) -> tuple[str, int]:
     return full_text, word_count
 
 
+def fetch_module_hierarchy(module_uid: str) -> dict:
+    """
+    Fetch module hierarchy from the hierarchy API to get actual unit URLs.
+    
+    The hierarchy API returns accurate URLs for all units, unlike guessing from UIDs.
+    """
+    url = f"https://learn.microsoft.com/api/hierarchy/modules/{module_uid}?locale=en-us"
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=30)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        print(f"    Warning: Could not fetch hierarchy for {module_uid}: {e}")
+        return {}
+
+
+def build_unit_url_from_hierarchy(hierarchy: dict, unit_uid: str) -> str:
+    """
+    Get the unit URL from the hierarchy API response.
+    
+    The hierarchy API returns the actual URL for each unit, which may have
+    non-sequential numbering (e.g., 3b-optimize instead of 4-optimize).
+    """
+    for unit in hierarchy.get("units", []):
+        if unit.get("uid") == unit_uid:
+            url = unit.get("url", "")
+            if url and not url.startswith("http"):
+                return f"https://learn.microsoft.com{url}"
+            return url
+    return ""
+
+
 def build_unit_url(module_url: str, unit_uid: str, unit_index: int = 1) -> str:
     """
-    Build the URL for a unit page using the module's URL.
+    Build the URL for a unit page using the module's URL (fallback method).
     
     Module URL: https://learn.microsoft.com/en-us/training/modules/use-dataflow-gen-2-fabric/...
     Unit UID: learn.wwl.ingest-dataflows-gen2-fabric.introduction
     
     URL pattern: /training/modules/{module-slug}/{unit-index}-{unit-slug}/
+    
+    NOTE: This is a fallback - prefer fetch_module_hierarchy() for accurate URLs.
     """
     # Extract module slug from URL
     # URL format: https://learn.microsoft.com/en-us/training/modules/{module-slug}/...
@@ -301,15 +335,21 @@ def deep_discover(
             if max_units_per_module:
                 unit_uids = unit_uids[:max_units_per_module]
             
+            # Fetch module hierarchy to get accurate unit URLs
+            hierarchy = fetch_module_hierarchy(module_uid)
+            time.sleep(REQUEST_DELAY)  # Be respectful
+            
             for k, unit_uid in enumerate(unit_uids):
                 unit_data = units_by_uid.get(unit_uid)
                 if not unit_data:
                     # Try partial match (sometimes UIDs vary slightly)
                     continue
                 
-                # Build URL using module URL from catalog (more reliable than UID)
-                # Unit index is 1-based
-                unit_url = build_unit_url(module.url, unit_uid, unit_index=k + 1)
+                # Get URL from hierarchy API (accurate) or fall back to guessing
+                unit_url = build_unit_url_from_hierarchy(hierarchy, unit_uid)
+                if not unit_url:
+                    # Fallback to guessing (may not work for all units)
+                    unit_url = build_unit_url(module.url, unit_uid, unit_index=k + 1)
                 
                 unit = Unit(
                     uid=unit_uid,
@@ -387,10 +427,14 @@ def discover_test_content() -> DeepDiscoveryResult:
     test_unit_uid = "learn.wwl.describe-cloud-compute.introduction-microsoft-azure-fundamentals"
     
     module_data = modules_by_uid.get(test_module_uid, {})
-    module_url = module_data.get("url", "")
     
-    # Build URL using module URL from catalog (more reliable than UID)
-    unit_url = build_unit_url(module_url, test_unit_uid, unit_index=1)
+    # Use hierarchy API to get accurate URL
+    hierarchy = fetch_module_hierarchy(test_module_uid)
+    unit_url = build_unit_url_from_hierarchy(hierarchy, test_unit_uid)
+    if not unit_url:
+        # Fallback to guessing
+        module_url = module_data.get("url", "")
+        unit_url = build_unit_url(module_url, test_unit_uid, unit_index=1)
     print(f"Test unit URL: {unit_url}")
     
     # Fetch content
