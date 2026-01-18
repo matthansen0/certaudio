@@ -33,7 +33,7 @@ CERTIFICATION_PATH_UIDS = {
         "learn.wwl.ingest-data-with-microsoft-fabric",
         "learn.wwl.implement-lakehouse-microsoft-fabric",
         "learn.wwl.explore-real-time-analytics-microsoft-fabric",
-        "learn.wwl.work-with-data-warehouses-using-microsoft-fabric",
+        "learn-wwl.work-with-data-warehouses-using-microsoft-fabric",
         "learn.wwl.manage-microsoft-fabric-environment",
         "learn.wwl.get-started-fabric",
     ],
