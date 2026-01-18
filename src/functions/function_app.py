@@ -19,6 +19,21 @@ app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 logger = logging.getLogger(__name__)
 
 
+def _normalize_episode_id(episode_num: str) -> str:
+    """Normalize an episode identifier for blob paths.
+
+    The content pipeline stores episode assets using zero-padded numbers
+    (e.g., episodes/001.mp3, scripts/001.md). The web app routes use
+    natural numbers (e.g., /api/audio/.../1).
+    """
+    if episode_num is None:
+        return ""
+    text = str(episode_num).strip()
+    if text.isdigit():
+        return f"{int(text):03d}"
+    return text
+
+
 def _format_cert_name(cert_id: str) -> str:
     # Basic display name helper. Prefer a curated map when present.
     curated = {
@@ -188,7 +203,8 @@ def get_audio(req: func.HttpRequest) -> func.HttpResponse:
     try:
         blob_service = get_blob_service()
         container_name = f"{cert_id}-{audio_format}"
-        blob_name = f"episodes/{episode_num}.mp3"
+        episode_id = _normalize_episode_id(episode_num)
+        blob_name = f"episodes/{episode_id}.mp3"
 
         blob_client = blob_service.get_blob_client(
             container=container_name, blob=blob_name
@@ -391,7 +407,8 @@ def get_script(req: func.HttpRequest) -> func.HttpResponse:
     try:
         blob_service = get_blob_service()
         container_name = f"{cert_id}-{audio_format}-scripts"
-        blob_name = f"scripts/{episode_num}.md"
+        episode_id = _normalize_episode_id(episode_num)
+        blob_name = f"scripts/{episode_id}.md"
 
         blob_client = blob_service.get_blob_client(
             container=container_name, blob=blob_name
