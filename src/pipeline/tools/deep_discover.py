@@ -448,8 +448,44 @@ def discover_test_content() -> DeepDiscoveryResult:
 
 
 def result_to_dict(result: DeepDiscoveryResult) -> dict:
-    """Convert result to JSON-serializable dict."""
+    """
+    Convert result to JSON-serializable dict.
+    
+    Output includes both detailed structure AND workflow-compatible format
+    (skillsOutline, sourceUrls) for use with generate-content.yml workflow.
+    """
+    # Build skills outline from learning paths (workflow-compatible format)
+    # Each module becomes a "skill" and each unit becomes a "topic"
+    skills_outline = []
+    source_urls = set()
+    
+    for path in result.learning_paths:
+        for module in path.modules:
+            skill = {
+                "skillName": module.title,
+                "weightPercentage": None,  # Deep discovery doesn't have weights
+                "learningPath": path.title,
+                "topics": []
+            }
+            
+            for unit in module.units:
+                skill["topics"].append({
+                    "topicName": unit.title,
+                    "content": unit.content,
+                    "wordCount": unit.word_count,
+                    "url": unit.url
+                })
+                if unit.url:
+                    source_urls.add(unit.url)
+            
+            skills_outline.append(skill)
+    
     return {
+        # Workflow-compatible format (required by generate-content.yml)
+        "skillsOutline": skills_outline,
+        "sourceUrls": list(source_urls),
+        
+        # Detailed discovery result
         "certificationId": result.certification_id,
         "certificationUrl": result.certification_url,
         "learningPaths": [

@@ -8,6 +8,8 @@ on:
         required: true
         type: choice
         options:
+          # === TEST MODE ===
+          - test       # Single unit test (~$0.15) for development
           # === AZURE ===
           - az-900     # Azure Fundamentals
           - az-104     # Azure Administrator
@@ -63,7 +65,15 @@ on:
           - mb-700     # Dynamics 365 Finance & Operations Solution Architect
           - mb-800     # Dynamics 365 Business Central Functional Consultant
           - mb-820     # Dynamics 365 Business Central Developer
-        default: 'ai-102'
+        default: 'test'
+      discoveryMode:
+        description: 'Content discovery mode'
+        required: true
+        type: choice
+        options:
+          - deep       # Full learning paths (comprehensive, higher cost)
+          - skills     # Skills outline only (quick, lower cost)
+        default: 'deep'
       audioFormat:
         description: 'Audio format'
         required: true
@@ -217,12 +227,26 @@ jobs:
         env:
           CERTIFICATION_ID: ${{ inputs.certificationId }}
           EXAM_PAGE_URL: ${{ inputs.examPageUrl }}
+          DISCOVERY_MODE: ${{ inputs.discoveryMode }}
         run: |
           cd src/pipeline
-          python3 -m tools.discover_exam_content \
-            --certification-id "$CERTIFICATION_ID" \
-            --exam-page-url "$EXAM_PAGE_URL" \
-            --output-file /tmp/discovery_results.json
+          
+          # Handle test mode: use deep_discover --test for minimal content
+          if [ "$CERTIFICATION_ID" = "test" ]; then
+            echo "Running TEST MODE discovery (single unit, ~\$0.15)"
+            python3 -m tools.deep_discover --test --output-file /tmp/discovery_results.json
+          elif [ "$DISCOVERY_MODE" = "deep" ]; then
+            echo "Running DEEP discovery (full learning paths)"
+            python3 -m tools.deep_discover \
+              --certification-id "$CERTIFICATION_ID" \
+              --output-file /tmp/discovery_results.json
+          else
+            echo "Running SKILLS OUTLINE discovery (quick mode)"
+            python3 -m tools.discover_exam_content \
+              --certification-id "$CERTIFICATION_ID" \
+              --exam-page-url "$EXAM_PAGE_URL" \
+              --output-file /tmp/discovery_results.json
+          fi
           
           echo "skillsOutline=$(cat /tmp/discovery_results.json | jq -c '.skillsOutline')" >> $GITHUB_OUTPUT
           echo "sourceUrls=$(cat /tmp/discovery_results.json | jq -c '.sourceUrls')" >> $GITHUB_OUTPUT
