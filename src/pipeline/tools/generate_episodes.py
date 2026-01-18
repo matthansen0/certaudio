@@ -410,6 +410,27 @@ def get_next_episode_number(
     return max_seq + 1
 
 
+def episode_exists(
+    certification_id: str,
+    audio_format: str,
+    episode_number: int,
+    cosmos_client: CosmosClient,
+) -> bool:
+    """Check if an episode already exists in Cosmos DB."""
+    database = cosmos_client.get_database_client(
+        os.environ.get("COSMOS_DB_DATABASE", "certaudio")
+    )
+    container = database.get_container_client("episodes")
+    
+    episode_id = f"{certification_id}-{audio_format}-{episode_number:03d}"
+    
+    try:
+        container.read_item(item=episode_id, partition_key=certification_id)
+        return True
+    except Exception:
+        return False
+
+
 def process_skill_domain(
     episode_number: int,
     skill_domain: str,
@@ -595,6 +616,8 @@ def main():
     parser.add_argument("--batch-index", type=int, default=0, help="Batch index for parallel processing")
     parser.add_argument("--batch-size", type=int, default=10, help="Number of episode units per batch")
     parser.add_argument("--topics-per-episode", type=int, default=5, help="Target topics per episode for optimal length")
+    parser.add_argument("--force-regenerate", action="store_true",
+                        help="Regenerate episodes even if they already exist (e.g., to change voice)")
 
     args = parser.parse_args()
 
@@ -689,9 +712,12 @@ def main():
     # Episode numbers are based on the global index of the episode unit.
     base_episode_number = start_idx + 1
     print(f"\nBatch base episode number: {base_episode_number}")
+    if args.force_regenerate:
+        print("Force regenerate mode: will overwrite existing episodes")
 
     # Process each episode unit in the batch
     generated_episodes = []
+    skipped_episodes = []
     errors: list[str] = []
     for i, unit in enumerate(batch_units):
         episode_number = base_episode_number + i
@@ -700,6 +726,14 @@ def main():
             episode_title = f"{unit['domain']} (Part {unit['part']})"
         else:
             episode_title = unit["domain"]
+        
+        # Check if episode already exists (skip unless force-regenerate)
+        if not args.force_regenerate and episode_exists(
+            args.certification_id, args.audio_format, episode_number, cosmos_client
+        ):
+            print(f"\nSkipping episode {episode_number}: {episode_title} (already exists)")
+            skipped_episodes.append({"number": episode_number, "title": episode_title})
+            continue
         
         try:
             episode = process_skill_domain(
@@ -726,16 +760,23 @@ def main():
     # Summary
     print(f"\n{'='*60}")
     print(f"BATCH COMPLETE")
-    print(f"Generated {len(generated_episodes)} of {len(batch_units)} episodes")
-    for ep in generated_episodes:
-        print(f"  - {ep['id']}: {ep['title']} ({ep['durationSeconds']:.0f}s)")
+    print(f"Generated: {len(generated_episodes)} | Skipped: {len(skipped_episodes)} | Errors: {len(errors)}")
+    if skipped_episodes:
+        print(f"\nSkipped (already exist):")
+        for ep in skipped_episodes:
+            print(f"  - Episode {ep['number']}: {ep['title']}")
+    if generated_episodes:
+        print(f"\nGenerated:")
+        for ep in generated_episodes:
+            print(f"  - {ep['id']}: {ep['title']} ({ep['durationSeconds']:.0f}s)")
     print(f"{'='*60}")
 
     if errors:
         print(f"\nBatch failed with {len(errors)} error(s).", file=sys.stderr)
         sys.exit(1)
 
-    if len(generated_episodes) == 0:
+    # Success if we generated OR skipped episodes (skipped = already done)
+    if len(generated_episodes) == 0 and len(skipped_episodes) == 0:
         print("\nBatch produced 0 episodes (unexpected).", file=sys.stderr)
         sys.exit(1)
 

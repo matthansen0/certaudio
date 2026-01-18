@@ -131,6 +131,11 @@ on:
           - en-US-JennyNeural
           - en-US-AriaNeural
         default: 'en-US-TonyNeural'
+      forceRegenerate:
+        description: 'Regenerate all episodes even if they already exist (use for voice changes)'
+        required: false
+        type: boolean
+        default: false
       examPageUrl:
         description: 'Override exam page URL (optional, auto-discovered if empty)'
         required: false
@@ -647,10 +652,18 @@ jobs:
           INSTRUCTIONAL_VOICE: ${{ inputs.instructionalVoice }}
           PODCAST_HOST_VOICE: ${{ inputs.podcastHostVoice }}
           PODCAST_EXPERT_VOICE: ${{ inputs.podcastExpertVoice }}
+          FORCE_REGENERATE: ${{ inputs.forceRegenerate }}
           SKILLS_OUTLINE: ${{ needs.discover-content.outputs.skillsOutline }}
           BATCH_INDEX: ${{ matrix.batch }}
         run: |
           cd src/pipeline
+          
+          # Build command with optional --force-regenerate flag
+          REGEN_FLAG=""
+          if [ "$FORCE_REGENERATE" = "true" ]; then
+            REGEN_FLAG="--force-regenerate"
+          fi
+          
           python3 -m tools.generate_episodes \
             --certification-id "$CERTIFICATION_ID" \
             --audio-format "$AUDIO_FORMAT" \
@@ -659,7 +672,8 @@ jobs:
             --podcast-expert-voice "$PODCAST_EXPERT_VOICE" \
             --skills-outline "$SKILLS_OUTLINE" \
             --batch-index "$BATCH_INDEX" \
-            --batch-size "$EPISODE_BATCH_SIZE"
+            --batch-size "$EPISODE_BATCH_SIZE" \
+            $REGEN_FLAG
 
   finalize:
     name: Finalize Content Generation
