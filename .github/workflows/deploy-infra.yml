@@ -395,3 +395,96 @@ jobs:
           app_location: 'src/web'
           output_location: ''
           skip_api_build: true
+
+  link-swa-backend:
+    name: Link SWA API Backend (Functions)
+    runs-on: ubuntu-latest
+    needs:
+      - deploy-functions
+      - deploy-static-web-app
+    steps:
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Link Functions backend to SWA
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            set -euo pipefail
+
+            SWA_NAME="certaudio-dev-swa-$UNIQUE_SUFFIX"
+            FUNCTIONS_APP_NAME="certaudio-dev-func-$UNIQUE_SUFFIX"
+
+            echo "Static Web App: $SWA_NAME"
+            echo "Functions App:  $FUNCTIONS_APP_NAME"
+
+            backendResourceId=$(az functionapp show \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --name "$FUNCTIONS_APP_NAME" \
+              --query id -o tsv)
+
+            echo "Backend resource id: $backendResourceId"
+
+            echo "Validating backend..."
+            az staticwebapp backends validate \
+              --name "$SWA_NAME" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --backend-resource-id "$backendResourceId" \
+              --backend-region "$LOCATION" \
+              --environment-name default \
+              --only-show-errors
+
+            currentBackendId=$(az staticwebapp backends show \
+              --name "$SWA_NAME" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --environment-name default \
+              --query backendResourceId -o tsv 2>/dev/null || true)
+
+            if [[ -n "$currentBackendId" && "$currentBackendId" != "$backendResourceId" ]]; then
+              echo "A different backend is already linked; unlinking first."
+              az staticwebapp backends unlink \
+                --name "$SWA_NAME" \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
+                --environment-name default \
+                --remove-backend-auth \
+                --only-show-errors
+              currentBackendId=""
+            fi
+
+            if [[ "$currentBackendId" != "$backendResourceId" ]]; then
+              echo "Linking backend..."
+              az staticwebapp backends link \
+                --name "$SWA_NAME" \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
+                --backend-resource-id "$backendResourceId" \
+                --backend-region "$LOCATION" \
+                --environment-name default \
+                --only-show-errors
+            else
+              echo "Backend already linked; nothing to do."
+            fi
+
+            echo "Backend status:"
+            az staticwebapp backends show \
+              --name "$SWA_NAME" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --environment-name default \
+              -o jsonc
+
+            echo "Smoke test: calling SWA /api/certifications (should not be 404)"
+            swaHostname=$(az staticwebapp show \
+              --name "$SWA_NAME" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query defaultHostname -o tsv)
+            url="https://$swaHostname/api/certifications"
+            echo "GET $url"
+            httpCode=$(curl -sS -o /dev/null -w "%{http_code}" "$url" || true)
+            echo "HTTP $httpCode"
+            if [[ "$httpCode" == "404" ]]; then
+              echo "::error::SWA /api is still returning 404 after backend link."
+              exit 1
+            fi
