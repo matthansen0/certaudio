@@ -86,7 +86,108 @@ jobs:
 
             accessToken=$(az account get-access-token \
               --resource https://management.azure.com \
+              --query accessToken -o tsv)
+            export ACCESS_TOKEN="$accessToken"
 
+            automationPrincipalId=$(python3 - <<'PY'
+            import os, json, base64
+            token = os.environ.get('ACCESS_TOKEN', '')
+            parts = token.split('.')
+            if len(parts) < 2:
+              print('')
+              raise SystemExit(0)
+            payload = parts[1]
+            payload += '=' * (-len(payload) % 4)
+            data = base64.urlsafe_b64decode(payload.encode('utf-8')).decode('utf-8')
+            claims = json.loads(data)
+            print(claims.get('oid') or claims.get('objectId') or '')
+            PY
+            )
+
+            if [[ -z "$automationPrincipalId" ]]; then
+              echo "::warning::Could not determine automation principal objectId from access token; Cosmos SQL RBAC for automation will not be applied."
+            else
+              echo "Automation principal objectId: $automationPrincipalId"
+            fi
+
+            deploymentName="certaudio-${{ github.run_id }}-${{ github.run_attempt }}"
+
+            az deployment group validate \
+              --name "$deploymentName" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --template-file ./infra/main.bicep \
+              --parameters \
+                uniqueSuffix=$UNIQUE_SUFFIX \
+                location=$LOCATION \
+                openAiLocation=$OPENAI_LOCATION \
+                automationPrincipalId=$automationPrincipalId
+
+  deploy:
+    name: Deploy Infrastructure
+    runs-on: ubuntu-latest
+    needs: validate
+    # NOTE: We don't pass app names as job outputs because GitHub Actions masks them
+    # (they contain the UNIQUE_SUFFIX secret). Downstream jobs construct names directly.
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy Bicep template
+        uses: azure/cli@v2
+        env:
+          DEPLOYMENT_NAME: certaudio-${{ github.run_id }}-${{ github.run_attempt }}
+        with:
+          inlineScript: |
+            set -euo pipefail
+
+            accessToken=$(az account get-access-token \
+              --resource https://management.azure.com \
+              --query accessToken -o tsv)
+            export ACCESS_TOKEN="$accessToken"
+
+            automationPrincipalId=$(python3 - <<'PY'
+            import os, json, base64
+            token = os.environ.get('ACCESS_TOKEN', '')
+            parts = token.split('.')
+            if len(parts) < 2:
+              print('')
+              raise SystemExit(0)
+            payload = parts[1]
+            payload += '=' * (-len(payload) % 4)
+            data = base64.urlsafe_b64decode(payload.encode('utf-8')).decode('utf-8')
+            claims = json.loads(data)
+            print(claims.get('oid') or claims.get('objectId') or '')
+            PY
+            )
+
+            if [[ -z "$automationPrincipalId" ]]; then
+              echo "::warning::Could not determine automation principal objectId from access token; Cosmos SQL RBAC for automation will not be applied."
+            else
+              echo "Automation principal objectId: $automationPrincipalId"
+            fi
+
+            # Run deployment
+            if ! az deployment group create \
+              --name "$DEPLOYMENT_NAME" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --template-file ./infra/main.bicep \
+              --parameters \
+                uniqueSuffix=$UNIQUE_SUFFIX \
+                location=$LOCATION \
+                openAiLocation=$OPENAI_LOCATION \
+                automationPrincipalId=$automationPrincipalId \
+              --only-show-errors; then
+              echo "::group::Deployment error (properties.error)"
+              az deployment group show \
+                --name "$DEPLOYMENT_NAME" \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
                 --query properties.error \
                 -o jsonc || true
               echo "::endgroup::"
@@ -101,31 +202,6 @@ jobs:
 
               exit 1
             fi
-
-      - name: Diagnose Cosmos/Storage network access
-        uses: azure/cli@v2
-        env:
-          DEPLOYMENT_NAME: certaudio-${{ github.run_id }}-${{ github.run_attempt }}
-        with:
-          inlineScript: |
-            set -euo pipefail
-
-            storageAccountName=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.storageAccountName.value" -o tsv)
-            cosmosDbAccountName=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.cosmosDbAccountName.value" -o tsv)
-
-            echo "Storage account: $storageAccountName"
-            az storage account show \
-              --name "$storageAccountName" \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --query "{publicNetworkAccess:publicNetworkAccess, defaultAction:networkRuleSet.defaultAction, bypass:networkRuleSet.bypass, allowSharedKeyAccess:allowSharedKeyAccess, allowBlobPublicAccess:allowBlobPublicAccess}" \
-              -o jsonc || true
-
-            echo "Cosmos account:  $cosmosDbAccountName"
-            az cosmosdb show \
-              --name "$cosmosDbAccountName" \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --query "{publicNetworkAccess:publicNetworkAccess, disableLocalAuth:disableLocalAuth, ipRules:ipRules}" \
-              -o jsonc || true
 
       - name: Get deployment outputs
         id: outputs
@@ -159,7 +235,7 @@ jobs:
   deploy-functions:
     name: Deploy Functions App
     runs-on: ubuntu-latest
-    needs: validate  # Wait for infra to be deployed
+    needs: deploy  # Wait for infra to be deployed
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -201,46 +277,6 @@ jobs:
               --name "$FUNCTIONS_APP_NAME" \
               --src "functions.zip"
 
-      - name: Disable App Service authentication (EasyAuth)
-        uses: azure/cli@v2
-        with:
-          inlineScript: |
-            set -euo pipefail
-
-            FUNCTIONS_APP_NAME="certaudio-dev-func-$UNIQUE_SUFFIX"
-            echo "Disabling App Service auth (v2) for: $FUNCTIONS_APP_NAME"
-
-            siteId=$(az functionapp show \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --name "$FUNCTIONS_APP_NAME" \
-              --query id -o tsv)
-
-            uri="https://management.azure.com${siteId}/config/authsettingsV2?api-version=2022-03-01"
-
-            # NOTE: `az webapp auth update` targets the legacy (v1) endpoint and fails when the site is on auth v2.
-            az rest \
-              --method put \
-              --uri "$uri" \
-              --body '{
-                "properties": {
-                  "platform": { "enabled": false },
-                  "globalValidation": {
-                    "requireAuthentication": false,
-                    "unauthenticatedClientAction": "AllowAnonymous"
-                  }
-                }
-              }'
-
-            echo "Auth settings (authsettingsV2):"
-            az rest --method get --uri "$uri" -o jsonc || true
-
-            echo "Restarting Function App to ensure auth changes apply..."
-            az functionapp restart \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --name "$FUNCTIONS_APP_NAME" \
-              --only-show-errors
-            sleep 20
-
       - name: Smoke test Functions directly
         uses: azure/cli@v2
         with:
@@ -260,7 +296,7 @@ jobs:
             attempt=1
             while [[ $attempt -le $maxAttempts ]]; do
               echo "Attempt $attempt/$maxAttempts: GET $url"
-              httpCode=$(curl -sS -D /tmp/functions_headers.txt -o /tmp/functions_body.txt -w "%{http_code}" "$url" || true)
+              httpCode=$(curl -sS -o /tmp/functions_body.txt -w "%{http_code}" "$url" || true)
               echo "HTTP $httpCode"
 
               # 404 means the route isn't loaded; 000 is network/TLS failure.
@@ -270,32 +306,10 @@ jobs:
                 break
               fi
               if [[ "$httpCode" == "401" || "$httpCode" == "403" ]]; then
-                echo "::group::Functions response headers"
-                head -60 /tmp/functions_headers.txt || true
-                echo "::endgroup::"
-
-                # Disambiguate: function-key auth vs App Service auth.
-                masterKey=$(az functionapp keys list \
-                  --resource-group "$AZURE_RESOURCE_GROUP" \
-                  --name "$FUNCTIONS_APP_NAME" \
-                  --query masterKey -o tsv)
-
-                if [[ -n "$masterKey" ]]; then
-                  echo "::add-mask::$masterKey"
-                  echo "Retrying once with x-functions-key header (diagnostic)..."
-                  httpCodeKeyed=$(curl -sS -D /tmp/functions_headers_keyed.txt -o /tmp/functions_body_keyed.txt -w "%{http_code}" -H "x-functions-key: $masterKey" "$url" || true)
-                  echo "HTTP (with key) $httpCodeKeyed"
-
-                  if [[ "$httpCodeKeyed" == "200" ]]; then
-                    echo "::error::Functions responded only when a host key was provided. This indicates the HTTP trigger is not anonymous."
-                    exit 1
-                  fi
-                fi
-
                 echo "::group::Functions response body (truncated)"
                 head -200 /tmp/functions_body.txt || true
                 echo "::endgroup::"
-                echo "::error::Functions /api/healthz returned HTTP $httpCode after auth disable + restart."
+                echo "::error::Functions /api/healthz returned HTTP $httpCode (auth is blocking anonymous requests)."
                 exit 1
               fi
 
@@ -315,7 +329,7 @@ jobs:
   deploy-static-web-app:
     name: Deploy Static Web App
     runs-on: ubuntu-latest
-    needs: validate  # Wait for infra to be deployed
+    needs: deploy  # Wait for infra to be deployed
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -393,37 +407,93 @@ jobs:
               --environment-name default \
               --only-show-errors
 
-            echo "Unlinking any existing backend (best-effort)..."
-            az staticwebapp backends unlink \
+            currentBackendId=$(az staticwebapp backends show \
               --name "$SWA_NAME" \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --environment-name default \
-              --only-show-errors || true
+              --query backendResourceId -o tsv 2>/dev/null || true)
 
-            echo "Linking backend (with retries)..."
-            for attempt in $(seq 1 10); do
-              echo "Link attempt $attempt/10"
-              if az staticwebapp backends link \
+            if [[ -n "$currentBackendId" && "$currentBackendId" != "$backendResourceId" ]]; then
+              echo "A different backend is already linked; unlinking first."
+              az staticwebapp backends unlink \
+                --name "$SWA_NAME" \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
+                --environment-name default \
+                --remove-backend-auth \
+                --only-show-errors
+              currentBackendId=""
+            fi
+
+            if [[ "$currentBackendId" != "$backendResourceId" ]]; then
+              echo "Linking backend..."
+              az staticwebapp backends link \
                 --name "$SWA_NAME" \
                 --resource-group "$AZURE_RESOURCE_GROUP" \
                 --backend-resource-id "$backendResourceId" \
                 --backend-region "$LOCATION" \
                 --environment-name default \
-                --only-show-errors; then
-                echo "✅ Backend linked"
-                break
-              fi
-
-              if [[ $attempt -eq 10 ]]; then
-                echo "::error::Failed to link SWA backend after 10 attempts."
-                exit 1
-              fi
-              sleep 10
-            done
+                --only-show-errors
+            else
+              echo "Backend already linked; nothing to do."
+            fi
 
             echo "Backend status:"
             az staticwebapp backends show \
               --name "$SWA_NAME" \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --environment-name default \
-              -o jsonc || true
+              -o jsonc
+
+            # Smoke test with retry - backend link can take time to propagate
+            echo "Smoke test: calling SWA /api/healthz (with retry)"
+            swaHostname=$(az staticwebapp show \
+              --name "$SWA_NAME" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query defaultHostname -o tsv)
+            url="https://$swaHostname/api/healthz"
+            
+            maxAttempts=20
+            attempt=1
+            while [[ $attempt -le $maxAttempts ]]; do
+              echo "Attempt $attempt/$maxAttempts: GET $url"
+              httpCode=$(curl -sS -D /tmp/swa_headers.txt -o /tmp/swa_body.txt -w "%{http_code}" "$url" || true)
+              echo "HTTP $httpCode"
+
+              if [[ $attempt -eq 1 ]]; then
+                echo "::group::SWA response headers (attempt 1)"
+                head -60 /tmp/swa_headers.txt || true
+                echo "::endgroup::"
+              fi
+              
+              if [[ "$httpCode" == "200" ]]; then
+                echo "✅ SWA /api/healthz OK (HTTP $httpCode)"
+                break
+              fi
+
+              if [[ "$httpCode" == "401" || "$httpCode" == "403" ]]; then
+                echo "::group::SWA response headers (auth failure)"
+                head -60 /tmp/swa_headers.txt || true
+                echo "::endgroup::"
+                echo "::group::SWA response body (auth failure, truncated)"
+                head -200 /tmp/swa_body.txt || true
+                echo "::endgroup::"
+                echo "::error::SWA /api/healthz returned HTTP $httpCode (backend auth is blocking requests)."
+                exit 1
+              fi
+              
+              if [[ $attempt -eq $maxAttempts ]]; then
+                echo "::group::SWA response headers (last attempt)"
+                head -60 /tmp/swa_headers.txt || true
+                echo "::endgroup::"
+
+                echo "::group::SWA response body (last attempt, truncated)"
+                head -200 /tmp/swa_body.txt || true
+                echo "::endgroup::"
+                echo "::error::SWA /api/healthz did not return HTTP 200 after $maxAttempts attempts."
+                exit 1
+              fi
+              
+              echo "Backend link not yet propagated, waiting 15s..."
+              sleep 15
+              ((attempt++))
+            done
