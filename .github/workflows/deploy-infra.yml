@@ -277,6 +277,47 @@ jobs:
               --name "$FUNCTIONS_APP_NAME" \
               --src "functions.zip"
 
+      - name: Smoke test Functions directly
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            set -euo pipefail
+
+            FUNCTIONS_APP_NAME="certaudio-dev-func-$UNIQUE_SUFFIX"
+            hostname=$(az functionapp show \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --name "$FUNCTIONS_APP_NAME" \
+              --query defaultHostName -o tsv)
+
+            url="https://$hostname/api/certifications"
+            echo "Smoke test: $url"
+
+            maxAttempts=10
+            attempt=1
+            while [[ $attempt -le $maxAttempts ]]; do
+              echo "Attempt $attempt/$maxAttempts: GET $url"
+              httpCode=$(curl -sS -o /tmp/functions_body.txt -w "%{http_code}" "$url" || true)
+              echo "HTTP $httpCode"
+
+              # 404 means the route isn't loaded; 000 is network/TLS failure.
+              if [[ "$httpCode" != "404" && "$httpCode" != "000" ]]; then
+                echo "✅ Functions endpoint responding (HTTP $httpCode)"
+                break
+              fi
+
+              if [[ $attempt -eq $maxAttempts ]]; then
+                echo "::group::Functions response body (truncated)"
+                head -200 /tmp/functions_body.txt || true
+                echo "::endgroup::"
+                echo "::error::Functions /api/certifications is not reachable or still returns 404 after $maxAttempts attempts."
+                exit 1
+              fi
+
+              echo "Waiting 10s before retry..."
+              sleep 10
+              ((attempt++))
+            done
+
   deploy-static-web-app:
     name: Deploy Static Web App
     runs-on: ubuntu-latest
@@ -394,7 +435,7 @@ jobs:
               --environment-name default \
               -o jsonc
 
-            # Smoke test with retry - backend link takes time to propagate
+            # Smoke test with retry - backend link can take time to propagate
             echo "Smoke test: calling SWA /api/certifications (with retry)"
             swaHostname=$(az staticwebapp show \
               --name "$SWA_NAME" \
@@ -402,12 +443,18 @@ jobs:
               --query defaultHostname -o tsv)
             url="https://$swaHostname/api/certifications"
             
-            maxAttempts=6
+            maxAttempts=20
             attempt=1
             while [[ $attempt -le $maxAttempts ]]; do
               echo "Attempt $attempt/$maxAttempts: GET $url"
-              httpCode=$(curl -sS -o /dev/null -w "%{http_code}" "$url" || true)
+              httpCode=$(curl -sS -D /tmp/swa_headers.txt -o /tmp/swa_body.txt -w "%{http_code}" "$url" || true)
               echo "HTTP $httpCode"
+
+              if [[ $attempt -eq 1 ]]; then
+                echo "::group::SWA response headers (attempt 1)"
+                head -60 /tmp/swa_headers.txt || true
+                echo "::endgroup::"
+              fi
               
               if [[ "$httpCode" != "404" ]]; then
                 echo "✅ SWA /api is responding (HTTP $httpCode)"
@@ -415,11 +462,18 @@ jobs:
               fi
               
               if [[ $attempt -eq $maxAttempts ]]; then
+                echo "::group::SWA response headers (last attempt)"
+                head -60 /tmp/swa_headers.txt || true
+                echo "::endgroup::"
+
+                echo "::group::SWA response body (last attempt, truncated)"
+                head -200 /tmp/swa_body.txt || true
+                echo "::endgroup::"
                 echo "::error::SWA /api is still returning 404 after $maxAttempts attempts."
                 exit 1
               fi
               
-              echo "Backend link not yet propagated, waiting 10s..."
-              sleep 10
+              echo "Backend link not yet propagated, waiting 15s..."
+              sleep 15
               ((attempt++))
             done
