@@ -417,8 +417,6 @@ jobs:
         env:
           CERTIFICATION_ID: ${{ inputs.certificationId }}
           AUDIO_FORMAT: ${{ inputs.audioFormat }}
-          COSMOS_DB_ENDPOINT: ${{ steps.endpoints.outputs.cosmos_endpoint }}
-          STORAGE_ACCOUNT_NAME: ${{ steps.endpoints.outputs.storage_account }}
         run: |
           echo "Force regenerate enabled - purging existing episodes for $CERTIFICATION_ID/$AUDIO_FORMAT"
           
