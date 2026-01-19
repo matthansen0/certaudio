@@ -492,6 +492,8 @@ jobs:
           # Construct Search endpoint from ephemeral deployment name
           searchName="${{ needs.deploy-search.outputs.searchName }}"
           echo "SEARCH_ENDPOINT=https://${searchName}.search.windows.net" >> "$GITHUB_ENV"
+
+      - name: Ensure Cosmos, Speech, OpenAI, and Storage RBAC for this workflow principal
         run: |
           set -euo pipefail
 
