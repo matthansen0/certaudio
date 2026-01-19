@@ -296,7 +296,7 @@ jobs:
             attempt=1
             while [[ $attempt -le $maxAttempts ]]; do
               echo "Attempt $attempt/$maxAttempts: GET $url"
-              httpCode=$(curl -sS -o /tmp/functions_body.txt -w "%{http_code}" "$url" || true)
+              httpCode=$(curl -sS -D /tmp/functions_headers.txt -o /tmp/functions_body.txt -w "%{http_code}" "$url" || true)
               echo "HTTP $httpCode"
 
               # 404 means the route isn't loaded; 000 is network/TLS failure.
@@ -306,6 +306,9 @@ jobs:
                 break
               fi
               if [[ "$httpCode" == "401" || "$httpCode" == "403" ]]; then
+                echo "::group::Functions response headers"
+                head -60 /tmp/functions_headers.txt || true
+                echo "::endgroup::"
                 echo "::group::Functions response body (truncated)"
                 head -200 /tmp/functions_body.txt || true
                 echo "::endgroup::"
