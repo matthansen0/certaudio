@@ -252,17 +252,14 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Install dependencies
+      # NOTE: We do NOT install dependencies locally. The azure-functions runtime is
+      # compiled against an older glibc than the GitHub runner. By leaving requirements.txt
+      # in the zip and enabling SCM_DO_BUILD_DURING_DEPLOYMENT=true (in Bicep), the Function App
+      # performs a "remote build" and installs packages in a compatible environment.
+      - name: Zip Functions package (source only, remote build)
         run: |
           cd src/functions
-          python -m pip install --upgrade pip
-          # Package dependencies into the Azure Functions expected folder layout
-          python -m pip install -r requirements.txt --target ".python_packages/lib/site-packages"
-
-      - name: Zip Functions package
-        run: |
-          cd src/functions
-          zip -r "$GITHUB_WORKSPACE/functions.zip" .
+          zip -r "$GITHUB_WORKSPACE/functions.zip" . -x ".python_packages/*"
 
       - name: Deploy to Azure Functions (zip deploy)
         uses: azure/cli@v2
