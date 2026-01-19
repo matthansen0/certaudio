@@ -173,31 +173,6 @@ jobs:
               echo "Automation principal objectId: $automationPrincipalId"
             fi
 
-      - name: Diagnose Cosmos/Storage network access
-        uses: azure/cli@v2
-        env:
-          DEPLOYMENT_NAME: certaudio-${{ github.run_id }}-${{ github.run_attempt }}
-        with:
-          inlineScript: |
-            set -euo pipefail
-
-            storageAccountName=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.storageAccountName.value" -o tsv)
-            cosmosDbAccountName=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.cosmosDbAccountName.value" -o tsv)
-
-            echo "Storage account: $storageAccountName"
-            az storage account show \
-              --name "$storageAccountName" \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --query "{publicNetworkAccess:publicNetworkAccess, defaultAction:networkRuleSet.defaultAction, bypass:networkRuleSet.bypass, allowSharedKeyAccess:allowSharedKeyAccess, allowBlobPublicAccess:allowBlobPublicAccess}" \
-              -o jsonc || true
-
-            echo "Cosmos account:  $cosmosDbAccountName"
-            az cosmosdb show \
-              --name "$cosmosDbAccountName" \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --query "{publicNetworkAccess:publicNetworkAccess, disableLocalAuth:disableLocalAuth, ipRules:ipRules}" \
-              -o jsonc || true
-
             # Run deployment
             if ! az deployment group create \
               --name "$DEPLOYMENT_NAME" \
@@ -227,6 +202,31 @@ jobs:
 
               exit 1
             fi
+
+      - name: Diagnose Cosmos/Storage network access
+        uses: azure/cli@v2
+        env:
+          DEPLOYMENT_NAME: certaudio-${{ github.run_id }}-${{ github.run_attempt }}
+        with:
+          inlineScript: |
+            set -euo pipefail
+
+            storageAccountName=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.storageAccountName.value" -o tsv)
+            cosmosDbAccountName=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.cosmosDbAccountName.value" -o tsv)
+
+            echo "Storage account: $storageAccountName"
+            az storage account show \
+              --name "$storageAccountName" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query "{publicNetworkAccess:publicNetworkAccess, defaultAction:networkRuleSet.defaultAction, bypass:networkRuleSet.bypass, allowSharedKeyAccess:allowSharedKeyAccess, allowBlobPublicAccess:allowBlobPublicAccess}" \
+              -o jsonc || true
+
+            echo "Cosmos account:  $cosmosDbAccountName"
+            az cosmosdb show \
+              --name "$cosmosDbAccountName" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query "{publicNetworkAccess:publicNetworkAccess, disableLocalAuth:disableLocalAuth, ipRules:ipRules}" \
+              -o jsonc || true
 
       - name: Get deployment outputs
         id: outputs
@@ -335,6 +335,13 @@ jobs:
             echo "Auth settings (authsettingsV2):"
             az rest --method get --uri "$uri" -o jsonc || true
 
+            echo "Restarting Function App to ensure auth changes apply..."
+            az functionapp restart \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --name "$FUNCTIONS_APP_NAME" \
+              --only-show-errors
+            sleep 20
+
       - name: Smoke test Functions directly
         uses: azure/cli@v2
         with:
@@ -367,10 +374,29 @@ jobs:
                 echo "::group::Functions response headers"
                 head -60 /tmp/functions_headers.txt || true
                 echo "::endgroup::"
+
+                # Disambiguate: function-key auth vs App Service auth.
+                masterKey=$(az functionapp keys list \
+                  --resource-group "$AZURE_RESOURCE_GROUP" \
+                  --name "$FUNCTIONS_APP_NAME" \
+                  --query masterKey -o tsv)
+
+                if [[ -n "$masterKey" ]]; then
+                  echo "::add-mask::$masterKey"
+                  echo "Retrying once with x-functions-key header (diagnostic)..."
+                  httpCodeKeyed=$(curl -sS -D /tmp/functions_headers_keyed.txt -o /tmp/functions_body_keyed.txt -w "%{http_code}" -H "x-functions-key: $masterKey" "$url" || true)
+                  echo "HTTP (with key) $httpCodeKeyed"
+
+                  if [[ "$httpCodeKeyed" == "200" ]]; then
+                    echo "::error::Functions responded only when a host key was provided. This indicates the HTTP trigger is not anonymous."
+                    exit 1
+                  fi
+                fi
+
                 echo "::group::Functions response body (truncated)"
                 head -200 /tmp/functions_body.txt || true
                 echo "::endgroup::"
-                echo "::error::Functions /api/healthz returned HTTP $httpCode (auth is blocking anonymous requests)."
+                echo "::error::Functions /api/healthz returned HTTP $httpCode after auth disable + restart."
                 exit 1
               fi
 
