@@ -24,6 +24,7 @@ def save_episode(
     amendment_of: int,
     source_urls: list[str],
     content_hash: str,
+    title: str = None,
 ) -> dict:
     """
     Save episode metadata to Cosmos DB.
@@ -32,7 +33,7 @@ def save_episode(
         certification_id: Certification ID
         audio_format: 'instructional' or 'podcast'
         episode_number: Sequential episode number
-        skill_domain: Skill domain covered
+        skill_domain: Skill domain for grouping (without part numbers)
         skill_topics: Topics covered in this episode
         audio_url: URL to audio file
         script_url: URL to script file
@@ -41,6 +42,7 @@ def save_episode(
         amendment_of: Original episode number (if amendment)
         source_urls: Source documentation URLs
         content_hash: Hash of source content
+        title: Display title (may include part numbers). Defaults to skill_domain.
 
     Returns:
         Saved episode document
@@ -59,18 +61,18 @@ def save_episode(
     # Create episode document
     episode_id = f"{certification_id}-{audio_format}-{episode_number:03d}"
 
-    # Generate title
+    # Generate title - use provided title or fall back to skill_domain
     if is_amendment:
-        title = f"Update: {skill_domain}"
+        display_title = f"Update: {title or skill_domain}"
     else:
-        title = skill_domain
+        display_title = title or skill_domain
 
     episode_doc = {
         "id": episode_id,
         "certificationId": certification_id,
         "format": audio_format,
         "sequenceNumber": episode_number,
-        "title": title,
+        "title": display_title,
         "skillDomain": skill_domain,
         "skillTopics": skill_topics,
         "audioUrl": audio_url,

@@ -466,6 +466,7 @@ def process_skill_domain(
     instructional_voice: str = "en-US-AndrewNeural",
     podcast_host_voice: str = "en-US-GuyNeural",
     podcast_expert_voice: str = "en-US-TonyNeural",
+    episode_title: str = None,
 ) -> list[dict]:
     """
     Process a single skill domain and generate episode(s).
@@ -504,7 +505,11 @@ def process_skill_domain(
     
     while part_number <= max_parts:
         part_suffix = f" (Part {part_number})" if part_number > 1 else ""
-        domain_title = f"{skill_domain}{part_suffix}"
+        # Use episode_title if provided (first part), otherwise build from skill_domain
+        if part_number == 1 and episode_title:
+            domain_title = episode_title
+        else:
+            domain_title = f"{skill_domain}{part_suffix}"
         
         print(f"\nStep 2: Generating narration script{part_suffix}...")
         min_words = base_min_words
@@ -580,7 +585,7 @@ def process_skill_domain(
             certification_id=certification_id,
             audio_format=audio_format,
             episode_number=current_episode_number,
-            skill_domain=domain_title,
+            skill_domain=skill_domain,  # Original domain for grouping
             skill_topics=skill_topics,
             audio_url=upload_result["audio_url"],
             script_url=upload_result["script_url"],
@@ -589,6 +594,7 @@ def process_skill_domain(
             amendment_of=0,
             source_urls=all_source_urls,
             content_hash=retrieved_content["content_hash"],
+            title=domain_title,  # Title with part number for display
         )
         print(f"  - Episode ID: {episode_doc['id']}")
         
@@ -806,7 +812,7 @@ def main():
             # process_skill_domain returns a list (may generate multiple parts)
             episodes = process_skill_domain(
                 episode_number=episode_number,
-                skill_domain=episode_title,
+                skill_domain=unit["domain"],  # Original domain for grouping
                 skill_topics=unit["topics"],
                 source_urls=unit.get("sourceUrls", []),
                 certification_id=args.certification_id,
@@ -818,6 +824,7 @@ def main():
                 instructional_voice=args.instructional_voice,
                 podcast_host_voice=args.podcast_host_voice,
                 podcast_expert_voice=args.podcast_expert_voice,
+                episode_title=episode_title,  # Title with part number for display
             )
             generated_episodes.extend(episodes)
             
