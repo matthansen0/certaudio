@@ -72,44 +72,74 @@ def get_speech_config() -> speechsdk.SpeechConfig:
     return config
 
 
-def synthesize_ssml(ssml_content: str, output_path: str) -> tuple[bool, float]:
+def synthesize_ssml(ssml_content: str, output_path: str, max_retries: int = 3) -> tuple[bool, float]:
     """
-    Synthesize SSML to audio file.
+    Synthesize SSML to audio file with retry logic.
 
     Args:
         ssml_content: SSML markup
         output_path: Path to save MP3 file
+        max_retries: Maximum number of retry attempts
 
     Returns:
         Tuple of (success, duration_seconds)
     """
-    config = get_speech_config()
+    import time
+    
+    base_delay = 2  # Start with 2 second delay
+    
+    for attempt in range(max_retries):
+        config = get_speech_config()
 
-    # Configure audio output to file
-    audio_config = speechsdk.audio.AudioOutputConfig(filename=output_path)
+        # Configure audio output to file
+        audio_config = speechsdk.audio.AudioOutputConfig(filename=output_path)
 
-    # Create synthesizer
-    synthesizer = speechsdk.SpeechSynthesizer(
-        speech_config=config, audio_config=audio_config
-    )
+        # Create synthesizer
+        synthesizer = speechsdk.SpeechSynthesizer(
+            speech_config=config, audio_config=audio_config
+        )
 
-    # Synthesize
-    result = synthesizer.speak_ssml_async(ssml_content).get()
+        # Synthesize
+        result = synthesizer.speak_ssml_async(ssml_content).get()
 
-    if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-        # Calculate duration from audio data
-        # MP3 at 192kbps: duration = file_size_bytes * 8 / 192000
-        file_size = os.path.getsize(output_path)
-        duration_seconds = (file_size * 8) / 192000
-        return True, duration_seconds
+        if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+            # Calculate duration from audio data
+            # MP3 at 192kbps: duration = file_size_bytes * 8 / 192000
+            file_size = os.path.getsize(output_path)
+            duration_seconds = (file_size * 8) / 192000
+            return True, duration_seconds
 
-    elif result.reason == speechsdk.ResultReason.Canceled:
-        cancellation = result.cancellation_details
-        print(f"Speech synthesis canceled: {cancellation.reason}")
-        if cancellation.reason == speechsdk.CancellationReason.Error:
-            print(f"Error details: {cancellation.error_details}")
-        return False, 0
-
+        elif result.reason == speechsdk.ResultReason.Canceled:
+            cancellation = result.cancellation_details
+            error_msg = f"Speech synthesis canceled: {cancellation.reason}"
+            if cancellation.reason == speechsdk.CancellationReason.Error:
+                error_msg += f" - {cancellation.error_details}"
+            
+            # Check if retryable (rate limit, transient errors)
+            is_retryable = (
+                "429" in str(cancellation.error_details) or
+                "TooManyRequests" in str(cancellation.error_details) or
+                "ServiceUnavailable" in str(cancellation.error_details) or
+                "timeout" in str(cancellation.error_details).lower()
+            )
+            
+            if is_retryable and attempt < max_retries - 1:
+                delay = base_delay * (2 ** attempt)  # 2, 4, 8 seconds
+                print(f"  TTS rate limit/transient error, retrying in {delay}s (attempt {attempt + 1}/{max_retries})...")
+                time.sleep(delay)
+                continue
+            else:
+                print(error_msg)
+                return False, 0
+        else:
+            # Unknown failure
+            if attempt < max_retries - 1:
+                delay = base_delay * (2 ** attempt)
+                print(f"  TTS failed (reason: {result.reason}), retrying in {delay}s...")
+                time.sleep(delay)
+                continue
+            return False, 0
+    
     return False, 0
 
 

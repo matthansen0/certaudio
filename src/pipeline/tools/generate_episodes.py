@@ -19,6 +19,7 @@ import sys
 import re
 import time
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from xml.sax.saxutils import escape
 from pathlib import Path
 
@@ -612,6 +613,10 @@ def process_skill_domain(
     return episode_docs
 
 
+# Maximum concurrent TTS requests (Azure Speech S0 tier supports 20, we use 10 for safety)
+TTS_MAX_WORKERS = int(os.environ.get("TTS_MAX_WORKERS", "10"))
+
+
 def split_narration_for_tts(narration: str, max_words_per_segment: int = 850) -> list[str]:
     """Split narration into segments to keep each TTS request under the Speech service limit."""
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n", narration) if p.strip()]
@@ -674,7 +679,155 @@ def synthesize_audio_with_chunking(
     }
 
 
-def main():
+def prepare_episode(
+    episode_number: int,
+    skill_domain: str,
+    skill_topics: list[str],
+    source_urls: list[str],
+    certification_id: str,
+    audio_format: str,
+    search_client: SearchClient,
+    openai_client: AzureOpenAI,
+    jinja_env: Environment,
+    instructional_voice: str,
+    podcast_host_voice: str,
+    podcast_expert_voice: str,
+    episode_title: str,
+) -> dict:
+    """
+    Prepare episode content (retrieval + narration + SSML) without synthesizing audio.
+    Returns a dict with all data needed for TTS and finalization.
+    """
+    print(f"\n--- Episode {episode_number}: {episode_title} ---")
+    
+    # 1. Retrieve relevant content from AI Search
+    print("  [1/3] Retrieving content...")
+    retrieved_content = retrieve_content(
+        certification_id=certification_id,
+        skill_domain=skill_domain,
+        skill_topics=skill_topics,
+        search_client=search_client,
+        openai_client=openai_client,
+    )
+    
+    all_source_urls = list(set(source_urls + retrieved_content["source_urls"]))
+    
+    # 2. Generate narration
+    print("  [2/3] Generating narration...")
+    base_min_words = int(os.environ.get("MIN_WORDS_PER_PART", "1200"))
+    max_length_retries = 1
+    
+    min_words = base_min_words
+    for attempt in range(max_length_retries + 1):
+        narration = generate_narration(
+            episode_number=episode_number,
+            skill_domain=skill_domain,
+            skill_topics=skill_topics,
+            retrieved_content=retrieved_content,
+            audio_format=audio_format,
+            openai_client=openai_client,
+            jinja_env=jinja_env,
+            is_continuation=False,
+            part_number=1,
+            topics_covered_so_far="",
+            min_words=min_words,
+        )
+        
+        narration = clean_narration(narration)
+        word_count = len(narration.split())
+        
+        if word_count >= min_words or attempt == max_length_retries:
+            break
+        
+        min_words = int(min_words * 1.15)
+        print(f"    Narration too short ({word_count} words); retrying...")
+    
+    print(f"    Generated {word_count} words")
+    
+    # 3. Convert to SSML
+    print("  [3/3] Converting to SSML...")
+    ssml = generate_ssml(
+        narration=narration,
+        audio_format=audio_format,
+        openai_client=openai_client,
+        jinja_env=jinja_env,
+        instructional_voice=instructional_voice,
+        podcast_host_voice=podcast_host_voice,
+        podcast_expert_voice=podcast_expert_voice,
+    )
+    
+    return {
+        "episode_number": episode_number,
+        "skill_domain": skill_domain,
+        "skill_topics": skill_topics,
+        "episode_title": episode_title,
+        "narration": narration,
+        "ssml": ssml,
+        "source_urls": all_source_urls,
+        "content_hash": retrieved_content["content_hash"],
+    }
+
+
+def synthesize_episode_audio(
+    prepared: dict,
+    certification_id: str,
+    audio_format: str,
+) -> dict:
+    """
+    Synthesize audio for a prepared episode. This is the slow step that runs in parallel.
+    Thread-safe: only uses local state and Azure Speech API calls.
+    """
+    return synthesize_audio_with_chunking(
+        narration=prepared["narration"],
+        ssml=prepared["ssml"],
+        episode_number=prepared["episode_number"],
+        certification_id=certification_id,
+        audio_format=audio_format,
+    )
+
+
+def finalize_episode(
+    prepared: dict,
+    certification_id: str,
+    audio_format: str,
+    cosmos_client: CosmosClient,
+) -> dict:
+    """
+    Upload audio and save episode to Cosmos DB.
+    """
+    audio_result = prepared["audio_result"]
+    
+    # Upload to blob storage
+    upload_result = upload_to_blob(
+        audio_file_path=audio_result["audio_path"],
+        script_content=prepared["narration"],
+        ssml_content=prepared["ssml"],
+        certification_id=certification_id,
+        audio_format=audio_format,
+        episode_number=prepared["episode_number"],
+    )
+    
+    # Save to Cosmos DB
+    episode_doc = save_episode(
+        certification_id=certification_id,
+        audio_format=audio_format,
+        episode_number=prepared["episode_number"],
+        skill_domain=prepared["skill_domain"],
+        skill_topics=prepared["skill_topics"],
+        audio_url=upload_result["audio_url"],
+        script_url=upload_result["script_url"],
+        duration_seconds=audio_result["duration_seconds"],
+        is_amendment=False,
+        amendment_of=0,
+        source_urls=prepared["source_urls"],
+        content_hash=prepared["content_hash"],
+        title=prepared["episode_title"],
+    )
+    
+    return episode_doc
+
+
+
     """Main entry point for episode generation."""
     parser = argparse.ArgumentParser(description="Generate audio episodes for certification")
     parser.add_argument("--certification-id", required=True, help="Certification ID (e.g., dp-700)")
@@ -789,9 +942,16 @@ def main():
         print("Force regenerate mode: will overwrite existing episodes")
 
     # Process each episode unit in the batch
-    generated_episodes = []
+    # Phase 1: Prepare all episodes (content retrieval + narration generation)
+    # This is done sequentially as GPT calls benefit from rate limit backoff
+    prepared_episodes = []
     skipped_episodes = []
     errors: list[str] = []
+    
+    print(f"\n{'='*60}")
+    print(f"PHASE 1: Preparing narrations for {len(batch_units)} episodes")
+    print(f"{'='*60}")
+    
     for i, unit in enumerate(batch_units):
         episode_number = base_episode_number + i
         # Build episode title with part number if multi-part domain
@@ -809,31 +969,76 @@ def main():
             continue
         
         try:
-            # process_skill_domain returns a list (may generate multiple parts)
-            episodes = process_skill_domain(
+            # Prepare episode (content retrieval + narration + SSML)
+            prepared = prepare_episode(
                 episode_number=episode_number,
-                skill_domain=unit["domain"],  # Original domain for grouping
+                skill_domain=unit["domain"],
                 skill_topics=unit["topics"],
                 source_urls=unit.get("sourceUrls", []),
                 certification_id=args.certification_id,
                 audio_format=args.audio_format,
                 search_client=search_client,
                 openai_client=openai_client,
-                cosmos_client=cosmos_client,
                 jinja_env=jinja_env,
                 instructional_voice=args.instructional_voice,
                 podcast_host_voice=args.podcast_host_voice,
                 podcast_expert_voice=args.podcast_expert_voice,
-                episode_title=episode_title,  # Title with part number for display
+                episode_title=episode_title,
             )
-            generated_episodes.extend(episodes)
-            
-            # If multiple parts were generated, adjust the episode counter for subsequent domains
-            if len(episodes) > 1:
-                print(f"  - Generated {len(episodes)} parts for this domain")
+            prepared_episodes.append(prepared)
         except Exception as e:
-            msg = f"Error processing '{episode_title}' (episode {episode_number}): {e}"
+            msg = f"Error preparing '{episode_title}' (episode {episode_number}): {e}"
             print(f"\n{msg}", file=sys.stderr)
+            errors.append(msg)
+    
+    # Phase 2: Synthesize audio in parallel (this is the slow part)
+    print(f"\n{'='*60}")
+    print(f"PHASE 2: Synthesizing {len(prepared_episodes)} episodes in parallel (max {TTS_MAX_WORKERS} concurrent)")
+    print(f"{'='*60}")
+    
+    synthesized_episodes = []
+    with ThreadPoolExecutor(max_workers=TTS_MAX_WORKERS) as executor:
+        future_to_episode = {
+            executor.submit(
+                synthesize_episode_audio,
+                ep,
+                args.certification_id,
+                args.audio_format,
+            ): ep
+            for ep in prepared_episodes
+        }
+        
+        for future in as_completed(future_to_episode):
+            ep = future_to_episode[future]
+            try:
+                audio_result = future.result()
+                ep["audio_result"] = audio_result
+                synthesized_episodes.append(ep)
+                print(f"  ✓ Episode {ep['episode_number']}: {audio_result['duration_seconds']:.1f}s")
+            except Exception as e:
+                msg = f"Error synthesizing episode {ep['episode_number']}: {e}"
+                print(f"  ✗ {msg}", file=sys.stderr)
+                errors.append(msg)
+    
+    # Phase 3: Upload and save (relatively fast, done sequentially)
+    print(f"\n{'='*60}")
+    print(f"PHASE 3: Uploading and saving {len(synthesized_episodes)} episodes")
+    print(f"{'='*60}")
+    
+    generated_episodes = []
+    for ep in synthesized_episodes:
+        try:
+            episode_doc = finalize_episode(
+                ep,
+                args.certification_id,
+                args.audio_format,
+                cosmos_client,
+            )
+            generated_episodes.append(episode_doc)
+            print(f"  ✓ Saved {episode_doc['id']}")
+        except Exception as e:
+            msg = f"Error finalizing episode {ep['episode_number']}: {e}"
+            print(f"  ✗ {msg}", file=sys.stderr)
             errors.append(msg)
 
     # Summary

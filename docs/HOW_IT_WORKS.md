@@ -636,10 +636,48 @@ generate-episodes:
   strategy:
     matrix:
       batchIndex: ${{ fromJson(needs.discover-content.outputs.batchIndices) }}
-    max-parallel: 3  # Don't overwhelm rate limits
+    max-parallel: 1  # Sequential batches (TTS parallelized within each)
 ```
 
-This creates parallel jobs: batch 0, batch 1, batch 2, etc. Each batch processes ~10 episodes.
+Each batch processes ~10 episodes with parallel TTS synthesis (10 concurrent by default).
+
+---
+
+### Alternative: Azure Container Instance (ACI)
+
+If you're hitting **GitHub Actions limits** (6-hour timeout, free tier minutes), you can run generation directly in Azure:
+
+```bash
+# Run full generation as an ACI job (no timeout, no batching)
+./scripts/run-aci-job.sh dp-700 comprehensive instructional
+```
+
+**Why ACI?**
+| Aspect | GitHub Actions | ACI |
+|--------|---------------|-----|
+| **Timeout** | 6 hours max | None |
+| **Minutes** | 2000/month free | ~$0.50/hour |
+| **Auth** | OIDC (expires) | Managed Identity |
+| **Complexity** | Batched | Single job |
+
+**Setup**:
+1. Build and push Docker image:
+   ```bash
+   docker build -t ghcr.io/yourorg/certaudio:latest .
+   docker push ghcr.io/yourorg/certaudio:latest
+   ```
+
+2. Run the job:
+   ```bash
+   ./scripts/run-aci-job.sh dp-700
+   ```
+
+3. Monitor:
+   ```bash
+   az container logs -n certaudio-dp-700-20260119-140000 -g rg-certaudio-dev --follow
+   ```
+
+The ACI runner uses the same code with managed identity (no token expiration issues).
 
 ---
 
