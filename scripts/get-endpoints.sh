@@ -41,7 +41,6 @@ short="${suffix:0:10}"
 openai="certaudio-dev-openai-$suffix"
 speech="certaudio-dev-speech-$suffix"
 docintel="certaudio-dev-docintel-$suffix"
-search="certaudio-dev-search-$suffix"
 cosmos="certaudio-dev-cosmos-$suffix"
 
 # Storage account names are truncated to 24 chars in Bicep.
@@ -52,9 +51,9 @@ OPENAI_ENDPOINT=$(az cognitiveservices account show -g "$rg" -n "$openai" --quer
 SPEECH_ENDPOINT=$(az cognitiveservices account show -g "$rg" -n "$speech" --query properties.endpoint -o tsv)
 SPEECH_REGION=$(az cognitiveservices account show -g "$rg" -n "$speech" --query location -o tsv)
 DOCUMENT_INTELLIGENCE_ENDPOINT=$(az cognitiveservices account show -g "$rg" -n "$docintel" --query properties.endpoint -o tsv)
-SEARCH_NAME=$(az search service show -g "$rg" -n "$search" --query name -o tsv)
-SEARCH_ENDPOINT="https://${SEARCH_NAME}.search.windows.net"
 COSMOS_DB_ENDPOINT=$(az cosmosdb show -g "$rg" -n "$cosmos" --query documentEndpoint -o tsv)
+# Note: AI Search is now ephemeral (deployed only during content generation)
+# The SEARCH_ENDPOINT is constructed dynamically in workflows, not fetched here
 
 cat <<EOF
 RG=$rg
@@ -65,7 +64,6 @@ OPENAI_ENDPOINT=$OPENAI_ENDPOINT
 SPEECH_ENDPOINT=$SPEECH_ENDPOINT
 SPEECH_REGION=$SPEECH_REGION
 DOCUMENT_INTELLIGENCE_ENDPOINT=$DOCUMENT_INTELLIGENCE_ENDPOINT
-SEARCH_ENDPOINT=$SEARCH_ENDPOINT
 COSMOS_DB_ENDPOINT=$COSMOS_DB_ENDPOINT
 STORAGE_ACCOUNT_NAME=$storage
 EOF
@@ -81,8 +79,8 @@ if [[ "${SET_GH_SECRETS:-false}" == "true" ]]; then
   gh secret set OPENAI_ENDPOINT -b"$OPENAI_ENDPOINT"
   gh secret set SPEECH_ENDPOINT -b"$SPEECH_ENDPOINT"
   gh secret set DOCUMENT_INTELLIGENCE_ENDPOINT -b"$DOCUMENT_INTELLIGENCE_ENDPOINT"
-  gh secret set SEARCH_ENDPOINT -b"$SEARCH_ENDPOINT"
   gh secret set COSMOS_DB_ENDPOINT -b"$COSMOS_DB_ENDPOINT"
   gh secret set STORAGE_ACCOUNT_NAME -b"$storage"
+  # Note: SEARCH_ENDPOINT is not set here - AI Search is ephemeral
   echo "Done."
 fi
