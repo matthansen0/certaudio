@@ -193,8 +193,8 @@ resource functionsApp 'Microsoft.Web/sites@2023-12-01' = {
 }
 
 // Ensure App Service Authentication/Authorization (EasyAuth) is disabled for this API.
-// This prevents unexpected 401s if auth settings get toggled in the portal or by policy.
-resource functionsAuth 'Microsoft.Web/sites/config@2023-12-01' = {
+// We set both authsettingsV2 and legacy authsettings to guard against drift.
+resource functionsAuth 'Microsoft.Web/sites/config@2022-03-01' = {
   parent: functionsApp
   name: 'authsettingsV2'
   properties: {
@@ -205,6 +205,14 @@ resource functionsAuth 'Microsoft.Web/sites/config@2023-12-01' = {
       requireAuthentication: false
       unauthenticatedClientAction: 'AllowAnonymous'
     }
+  }
+}
+
+resource functionsAuthLegacy 'Microsoft.Web/sites/config@2022-03-01' = {
+  parent: functionsApp
+  name: 'authsettings'
+  properties: {
+    enabled: false
   }
 }
 
