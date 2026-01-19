@@ -153,6 +153,8 @@ env:
   UNIQUE_SUFFIX: ${{ secrets.AZURE_UNIQUE_SUFFIX || github.run_id }}
   # Location for ephemeral AI Search
   LOCATION: 'centralus'
+  # Fixed search name pattern (avoids GitHub secret masking issues with outputs)
+  SEARCH_NAME: 'certaudio-search-ephemeral'
 
 # =============================================================================
 # REQUIRED SECRETS (configure in GitHub Settings > Secrets > Actions):
@@ -191,8 +193,6 @@ jobs:
     name: Deploy Ephemeral AI Search
     needs: check-secrets
     runs-on: ubuntu-latest
-    outputs:
-      searchName: ${{ steps.deploy.outputs.searchName }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -257,29 +257,23 @@ jobs:
             )
             
             echo "Deploying ephemeral AI Search with principal ID: $principalId"
+            echo "Using fixed search name: $SEARCH_NAME"
             
             deploymentName="search-ephemeral-${{ github.run_id }}"
             
-            result=$(az deployment group create \
+            # Deploy with fixed search name to avoid output masking issues
+            az deployment group create \
               --name "$deploymentName" \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --template-file ./infra/modules/search-ephemeral.bicep \
               --parameters \
-                resourcePrefix="certaudio-dev" \
+                searchName="$SEARCH_NAME" \
                 location="$LOCATION" \
-                uniqueSuffix="$UNIQUE_SUFFIX" \
                 automationPrincipalId="$principalId" \
-              --query 'properties.outputs' \
-              -o json)
+              --only-show-errors
             
-            searchEndpoint=$(echo "$result" | jq -r '.searchEndpoint.value')
-            searchName=$(echo "$result" | jq -r '.searchName.value')
-            
-            echo "searchEndpoint=$searchEndpoint" >> $GITHUB_OUTPUT
-            echo "searchName=$searchName" >> $GITHUB_OUTPUT
-            
-            echo "✅ AI Search deployed: $searchName"
-            echo "   Endpoint: $searchEndpoint"
+            echo "✅ AI Search deployed: $SEARCH_NAME"
+            echo "   Endpoint: https://${SEARCH_NAME}.search.windows.net"
             
             # Wait for RBAC to propagate
             echo "Waiting 30s for RBAC propagation..."
@@ -489,9 +483,8 @@ jobs:
           # Get endpoints from always-on infra (excludes Search which is ephemeral)
           echo "$out" | awk -F= '/^(OPENAI_ENDPOINT|SPEECH_ENDPOINT|SPEECH_REGION|DOCUMENT_INTELLIGENCE_ENDPOINT|COSMOS_DB_ENDPOINT|STORAGE_ACCOUNT_NAME)=/ {print $0}' >> "$GITHUB_ENV"
           
-          # Construct Search endpoint from ephemeral deployment name
-          searchName="${{ needs.deploy-search.outputs.searchName }}"
-          echo "SEARCH_ENDPOINT=https://${searchName}.search.windows.net" >> "$GITHUB_ENV"
+          # Construct Search endpoint from fixed name (avoids GitHub secret masking)
+          echo "SEARCH_ENDPOINT=https://${SEARCH_NAME}.search.windows.net" >> "$GITHUB_ENV"
 
       - name: Ensure Cosmos, Speech, OpenAI, and Storage RBAC for this workflow principal
         run: |
@@ -721,9 +714,8 @@ jobs:
           # Get endpoints from always-on infra (excludes Search which is ephemeral)
           echo "$out" | awk -F= '/^(OPENAI_ENDPOINT|SPEECH_ENDPOINT|SPEECH_REGION|DOCUMENT_INTELLIGENCE_ENDPOINT|COSMOS_DB_ENDPOINT|STORAGE_ACCOUNT_NAME)=/ {print $0}' >> "$GITHUB_ENV"
           
-          # Construct Search endpoint from ephemeral deployment name
-          searchName="${{ needs.deploy-search.outputs.searchName }}"
-          echo "SEARCH_ENDPOINT=https://${searchName}.search.windows.net" >> "$GITHUB_ENV"
+          # Construct Search endpoint from fixed name (avoids GitHub secret masking)
+          echo "SEARCH_ENDPOINT=https://${SEARCH_NAME}.search.windows.net" >> "$GITHUB_ENV"
 
       - name: Generate episode batch
         env:
@@ -903,7 +895,7 @@ jobs:
   cleanup-search:
     name: Delete Ephemeral AI Search
     needs: [deploy-search, generate-episodes, finalize]
-    if: always() && needs.deploy-search.outputs.searchName != ''
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Azure Login
@@ -919,26 +911,24 @@ jobs:
           inlineScript: |
             set -euo pipefail
             
-            searchName="${{ needs.deploy-search.outputs.searchName }}"
-            
-            echo "Deleting ephemeral AI Search: $searchName"
+            echo "Deleting ephemeral AI Search: $SEARCH_NAME"
             
             # Check if it exists first
             exists=$(az search service show \
-              --name "$searchName" \
+              --name "$SEARCH_NAME" \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --query name -o tsv 2>/dev/null || echo "")
             
             if [[ -n "$exists" ]]; then
               az search service delete \
-                --name "$searchName" \
+                --name "$SEARCH_NAME" \
                 --resource-group "$AZURE_RESOURCE_GROUP" \
                 --yes
               
-              echo "✅ AI Search deleted: $searchName"
+              echo "✅ AI Search deleted: $SEARCH_NAME"
               echo "   Monthly savings: ~\$250"
             else
-              echo "⚠️ AI Search not found (may have been deleted already): $searchName"
+              echo "⚠️ AI Search not found (may have been deleted already): $SEARCH_NAME"
             fi
       
       - name: Summary

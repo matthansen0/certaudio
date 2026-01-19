@@ -8,14 +8,11 @@ targetScope = 'resourceGroup'
 // PARAMETERS
 // ============================================================================
 
-@description('Resource prefix for naming')
-param resourcePrefix string = 'certaudio-dev'
+@description('Name of the search service')
+param searchName string = 'certaudio-search-ephemeral'
 
 @description('Azure region for resources')
 param location string = resourceGroup().location
-
-@description('Unique suffix for globally unique resource names')
-param uniqueSuffix string = uniqueString(resourceGroup().id)
 
 @description('AAD object ID of the automation principal for RBAC')
 param automationPrincipalId string = ''
@@ -30,7 +27,7 @@ param tags object = {
 // VARIABLES
 // ============================================================================
 
-var searchName = '${resourcePrefix}-search-${uniqueSuffix}'
+// searchName is now a parameter, no need for variable
 
 // ============================================================================
 // RESOURCES
