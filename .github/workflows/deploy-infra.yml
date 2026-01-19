@@ -277,6 +277,28 @@ jobs:
               --name "$FUNCTIONS_APP_NAME" \
               --src "functions.zip"
 
+      - name: Disable App Service authentication (EasyAuth)
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            set -euo pipefail
+
+            FUNCTIONS_APP_NAME="certaudio-dev-func-$UNIQUE_SUFFIX"
+            echo "Disabling App Service auth for: $FUNCTIONS_APP_NAME"
+
+            # Some tenants/policies may enable EasyAuth by default; force it off.
+            az webapp auth update \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --name "$FUNCTIONS_APP_NAME" \
+              --enabled false \
+              --only-show-errors
+
+            echo "Auth settings (sanity):"
+            az webapp auth show \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --name "$FUNCTIONS_APP_NAME" \
+              -o jsonc || true
+
       - name: Smoke test Functions directly
         uses: azure/cli@v2
         with:
