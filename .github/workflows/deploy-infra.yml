@@ -261,18 +261,21 @@ jobs:
           cd src/functions
           zip -r "$GITHUB_WORKSPACE/functions.zip" . -x ".python_packages/*"
 
-      - name: Deploy to Azure Functions (zip deploy)
+      - name: Deploy to Azure Functions (zip deploy with remote build)
         uses: azure/cli@v2
         with:
           inlineScript: |
             set -euo pipefail
             # Construct name directly (can't use job outputs - they contain secrets and get masked)
             FUNCTIONS_APP_NAME="certaudio-dev-func-$UNIQUE_SUFFIX"
-            echo "Deploying to Functions App: $FUNCTIONS_APP_NAME"
+            echo "Deploying to Functions App: $FUNCTIONS_APP_NAME (remote build enabled)"
+            # --build-remote ensures pip install runs on Azure, avoiding glibc mismatch
             az functionapp deployment source config-zip \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --name "$FUNCTIONS_APP_NAME" \
-              --src "functions.zip"
+              --src "functions.zip" \
+              --build-remote true \
+              --timeout 300
 
       - name: Disable App Service authentication (EasyAuth)
         uses: azure/cli@v2
