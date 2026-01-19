@@ -220,9 +220,10 @@ def get_audio(req: func.HttpRequest) -> func.HttpResponse:
 
     try:
         blob_service = get_blob_service()
-        container_name = f"{cert_id}-{audio_format}"
+        # Fixed container name with path prefix for organization
+        container_name = "audio"
         episode_id = _normalize_episode_id(episode_num)
-        blob_name = f"episodes/{episode_id}.mp3"
+        blob_name = f"{cert_id}/{audio_format}/episodes/{episode_id}.mp3"
 
         blob_client = blob_service.get_blob_client(
             container=container_name, blob=blob_name
@@ -424,9 +425,10 @@ def get_script(req: func.HttpRequest) -> func.HttpResponse:
 
     try:
         blob_service = get_blob_service()
-        container_name = f"{cert_id}-{audio_format}-scripts"
+        # Fixed container name with path prefix for organization
+        container_name = "scripts"
         episode_id = _normalize_episode_id(episode_num)
-        blob_name = f"scripts/{episode_id}.md"
+        blob_name = f"{cert_id}/{audio_format}/scripts/{episode_id}.md"
 
         blob_client = blob_service.get_blob_client(
             container=container_name, blob=blob_name

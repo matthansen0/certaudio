@@ -7,16 +7,6 @@ targetScope = 'resourceGroup'
 // PARAMETERS
 // ============================================================================
 
-@description('Microsoft certification ID (e.g., ai-102, az-204, az-104)')
-param certificationId string = 'ai-102'
-
-@description('Audio format for the course')
-@allowed(['instructional', 'podcast'])
-param audioFormat string = 'instructional'
-
-@description('Enable Azure AD B2C authentication')
-param enableB2C bool = false
-
 @description('Azure region for resources')
 param location string = resourceGroup().location
 
@@ -39,9 +29,7 @@ var environment = 'dev'
 var resourcePrefix = '${baseName}-${environment}'
 var tags = {
   project: 'certification-audio-platform'
-  certification: certificationId
   environment: environment
-  audioFormat: audioFormat
 }
 
 // ============================================================================
@@ -68,8 +56,6 @@ module data 'modules/data.bicep' = {
     resourcePrefix: resourcePrefix
     location: location
     uniqueSuffix: uniqueSuffix
-    certificationId: certificationId
-    audioFormat: audioFormat
     automationPrincipalId: automationPrincipalId
     tags: tags
   }
@@ -89,19 +75,11 @@ module web 'modules/web.bicep' = {
     openAiEndpoint: aiServices.outputs.openAiEndpoint
     speechEndpoint: aiServices.outputs.speechEndpoint
     searchEndpoint: aiServices.outputs.searchEndpoint
-    enableB2C: enableB2C
     tags: tags
   }
 }
 
-// Identity: Azure AD B2C (conditional)
-module identity 'modules/identity.bicep' = if (enableB2C) {
-  name: 'deploy-identity'
-  params: {
-    resourcePrefix: resourcePrefix
-    staticWebAppName: web.outputs.staticWebAppName
-  }
-}
+
 
 // ============================================================================
 // OUTPUTS
@@ -117,4 +95,3 @@ output openAiEndpoint string = aiServices.outputs.openAiEndpoint
 output speechEndpoint string = aiServices.outputs.speechEndpoint
 output searchEndpoint string = aiServices.outputs.searchEndpoint
 output documentIntelligenceEndpoint string = aiServices.outputs.documentIntelligenceEndpoint
-output b2cTenantName string = enableB2C && identity != null ? identity!.outputs.b2cTenantName : 'N/A - B2C disabled'

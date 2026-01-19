@@ -47,15 +47,11 @@ def upload_to_blob(
     """
     blob_service = get_blob_service_client()
 
-    # Container name format: {certificationId}-{format}
-    container_name = f"{certification_id}-{audio_format}"
-    scripts_container_name = f"{certification_id}-{audio_format}-scripts"
+    # Fixed container names - use path prefixes for cert/format organization
+    audio_container = blob_service.get_container_client("audio")
+    scripts_container = blob_service.get_container_client("scripts")
 
-    # Get or create containers
-    audio_container = blob_service.get_container_client(container_name)
-    scripts_container = blob_service.get_container_client(scripts_container_name)
-
-    # Ensure containers exist
+    # Ensure containers exist (they should be created by infra, but just in case)
     try:
         audio_container.create_container()
     except Exception:
@@ -66,11 +62,11 @@ def upload_to_blob(
     except Exception:
         pass  # Container already exists
 
-    # File paths in blob storage
+    # File paths in blob storage - use path prefixes for organization
     episode_id = f"{episode_number:03d}"
-    audio_blob_path = f"episodes/{episode_id}.mp3"
-    script_blob_path = f"scripts/{episode_id}.md"
-    ssml_blob_path = f"ssml/{episode_id}.ssml"
+    audio_blob_path = f"{certification_id}/{audio_format}/episodes/{episode_id}.mp3"
+    script_blob_path = f"{certification_id}/{audio_format}/scripts/{episode_id}.md"
+    ssml_blob_path = f"{certification_id}/{audio_format}/ssml/{episode_id}.ssml"
 
     # Upload audio file
     print(f"Uploading audio: {audio_blob_path}")
@@ -111,7 +107,7 @@ def upload_to_blob(
         pass
 
     return {
-        "audio_url": f"{base_url}/{container_name}/{audio_blob_path}",
-        "script_url": f"{base_url}/{scripts_container_name}/{script_blob_path}",
-        "ssml_url": f"{base_url}/{scripts_container_name}/{ssml_blob_path}",
+        "audio_url": f"{base_url}/audio/{audio_blob_path}",
+        "script_url": f"{base_url}/scripts/{script_blob_path}",
+        "ssml_url": f"{base_url}/scripts/{ssml_blob_path}",
     }

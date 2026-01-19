@@ -8,8 +8,6 @@
 param resourcePrefix string
 param location string
 param uniqueSuffix string
-param certificationId string
-param audioFormat string
 param tags object
 @description('Optional AAD object ID of an automation principal (e.g., GitHub OIDC service principal) that runs content-generation workflows. If provided, it is granted Storage Blob Data Contributor on the storage account.')
 param automationPrincipalId string = ''
@@ -189,20 +187,20 @@ resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01'
   }
 }
 
-// Container for audio content: {certificationId}/{format}/episodes/
+// Container for audio content - uses path prefixes: {certificationId}/{audioFormat}/episodes/
 // Container names must be 3-63 characters, lowercase letters, numbers, and hyphens
 resource audioContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
   parent: blobService
-  name: 'audio-${certificationId}-${audioFormat}'
+  name: 'audio'
   properties: {
     publicAccess: 'None'
   }
 }
 
-// Container for scripts and metadata
+// Container for scripts and metadata - uses path prefixes: {certificationId}/{audioFormat}/
 resource scriptsContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
   parent: blobService
-  name: 'scripts-${certificationId}-${audioFormat}'
+  name: 'scripts'
   properties: {
     publicAccess: 'None'
   }

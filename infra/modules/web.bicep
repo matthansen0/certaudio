@@ -17,7 +17,6 @@ param openAiEndpoint string
 param speechEndpoint string
 @description('AI Search endpoint - optional since Search is deployed ephemerally during content generation')
 param searchEndpoint string = ''
-param enableB2C bool
 param tags object
 
 // ============================================================================
@@ -177,10 +176,6 @@ resource functionsApp 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'SEARCH_ENDPOINT'
           value: searchEndpoint
-        }
-        {
-          name: 'ENABLE_B2C'
-          value: string(enableB2C)
         }
         // Python v2 programming model requires worker indexing
         {

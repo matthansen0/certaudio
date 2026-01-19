@@ -118,7 +118,8 @@ def generate_index(
         credential=credential,
     )
     
-    container_name = f"{certification_id}-{audio_format}"
+    # Fixed container name with path prefix for organization
+    container_name = "audio"
     container_client = blob_service.get_container_client(container_name)
     
     # Ensure container exists
@@ -127,8 +128,8 @@ def generate_index(
     except:
         pass
     
-    # Upload index
-    blob_client = container_client.get_blob_client("metadata/index.json")
+    # Upload index with path prefix
+    blob_client = container_client.get_blob_client(f"{certification_id}/{audio_format}/metadata/index.json")
     blob_client.upload_blob(
         json.dumps(index_data, indent=2),
         overwrite=True,
