@@ -6,6 +6,12 @@ modules, and units for a certification, then fetches the actual content from eac
 
 Content hierarchy:
 - Certification → Learning Paths → Modules → Units → Content
+
+Discovery modes:
+- deep: Learning paths only (~5-7 hours for DP-700)
+- comprehensive: Learning paths + Exam skills outline (~10-12 hours for DP-700)
+
+See docs/CONTENT_DISCOVERY.md for detailed explanation of content sources.
 """
 
 import argparse
@@ -234,6 +240,101 @@ def build_unit_url(module_url: str, unit_uid: str, unit_index: int = 1) -> str:
     
     # Build URL with index prefix (e.g., 1-introduction, 2-explore)
     return f"https://learn.microsoft.com/en-us/training/modules/{module_slug}/{unit_index}-{unit_slug}/"
+
+
+def fetch_exam_skills_outline(certification_id: str) -> list[dict]:
+    """
+    Fetch the exam skills outline from the official study guide.
+    
+    This provides the specific testable skills that may not be fully covered
+    by learning path content alone.
+    
+    Returns list of skill dicts with format:
+    {
+        "name": "Skill name",
+        "weight": "30-35%",
+        "topics": ["Specific skill 1", "Specific skill 2", ...],
+        "sourceUrls": [],
+        "isExamSkill": True  # Flag to distinguish from learning path content
+    }
+    """
+    study_guide_url = (
+        f"https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/"
+        f"{certification_id.lower()}"
+    )
+    print(f"\nFetching exam skills outline from: {study_guide_url}")
+    
+    try:
+        html = fetch_page(study_guide_url)
+    except Exception as e:
+        print(f"  Warning: Could not fetch study guide: {e}")
+        return []
+    
+    soup = BeautifulSoup(html, "lxml")
+    
+    skills = []
+    current_domain = None
+    current_objective = None
+    
+    # Pattern for domain headings with percentages (handles various dash types)
+    domain_pattern = re.compile(r'(.+?)\s*\((\d+).(\d+)%\)')
+    
+    for element in soup.find_all(['h3', 'h4', 'ul', 'li']):
+        text = element.get_text(strip=True)
+        
+        # Check for domain heading (h3 with percentage)
+        if element.name == 'h3':
+            match = domain_pattern.search(text)
+            if match:
+                current_domain = {
+                    "name": match.group(1).strip(),
+                    "weight": f"{match.group(2)}-{match.group(3)}%",
+                    "topics": [],
+                    "sourceUrls": [],
+                    "isExamSkill": True
+                }
+                current_objective = None
+        
+        # Check for objective heading (h4)
+        elif element.name == 'h4' and current_domain:
+            obj_text = text.strip()
+            if obj_text and 'Note' not in obj_text and len(obj_text) > 10:
+                # Save previous domain if it has topics
+                if current_domain.get("topics"):
+                    skills.append(current_domain.copy())
+                
+                # Start a new domain for this objective
+                current_domain = {
+                    "name": f"{current_domain['name']}: {obj_text}",
+                    "weight": current_domain["weight"],
+                    "topics": [],
+                    "sourceUrls": [],
+                    "isExamSkill": True
+                }
+        
+        # Check for specific skills (li items)
+        elif element.name == 'li' and current_domain:
+            skill_text = text.strip()
+            if skill_text and len(skill_text) > 5:
+                # Filter out non-skill items
+                skip_phrases = ['how to earn', 'certification renewal', 'exam scoring', 
+                               'sandbox', 'last updated', 'high contrast', 'ai disclaimer',
+                               'previous versions', 'contribute', 'privacy', 'terms of use',
+                               'trademarks', '© microsoft']
+                if not any(x in skill_text.lower() for x in skip_phrases):
+                    current_domain["topics"].append(skill_text)
+    
+    # Don't forget last domain
+    if current_domain and current_domain.get("topics"):
+        skills.append(current_domain)
+    
+    # Filter out empty skills
+    skills = [s for s in skills if s.get("topics")]
+    
+    total_specific_skills = sum(len(s["topics"]) for s in skills)
+    print(f"  Found {len(skills)} objectives with {total_specific_skills} specific skills")
+    
+    return skills
 
 
 def deep_discover(
@@ -491,7 +592,7 @@ def discover_test_content() -> DeepDiscoveryResult:
     return result
 
 
-def result_to_dict(result: DeepDiscoveryResult) -> dict:
+def result_to_dict(result: DeepDiscoveryResult, exam_skills: list[dict] = None) -> dict:
     """
     Convert result to JSON-serializable dict.
     
@@ -505,6 +606,10 @@ def result_to_dict(result: DeepDiscoveryResult) -> dict:
     IMPORTANT: Modules are deduplicated by UID since the same module can appear
     in multiple learning paths. This prevents processing duplicates and wasting
     AI/compute resources.
+    
+    Args:
+        result: DeepDiscoveryResult from learning paths discovery
+        exam_skills: Optional list of exam skills from study guide (comprehensive mode)
     """
     # Build skills outline from learning paths (workflow-compatible format)
     # Each UNIQUE module becomes a "skill" and each unit becomes a "topic"
@@ -527,7 +632,8 @@ def result_to_dict(result: DeepDiscoveryResult) -> dict:
                 "weight": None,  # Deep discovery doesn't have weights
                 "learningPath": path.title,
                 "topics": [],
-                "sourceUrls": []  # Per-skill source URLs
+                "sourceUrls": [],  # Per-skill source URLs
+                "isExamSkill": False  # Flag: this is learning path content
             }
             
             for unit in module.units:
@@ -540,6 +646,20 @@ def result_to_dict(result: DeepDiscoveryResult) -> dict:
     
     if duplicate_count > 0:
         print(f"  Deduplicated: removed {duplicate_count} duplicate module(s)")
+    
+    # Add exam skills to the outline (comprehensive mode)
+    # These come AFTER learning paths to provide: foundations → specific skills
+    if exam_skills:
+        print(f"  Adding {len(exam_skills)} exam skill objectives to outline")
+        for skill in exam_skills:
+            # Prefix exam skills to distinguish in episode titles
+            skills_outline.append({
+                "name": f"[Exam Skill] {skill['name']}",
+                "weight": skill.get("weight"),
+                "topics": skill.get("topics", []),
+                "sourceUrls": skill.get("sourceUrls", []),
+                "isExamSkill": True
+            })
     
     return {
         # Workflow-compatible format (required by generate-content.yml)
@@ -622,6 +742,11 @@ def main():
         help="Skip fetching unit content (structure only)"
     )
     parser.add_argument(
+        "--comprehensive",
+        action="store_true",
+        help="Include exam skills outline in addition to learning paths (recommended)"
+    )
+    parser.add_argument(
         "--output-file",
         default="deep_discovery_results.json",
         help="Output JSON file path"
@@ -630,6 +755,7 @@ def main():
     args = parser.parse_args()
     
     # Determine mode
+    exam_skills = None
     if args.test or args.certification_id == "test":
         result = discover_test_content()
     elif args.certification_id:
@@ -640,11 +766,32 @@ def main():
             max_units_per_module=args.max_units,
             skip_content=args.skip_content
         )
+        
+        # Fetch exam skills for comprehensive mode
+        if args.comprehensive:
+            print("\n" + "=" * 60)
+            print("COMPREHENSIVE MODE: Adding exam skills outline")
+            exam_skills = fetch_exam_skills_outline(args.certification_id)
     else:
         parser.error("Either --certification-id or --test is required")
     
     # Save results
-    output = result_to_dict(result)
+    output = result_to_dict(result, exam_skills=exam_skills)
+    
+    # Print summary
+    total_skills = len(output.get("skillsOutline", []))
+    total_topics = sum(len(s.get("topics", [])) for s in output.get("skillsOutline", []))
+    learning_path_skills = len([s for s in output.get("skillsOutline", []) if not s.get("isExamSkill")])
+    exam_skill_count = len([s for s in output.get("skillsOutline", []) if s.get("isExamSkill")])
+    
+    print("\n" + "=" * 60)
+    print("DISCOVERY SUMMARY")
+    print("=" * 60)
+    print(f"  Learning Path modules: {learning_path_skills}")
+    print(f"  Exam skill objectives: {exam_skill_count}")
+    print(f"  Total skill domains: {total_skills}")
+    print(f"  Total topics: {total_topics}")
+    
     with open(args.output_file, "w", encoding="utf-8") as f:
         json.dump(output, f, indent=2, ensure_ascii=False)
     

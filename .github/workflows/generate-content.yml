@@ -67,13 +67,14 @@ on:
           - mb-820     # Dynamics 365 Business Central Developer
         default: 'test'
       discoveryMode:
-        description: 'Content discovery mode'
+        description: 'Content discovery mode (comprehensive recommended for full coverage)'
         required: true
         type: choice
         options:
-          - deep       # Full learning paths (comprehensive, higher cost)
-          - skills     # Skills outline only (quick, lower cost)
-        default: 'deep'
+          - comprehensive  # Learning paths + exam skills (recommended, ~10-12h)
+          - deep           # Learning paths only (~5-7h)
+          - skills         # Skills outline only (quick, ~2-3h)
+        default: 'comprehensive'
       audioFormat:
         description: 'Audio format'
         required: true
@@ -132,7 +133,7 @@ on:
           - en-US-AriaNeural
         default: 'en-US-TonyNeural'
       forceRegenerate:
-        description: 'Regenerate all episodes even if they already exist (use for voice changes)'
+        description: 'Regenerate all episodes (purges existing episodes first, use for major changes)'
         required: false
         type: boolean
         default: false
@@ -389,13 +390,19 @@ jobs:
           if [ "$CERTIFICATION_ID" = "test" ]; then
             echo "Running TEST MODE discovery (single unit, ~\$0.15)"
             python3 -m tools.deep_discover --test --output-file /tmp/discovery_results.json
+          elif [ "$DISCOVERY_MODE" = "comprehensive" ]; then
+            echo "Running COMPREHENSIVE discovery (learning paths + exam skills, ~10-12h)"
+            python3 -m tools.deep_discover \
+              --certification-id "$CERTIFICATION_ID" \
+              --comprehensive \
+              --output-file /tmp/discovery_results.json
           elif [ "$DISCOVERY_MODE" = "deep" ]; then
-            echo "Running DEEP discovery (full learning paths)"
+            echo "Running DEEP discovery (learning paths only, ~5-7h)"
             python3 -m tools.deep_discover \
               --certification-id "$CERTIFICATION_ID" \
               --output-file /tmp/discovery_results.json
           else
-            echo "Running SKILLS OUTLINE discovery (quick mode)"
+            echo "Running SKILLS OUTLINE discovery (quick mode, ~2-3h)"
             python3 -m tools.discover_exam_content \
               --certification-id "$CERTIFICATION_ID" \
               --exam-page-url "$EXAM_PAGE_URL" \
@@ -404,6 +411,74 @@ jobs:
           
           echo "skillsOutline=$(cat /tmp/discovery_results.json | jq -c '.skillsOutline')" >> $GITHUB_OUTPUT
           echo "sourceUrls=$(cat /tmp/discovery_results.json | jq -c '.sourceUrls')" >> $GITHUB_OUTPUT
+
+      - name: Purge existing episodes (if forceRegenerate)
+        if: ${{ inputs.forceRegenerate == true }}
+        env:
+          CERTIFICATION_ID: ${{ inputs.certificationId }}
+          AUDIO_FORMAT: ${{ inputs.audioFormat }}
+          COSMOS_DB_ENDPOINT: ${{ steps.endpoints.outputs.cosmos_endpoint }}
+          STORAGE_ACCOUNT_NAME: ${{ steps.endpoints.outputs.storage_account }}
+        run: |
+          echo "Force regenerate enabled - purging existing episodes for $CERTIFICATION_ID/$AUDIO_FORMAT"
+          
+          cd src/pipeline
+          python3 - <<'PY'
+          import os
+          from azure.cosmos import CosmosClient
+          from azure.identity import DefaultAzureCredential
+          from azure.storage.blob import BlobServiceClient, ContainerClient
+          
+          cert_id = os.environ["CERTIFICATION_ID"]
+          audio_format = os.environ["AUDIO_FORMAT"]
+          cosmos_endpoint = os.environ["COSMOS_DB_ENDPOINT"]
+          storage_account = os.environ["STORAGE_ACCOUNT_NAME"]
+          
+          credential = DefaultAzureCredential()
+          
+          # Purge from Cosmos DB
+          print(f"Purging episodes from Cosmos DB...")
+          cosmos = CosmosClient(cosmos_endpoint, credential)
+          db = cosmos.get_database_client("certaudio")
+          container = db.get_container_client("episodes")
+          
+          query = f"SELECT c.id FROM c WHERE c.certificationId = '{cert_id}' AND c.audioFormat = '{audio_format}'"
+          items = list(container.query_items(query, enable_cross_partition_query=True))
+          
+          for item in items:
+              try:
+                  container.delete_item(item["id"], partition_key=cert_id)
+                  print(f"  Deleted: {item['id']}")
+              except Exception as e:
+                  print(f"  Warning: Could not delete {item['id']}: {e}")
+          
+          print(f"Deleted {len(items)} episode documents from Cosmos DB")
+          
+          # Purge from Blob Storage
+          print(f"Purging audio/scripts from Blob Storage...")
+          blob_url = f"https://{storage_account}.blob.core.windows.net"
+          blob_service = BlobServiceClient(blob_url, credential)
+          container_client = blob_service.get_container_client("content")
+          
+          prefixes = [
+              f"{cert_id}/{audio_format}/episodes/",
+              f"{cert_id}/{audio_format}/scripts/",
+              f"{cert_id}/{audio_format}/ssml/"
+          ]
+          
+          deleted_blobs = 0
+          for prefix in prefixes:
+              blobs = container_client.list_blobs(name_starts_with=prefix)
+              for blob in blobs:
+                  try:
+                      container_client.delete_blob(blob.name)
+                      deleted_blobs += 1
+                  except Exception as e:
+                      print(f"  Warning: Could not delete {blob.name}: {e}")
+          
+          print(f"Deleted {deleted_blobs} blobs from storage")
+          print("Purge complete - ready for fresh generation")
+          PY
 
       - name: Compute episode batch matrix
         id: batches

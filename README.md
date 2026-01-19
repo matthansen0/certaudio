@@ -176,7 +176,7 @@ Run the **Generate Content** workflow to create audio episodes.
 |-----------|---------|-------------|
 | `certificationId` | `ai-102` | Microsoft certification ID (see supported list above) |
 | `audioFormat` | `instructional` | `instructional` or `podcast` |
-| `discoveryMode` | `skills` | `skills` (outline only) or `deep` (full learning paths) |
+| `discoveryMode` | `comprehensive` | `skills`, `deep`, or `comprehensive` (recommended - full coverage) |
 | `instructionalVoice` | `en-US-AndrewNeural` | Voice for instructional format |
 | `podcastHostVoice` | `en-US-BrianNeural` | Host voice for podcast format |
 | `podcastExpertVoice` | `en-US-AvaNeural` | Expert voice for podcast format |
@@ -207,8 +207,9 @@ Run the **Generate Content** workflow to create audio episodes.
 
 ### Discovery Modes
 
-- **Skills Mode** (default): Scrapes exam skills outline page for topics
-- **Deep Mode**: Uses Microsoft Learn Catalog API to discover all learning paths, modules, and units for comprehensive coverage (~24-30 hours for DP-700)
+- **Skills Mode**: Scrapes exam skills outline page for topics (~2-3 hours)
+- **Deep Mode**: Uses Microsoft Learn Catalog API to discover learning paths, modules, and units (~5-7 hours for DP-700)
+- **Comprehensive Mode** (recommended): Combines BOTH learning paths AND exam skills outline for full official coverage (~10-12 hours for DP-700). See [docs/CONTENT_DISCOVERY.md](docs/CONTENT_DISCOVERY.md) for details.
 
 ### Instructional Format
 
