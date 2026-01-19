@@ -71,9 +71,9 @@ on:
         required: true
         type: choice
         options:
-          - comprehensive  # Learning paths + exam skills (recommended, ~10-12h)
-          - deep           # Learning paths only (~5-7h)
-          - skills         # Skills outline only (quick, ~2-3h)
+          - comprehensive  # Learning paths + exam skills (recommended)
+          - deep           # Learning paths only
+          - skills         # Skills outline only (quick)
         default: 'comprehensive'
       audioFormat:
         description: 'Audio format'
@@ -391,18 +391,18 @@ jobs:
             echo "Running TEST MODE discovery (single unit, ~\$0.15)"
             python3 -m tools.deep_discover --test --output-file /tmp/discovery_results.json
           elif [ "$DISCOVERY_MODE" = "comprehensive" ]; then
-            echo "Running COMPREHENSIVE discovery (learning paths + exam skills, ~10-12h)"
+            echo "Running COMPREHENSIVE discovery (learning paths + exam skills)"
             python3 -m tools.deep_discover \
               --certification-id "$CERTIFICATION_ID" \
               --comprehensive \
               --output-file /tmp/discovery_results.json
           elif [ "$DISCOVERY_MODE" = "deep" ]; then
-            echo "Running DEEP discovery (learning paths only, ~5-7h)"
+            echo "Running DEEP discovery (learning paths only)"
             python3 -m tools.deep_discover \
               --certification-id "$CERTIFICATION_ID" \
               --output-file /tmp/discovery_results.json
           else
-            echo "Running SKILLS OUTLINE discovery (quick mode, ~2-3h)"
+            echo "Running SKILLS OUTLINE discovery (quick mode)"
             python3 -m tools.discover_exam_content \
               --certification-id "$CERTIFICATION_ID" \
               --exam-page-url "$EXAM_PAGE_URL" \
