@@ -274,6 +274,44 @@ jobs:
               --name "$FUNCTIONS_APP_NAME" \
               --src "functions.zip"
 
+      - name: Disable App Service authentication (EasyAuth)
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            set -euo pipefail
+
+            FUNCTIONS_APP_NAME="certaudio-dev-func-$UNIQUE_SUFFIX"
+            echo "Disabling App Service auth (v2) for: $FUNCTIONS_APP_NAME"
+
+            siteId=$(az functionapp show \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --name "$FUNCTIONS_APP_NAME" \
+              --query id -o tsv)
+
+            uri="https://management.azure.com${siteId}/config/authsettingsV2?api-version=2022-03-01"
+
+            # Bicep deploys authsettingsV2 with enabled=false, but SWA backend linking
+            # or other processes can re-enable it. Force-disable here.
+            az rest \
+              --method put \
+              --uri "$uri" \
+              --body '{
+                "properties": {
+                  "platform": { "enabled": false },
+                  "globalValidation": {
+                    "requireAuthentication": false,
+                    "unauthenticatedClientAction": "AllowAnonymous"
+                  }
+                }
+              }'
+
+            echo "Restarting Function App to apply auth changes..."
+            az functionapp restart \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --name "$FUNCTIONS_APP_NAME" \
+              --only-show-errors
+            sleep 20
+
       - name: Smoke test Functions directly
         uses: azure/cli@v2
         with:
