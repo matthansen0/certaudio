@@ -501,14 +501,27 @@ def result_to_dict(result: DeepDiscoveryResult) -> dict:
     Field names match discover_exam_content.py format:
     - skill["name"] (not "skillName")
     - skill["weight"] (not "weightPercentage")
+    
+    IMPORTANT: Modules are deduplicated by UID since the same module can appear
+    in multiple learning paths. This prevents processing duplicates and wasting
+    AI/compute resources.
     """
     # Build skills outline from learning paths (workflow-compatible format)
-    # Each module becomes a "skill" and each unit becomes a "topic"
+    # Each UNIQUE module becomes a "skill" and each unit becomes a "topic"
+    # Deduplicate by module UID since same module appears in multiple paths
     skills_outline = []
     source_urls = set()
+    seen_module_uids = set()
+    duplicate_count = 0
     
     for path in result.learning_paths:
         for module in path.modules:
+            # Skip duplicate modules (same module in multiple learning paths)
+            if module.uid in seen_module_uids:
+                duplicate_count += 1
+                continue
+            seen_module_uids.add(module.uid)
+            
             skill = {
                 "name": module.title,  # Match discover_exam_content format
                 "weight": None,  # Deep discovery doesn't have weights
@@ -524,6 +537,9 @@ def result_to_dict(result: DeepDiscoveryResult) -> dict:
                     skill["sourceUrls"].append(unit.url)
             
             skills_outline.append(skill)
+    
+    if duplicate_count > 0:
+        print(f"  Deduplicated: removed {duplicate_count} duplicate module(s)")
     
     return {
         # Workflow-compatible format (required by generate-content.yml)

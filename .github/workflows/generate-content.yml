@@ -725,10 +725,17 @@ jobs:
           PODCAST_HOST_VOICE: ${{ inputs.podcastHostVoice }}
           PODCAST_EXPERT_VOICE: ${{ inputs.podcastExpertVoice }}
           FORCE_REGENERATE: ${{ inputs.forceRegenerate }}
+          DISCOVERY_MODE: ${{ inputs.discoveryMode }}
           SKILLS_OUTLINE: ${{ needs.discover-content.outputs.skillsOutline }}
           BATCH_INDEX: ${{ matrix.batch }}
         run: |
           cd src/pipeline
+
+          MIN_WORDS_PER_PART=1200
+          if [ "$DISCOVERY_MODE" = "deep" ]; then
+            MIN_WORDS_PER_PART=1400
+          fi
+          export MIN_WORDS_PER_PART
           
           # Build command with optional --force-regenerate flag
           REGEN_FLAG=""

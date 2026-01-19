@@ -152,6 +152,7 @@ def generate_narration(
     is_continuation: bool = False,
     part_number: int = 1,
     topics_covered_so_far: str = None,
+    min_words: int = 1200,
 ) -> str:
     """Generate narration script using Azure OpenAI."""
     template = jinja_env.get_template("narration.jinja2")
@@ -168,6 +169,7 @@ def generate_narration(
         is_continuation=is_continuation,
         part_number=part_number,
         topics_covered_so_far=topics_covered_so_far,
+        min_words=min_words,
     )
 
     # Split system and user parts
@@ -497,33 +499,44 @@ def process_skill_domain(
     current_episode_number = episode_number
     topics_covered_so_far = ""
     max_parts = 5  # Safety limit
+    base_min_words = int(os.environ.get("MIN_WORDS_PER_PART", "1200"))
+    max_length_retries = 1
     
     while part_number <= max_parts:
         part_suffix = f" (Part {part_number})" if part_number > 1 else ""
         domain_title = f"{skill_domain}{part_suffix}"
         
         print(f"\nStep 2: Generating narration script{part_suffix}...")
-        narration = generate_narration(
-            episode_number=current_episode_number,
-            skill_domain=skill_domain,
-            skill_topics=skill_topics,
-            retrieved_content=retrieved_content,
-            audio_format=audio_format,
-            openai_client=openai_client,
-            jinja_env=jinja_env,
-            is_continuation=(part_number > 1),
-            part_number=part_number,
-            topics_covered_so_far=topics_covered_so_far,
-        )
-        
-        # Check if continuation is needed
-        has_more = needs_continuation(narration)
-        narration = clean_narration(narration)
-        
-        word_count = len(narration.split())
-        print(f"  - Generated {word_count} words")
-        if has_more:
-            print(f"  - Content continues in next part...")
+        min_words = base_min_words
+        for attempt in range(max_length_retries + 1):
+            narration = generate_narration(
+                episode_number=current_episode_number,
+                skill_domain=skill_domain,
+                skill_topics=skill_topics,
+                retrieved_content=retrieved_content,
+                audio_format=audio_format,
+                openai_client=openai_client,
+                jinja_env=jinja_env,
+                is_continuation=(part_number > 1),
+                part_number=part_number,
+                topics_covered_so_far=topics_covered_so_far,
+                min_words=min_words,
+            )
+
+            # Check if continuation is needed
+            has_more = needs_continuation(narration)
+            narration = clean_narration(narration)
+
+            word_count = len(narration.split())
+            print(f"  - Generated {word_count} words")
+            if has_more:
+                print("  - Content continues in next part...")
+
+            if word_count >= min_words or attempt == max_length_retries:
+                break
+
+            min_words = int(min_words * 1.15)
+            print(f"  - Narration too short; retrying with min_words={min_words}")
 
         # 3. Convert to SSML
         print(f"Step 3: Converting to SSML{part_suffix}...")
