@@ -284,20 +284,31 @@ jobs:
             set -euo pipefail
 
             FUNCTIONS_APP_NAME="certaudio-dev-func-$UNIQUE_SUFFIX"
-            echo "Disabling App Service auth for: $FUNCTIONS_APP_NAME"
+            echo "Disabling App Service auth (v2) for: $FUNCTIONS_APP_NAME"
 
-            # Some tenants/policies may enable EasyAuth by default; force it off.
-            az webapp auth update \
+            siteId=$(az functionapp show \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --name "$FUNCTIONS_APP_NAME" \
-              --enabled false \
-              --only-show-errors
+              --query id -o tsv)
 
-            echo "Auth settings (sanity):"
-            az webapp auth show \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --name "$FUNCTIONS_APP_NAME" \
-              -o jsonc || true
+            uri="https://management.azure.com${siteId}/config/authsettingsV2?api-version=2022-03-01"
+
+            # NOTE: `az webapp auth update` targets the legacy (v1) endpoint and fails when the site is on auth v2.
+            az rest \
+              --method put \
+              --uri "$uri" \
+              --body '{
+                "properties": {
+                  "platform": { "enabled": false },
+                  "globalValidation": {
+                    "requireAuthentication": false,
+                    "unauthenticatedClientAction": "AllowAnonymous"
+                  }
+                }
+              }'
+
+            echo "Auth settings (authsettingsV2):"
+            az rest --method get --uri "$uri" -o jsonc || true
 
       - name: Smoke test Functions directly
         uses: azure/cli@v2
