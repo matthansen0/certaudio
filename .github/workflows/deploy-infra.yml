@@ -173,6 +173,31 @@ jobs:
               echo "Automation principal objectId: $automationPrincipalId"
             fi
 
+      - name: Diagnose Cosmos/Storage network access
+        uses: azure/cli@v2
+        env:
+          DEPLOYMENT_NAME: certaudio-${{ github.run_id }}-${{ github.run_attempt }}
+        with:
+          inlineScript: |
+            set -euo pipefail
+
+            storageAccountName=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.storageAccountName.value" -o tsv)
+            cosmosDbAccountName=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.cosmosDbAccountName.value" -o tsv)
+
+            echo "Storage account: $storageAccountName"
+            az storage account show \
+              --name "$storageAccountName" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query "{publicNetworkAccess:publicNetworkAccess, defaultAction:networkRuleSet.defaultAction, bypass:networkRuleSet.bypass, allowSharedKeyAccess:allowSharedKeyAccess, allowBlobPublicAccess:allowBlobPublicAccess}" \
+              -o jsonc || true
+
+            echo "Cosmos account:  $cosmosDbAccountName"
+            az cosmosdb show \
+              --name "$cosmosDbAccountName" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query "{publicNetworkAccess:publicNetworkAccess, disableLocalAuth:disableLocalAuth, ipRules:ipRules}" \
+              -o jsonc || true
+
             # Run deployment
             if ! az deployment group create \
               --name "$DEPLOYMENT_NAME" \
@@ -455,81 +480,112 @@ jobs:
                 --name "$SWA_NAME" \
                 --resource-group "$AZURE_RESOURCE_GROUP" \
                 --environment-name default \
-                --remove-backend-auth \
-                --only-show-errors
-              currentBackendId=""
-            fi
 
-            if [[ "$currentBackendId" != "$backendResourceId" ]]; then
-              echo "Linking backend..."
-              az staticwebapp backends link \
-                --name "$SWA_NAME" \
+        - name: Disable App Service authentication (EasyAuth)
+          uses: azure/cli@v2
+          with:
+            inlineScript: |
+              set -euo pipefail
+
+              FUNCTIONS_APP_NAME="certaudio-dev-func-$UNIQUE_SUFFIX"
+              echo "Disabling App Service auth (v2) for: $FUNCTIONS_APP_NAME"
+
+              siteId=$(az functionapp show \
                 --resource-group "$AZURE_RESOURCE_GROUP" \
-                --backend-resource-id "$backendResourceId" \
-                --backend-region "$LOCATION" \
-                --environment-name default \
+                --name "$FUNCTIONS_APP_NAME" \
+                --query id -o tsv)
+
+              uri="https://management.azure.com${siteId}/config/authsettingsV2?api-version=2022-03-01"
+
+              az rest \
+                --method put \
+                --uri "$uri" \
+                --body '{
+                  "properties": {
+                    "platform": { "enabled": false },
+                    "globalValidation": {
+                      "requireAuthentication": false,
+                      "unauthenticatedClientAction": "AllowAnonymous"
+                    }
+                  }
+                }'
+
+              echo "Auth settings (authsettingsV2):"
+              az rest --method get --uri "$uri" -o jsonc || true
+
+              echo "Restarting Function App to ensure auth changes apply..."
+              az functionapp restart \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
+                --name "$FUNCTIONS_APP_NAME" \
                 --only-show-errors
-            else
-              echo "Backend already linked; nothing to do."
-            fi
+              sleep 20
 
-            echo "Backend status:"
-            az staticwebapp backends show \
-              --name "$SWA_NAME" \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --environment-name default \
-              -o jsonc
+        - name: Smoke test Functions directly
+          uses: azure/cli@v2
+          with:
+            inlineScript: |
+              set -euo pipefail
 
-            # Smoke test with retry - backend link can take time to propagate
-            echo "Smoke test: calling SWA /api/healthz (with retry)"
-            swaHostname=$(az staticwebapp show \
-              --name "$SWA_NAME" \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --query defaultHostname -o tsv)
-            url="https://$swaHostname/api/healthz"
-            
-            maxAttempts=20
-            attempt=1
-            while [[ $attempt -le $maxAttempts ]]; do
-              echo "Attempt $attempt/$maxAttempts: GET $url"
-              httpCode=$(curl -sS -D /tmp/swa_headers.txt -o /tmp/swa_body.txt -w "%{http_code}" "$url" || true)
-              echo "HTTP $httpCode"
+              FUNCTIONS_APP_NAME="certaudio-dev-func-$UNIQUE_SUFFIX"
+              hostname=$(az functionapp show \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
+                --name "$FUNCTIONS_APP_NAME" \
+                --query defaultHostName -o tsv)
 
-              if [[ $attempt -eq 1 ]]; then
-                echo "::group::SWA response headers (attempt 1)"
-                head -60 /tmp/swa_headers.txt || true
-                echo "::endgroup::"
-              fi
-              
-              if [[ "$httpCode" == "200" ]]; then
-                echo "✅ SWA /api/healthz OK (HTTP $httpCode)"
-                break
-              fi
+              url="https://$hostname/api/healthz"
+              echo "Smoke test: $url"
 
-              if [[ "$httpCode" == "401" || "$httpCode" == "403" ]]; then
-                echo "::group::SWA response headers (auth failure)"
-                head -60 /tmp/swa_headers.txt || true
-                echo "::endgroup::"
-                echo "::group::SWA response body (auth failure, truncated)"
-                head -200 /tmp/swa_body.txt || true
-                echo "::endgroup::"
-                echo "::error::SWA /api/healthz returned HTTP $httpCode (backend auth is blocking requests)."
-                exit 1
-              fi
-              
-              if [[ $attempt -eq $maxAttempts ]]; then
-                echo "::group::SWA response headers (last attempt)"
-                head -60 /tmp/swa_headers.txt || true
-                echo "::endgroup::"
+              maxAttempts=10
+              attempt=1
+              while [[ $attempt -le $maxAttempts ]]; do
+                echo "Attempt $attempt/$maxAttempts: GET $url"
+                httpCode=$(curl -sS -D /tmp/functions_headers.txt -o /tmp/functions_body.txt -w "%{http_code}" "$url" || true)
+                echo "HTTP $httpCode"
 
-                echo "::group::SWA response body (last attempt, truncated)"
-                head -200 /tmp/swa_body.txt || true
-                echo "::endgroup::"
-                echo "::error::SWA /api/healthz did not return HTTP 200 after $maxAttempts attempts."
-                exit 1
-              fi
-              
-              echo "Backend link not yet propagated, waiting 15s..."
-              sleep 15
-              ((attempt++))
-            done
+                if [[ "$httpCode" == "200" ]]; then
+                  echo "✅ Functions healthz OK (HTTP $httpCode)"
+                  break
+                fi
+
+                if [[ "$httpCode" == "401" || "$httpCode" == "403" ]]; then
+                  echo "::group::Functions response headers"
+                  head -60 /tmp/functions_headers.txt || true
+                  echo "::endgroup::"
+
+                  # Disambiguate: function-key auth vs EasyAuth.
+                  # If a host key makes it work, then the function route isn't anonymous.
+                  masterKey=$(az functionapp keys list \
+                    --resource-group "$AZURE_RESOURCE_GROUP" \
+                    --name "$FUNCTIONS_APP_NAME" \
+                    --query masterKey -o tsv)
+                  if [[ -n "$masterKey" ]]; then
+                    echo "::add-mask::$masterKey"
+                    echo "Retrying once with x-functions-key header (diagnostic)..."
+                    httpCodeKeyed=$(curl -sS -D /tmp/functions_headers_keyed.txt -o /tmp/functions_body_keyed.txt -w "%{http_code}" -H "x-functions-key: $masterKey" "$url" || true)
+                    echo "HTTP (with key) $httpCodeKeyed"
+
+                    if [[ "$httpCodeKeyed" == "200" ]]; then
+                      echo "::error::Functions responded only when a host key was provided. This indicates the HTTP trigger is not anonymous."
+                      exit 1
+                    fi
+                  fi
+
+                  echo "::group::Functions response body (truncated)"
+                  head -200 /tmp/functions_body.txt || true
+                  echo "::endgroup::"
+                  echo "::error::Functions /api/healthz returned HTTP $httpCode after auth disable + restart."
+                  exit 1
+                fi
+
+                if [[ $attempt -eq $maxAttempts ]]; then
+                  echo "::group::Functions response body (truncated)"
+                  head -200 /tmp/functions_body.txt || true
+                  echo "::endgroup::"
+                  echo "::error::Functions /api/healthz did not return HTTP 200 after $maxAttempts attempts."
+                  exit 1
+                fi
+
+                echo "Waiting 10s before retry..."
+                sleep 10
+                ((attempt++))
+              done
