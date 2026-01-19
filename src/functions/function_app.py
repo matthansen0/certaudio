@@ -19,6 +19,17 @@ app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# GET /api/healthz
+# =============================================================================
+@app.route(route="healthz", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def healthz(req: func.HttpRequest) -> func.HttpResponse:
+    return func.HttpResponse(
+        json.dumps({"status": "ok"}),
+        mimetype="application/json",
+    )
+
+
 def _normalize_episode_id(episode_num: str) -> str:
     """Normalize an episode identifier for blob paths.
 
@@ -67,7 +78,11 @@ def get_blob_service():
 # =============================================================================
 # GET /api/certifications
 # =============================================================================
-@app.route(route="certifications", methods=["GET"])
+@app.route(
+    route="certifications",
+    methods=["GET"],
+    auth_level=func.AuthLevel.ANONYMOUS,
+)
 def list_certifications(req: func.HttpRequest) -> func.HttpResponse:
     """List certifications currently present in Cosmos episodes."""
     try:
@@ -103,7 +118,11 @@ def list_certifications(req: func.HttpRequest) -> func.HttpResponse:
 # =============================================================================
 # GET /api/episodes/{certificationId}/{format}
 # =============================================================================
-@app.route(route="episodes/{certificationId}/{format}", methods=["GET"])
+@app.route(
+    route="episodes/{certificationId}/{format}",
+    methods=["GET"],
+    auth_level=func.AuthLevel.ANONYMOUS,
+)
 def get_episodes(req: func.HttpRequest) -> func.HttpResponse:
     """
     Get all episodes for a certification and format.
@@ -199,7 +218,11 @@ def get_episodes(req: func.HttpRequest) -> func.HttpResponse:
 # =============================================================================
 # GET /api/audio/{certificationId}/{format}/{episodeNumber}
 # =============================================================================
-@app.route(route="audio/{certificationId}/{format}/{episodeNumber}", methods=["GET"])
+@app.route(
+    route="audio/{certificationId}/{format}/{episodeNumber}",
+    methods=["GET"],
+    auth_level=func.AuthLevel.ANONYMOUS,
+)
 def get_audio(req: func.HttpRequest) -> func.HttpResponse:
     """
     Stream audio file for an episode.
@@ -274,7 +297,11 @@ def get_audio(req: func.HttpRequest) -> func.HttpResponse:
 # =============================================================================
 # GET /api/progress/{userId}/{certificationId}
 # =============================================================================
-@app.route(route="progress/{userId}/{certificationId}", methods=["GET"])
+@app.route(
+    route="progress/{userId}/{certificationId}",
+    methods=["GET"],
+    auth_level=func.AuthLevel.ANONYMOUS,
+)
 def get_progress(req: func.HttpRequest) -> func.HttpResponse:
     """
     Get user progress for a certification.
@@ -327,7 +354,11 @@ def get_progress(req: func.HttpRequest) -> func.HttpResponse:
 # =============================================================================
 # POST /api/progress/{userId}/{certificationId}
 # =============================================================================
-@app.route(route="progress/{userId}/{certificationId}", methods=["POST"])
+@app.route(
+    route="progress/{userId}/{certificationId}",
+    methods=["POST"],
+    auth_level=func.AuthLevel.ANONYMOUS,
+)
 def update_progress(req: func.HttpRequest) -> func.HttpResponse:
     """
     Update user progress for a certification.
@@ -404,7 +435,11 @@ def update_progress(req: func.HttpRequest) -> func.HttpResponse:
 # =============================================================================
 # GET /api/script/{certificationId}/{format}/{episodeNumber}
 # =============================================================================
-@app.route(route="script/{certificationId}/{format}/{episodeNumber}", methods=["GET"])
+@app.route(
+    route="script/{certificationId}/{format}/{episodeNumber}",
+    methods=["GET"],
+    auth_level=func.AuthLevel.ANONYMOUS,
+)
 def get_script(req: func.HttpRequest) -> func.HttpResponse:
     """
     Get episode script (transcript).

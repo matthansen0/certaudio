@@ -289,7 +289,7 @@ jobs:
               --name "$FUNCTIONS_APP_NAME" \
               --query defaultHostName -o tsv)
 
-            url="https://$hostname/api/certifications"
+            url="https://$hostname/api/healthz"
             echo "Smoke test: $url"
 
             maxAttempts=10
@@ -300,16 +300,24 @@ jobs:
               echo "HTTP $httpCode"
 
               # 404 means the route isn't loaded; 000 is network/TLS failure.
-              if [[ "$httpCode" != "404" && "$httpCode" != "000" ]]; then
-                echo "✅ Functions endpoint responding (HTTP $httpCode)"
+              # 401/403 means auth is blocking anonymous access (bad for SWA proxying).
+              if [[ "$httpCode" == "200" ]]; then
+                echo "✅ Functions healthz OK (HTTP $httpCode)"
                 break
+              fi
+              if [[ "$httpCode" == "401" || "$httpCode" == "403" ]]; then
+                echo "::group::Functions response body (truncated)"
+                head -200 /tmp/functions_body.txt || true
+                echo "::endgroup::"
+                echo "::error::Functions /api/healthz returned HTTP $httpCode (auth is blocking anonymous requests)."
+                exit 1
               fi
 
               if [[ $attempt -eq $maxAttempts ]]; then
                 echo "::group::Functions response body (truncated)"
                 head -200 /tmp/functions_body.txt || true
                 echo "::endgroup::"
-                echo "::error::Functions /api/certifications is not reachable or still returns 404 after $maxAttempts attempts."
+                echo "::error::Functions /api/healthz did not return HTTP 200 after $maxAttempts attempts."
                 exit 1
               fi
 
@@ -437,12 +445,12 @@ jobs:
               -o jsonc
 
             # Smoke test with retry - backend link can take time to propagate
-            echo "Smoke test: calling SWA /api/certifications (with retry)"
+            echo "Smoke test: calling SWA /api/healthz (with retry)"
             swaHostname=$(az staticwebapp show \
               --name "$SWA_NAME" \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --query defaultHostname -o tsv)
-            url="https://$swaHostname/api/certifications"
+            url="https://$swaHostname/api/healthz"
             
             maxAttempts=20
             attempt=1
@@ -457,9 +465,20 @@ jobs:
                 echo "::endgroup::"
               fi
               
-              if [[ "$httpCode" != "404" ]]; then
-                echo "✅ SWA /api is responding (HTTP $httpCode)"
+              if [[ "$httpCode" == "200" ]]; then
+                echo "✅ SWA /api/healthz OK (HTTP $httpCode)"
                 break
+              fi
+
+              if [[ "$httpCode" == "401" || "$httpCode" == "403" ]]; then
+                echo "::group::SWA response headers (auth failure)"
+                head -60 /tmp/swa_headers.txt || true
+                echo "::endgroup::"
+                echo "::group::SWA response body (auth failure, truncated)"
+                head -200 /tmp/swa_body.txt || true
+                echo "::endgroup::"
+                echo "::error::SWA /api/healthz returned HTTP $httpCode (backend auth is blocking requests)."
+                exit 1
               fi
               
               if [[ $attempt -eq $maxAttempts ]]; then
@@ -470,7 +489,7 @@ jobs:
                 echo "::group::SWA response body (last attempt, truncated)"
                 head -200 /tmp/swa_body.txt || true
                 echo "::endgroup::"
-                echo "::error::SWA /api is still returning 404 after $maxAttempts attempts."
+                echo "::error::SWA /api/healthz did not return HTTP 200 after $maxAttempts attempts."
                 exit 1
               fi
               
