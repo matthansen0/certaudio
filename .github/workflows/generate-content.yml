@@ -424,8 +424,10 @@ jobs:
           python3 - <<'PY'
           import os
           from azure.cosmos import CosmosClient
+          from azure.cosmos.exceptions import CosmosResourceNotFoundError
           from azure.identity import DefaultAzureCredential
-          from azure.storage.blob import BlobServiceClient, ContainerClient
+          from azure.storage.blob import BlobServiceClient
+          from azure.core.exceptions import ResourceNotFoundError
           
           cert_id = os.environ["CERTIFICATION_ID"]
           audio_format = os.environ["AUDIO_FORMAT"]
@@ -434,47 +436,62 @@ jobs:
           
           credential = DefaultAzureCredential()
           
-          # Purge from Cosmos DB
-          print(f"Purging episodes from Cosmos DB...")
-          cosmos = CosmosClient(cosmos_endpoint, credential)
-          db = cosmos.get_database_client("certaudio")
-          container = db.get_container_client("episodes")
-          
-          query = f"SELECT c.id FROM c WHERE c.certificationId = '{cert_id}' AND c.audioFormat = '{audio_format}'"
-          items = list(container.query_items(query, enable_cross_partition_query=True))
-          
-          for item in items:
-              try:
-                  container.delete_item(item["id"], partition_key=cert_id)
-                  print(f"  Deleted: {item['id']}")
-              except Exception as e:
-                  print(f"  Warning: Could not delete {item['id']}: {e}")
-          
-          print(f"Deleted {len(items)} episode documents from Cosmos DB")
-          
-          # Purge from Blob Storage
-          print(f"Purging audio/scripts from Blob Storage...")
-          blob_url = f"https://{storage_account}.blob.core.windows.net"
-          blob_service = BlobServiceClient(blob_url, credential)
-          container_client = blob_service.get_container_client("content")
-          
-          prefixes = [
-              f"{cert_id}/{audio_format}/episodes/",
-              f"{cert_id}/{audio_format}/scripts/",
-              f"{cert_id}/{audio_format}/ssml/"
-          ]
-          
-          deleted_blobs = 0
-          for prefix in prefixes:
-              blobs = container_client.list_blobs(name_starts_with=prefix)
-              for blob in blobs:
+          # Purge from Cosmos DB (if container exists)
+          print("Purging episodes from Cosmos DB...")
+          try:
+              cosmos = CosmosClient(cosmos_endpoint, credential)
+              db = cosmos.get_database_client("certaudio")
+              container = db.get_container_client("episodes")
+              
+              query = f"SELECT c.id FROM c WHERE c.certificationId = '{cert_id}' AND c.audioFormat = '{audio_format}'"
+              items = list(container.query_items(query, enable_cross_partition_query=True))
+              
+              for item in items:
                   try:
-                      container_client.delete_blob(blob.name)
-                      deleted_blobs += 1
+                      container.delete_item(item["id"], partition_key=cert_id)
+                      print(f"  Deleted: {item['id']}")
                   except Exception as e:
-                      print(f"  Warning: Could not delete {blob.name}: {e}")
+                      print(f"  Warning: Could not delete {item['id']}: {e}")
+              
+              print(f"Deleted {len(items)} episode documents from Cosmos DB")
+          except CosmosResourceNotFoundError:
+              print("  Cosmos container 'episodes' does not exist yet - nothing to purge")
+          except Exception as e:
+              print(f"  Warning: Could not access Cosmos DB: {e}")
           
-          print(f"Deleted {deleted_blobs} blobs from storage")
+          # Purge from Blob Storage (if container exists)
+          print("Purging audio/scripts from Blob Storage...")
+          try:
+              blob_url = f"https://{storage_account}.blob.core.windows.net"
+              blob_service = BlobServiceClient(blob_url, credential)
+              container_client = blob_service.get_container_client("content")
+              
+              # Check if container exists first
+              if not container_client.exists():
+                  print("  Blob container 'content' does not exist yet - nothing to purge")
+              else:
+                  prefixes = [
+                      f"{cert_id}/{audio_format}/episodes/",
+                      f"{cert_id}/{audio_format}/scripts/",
+                      f"{cert_id}/{audio_format}/ssml/"
+                  ]
+                  
+                  deleted_blobs = 0
+                  for prefix in prefixes:
+                      blobs = container_client.list_blobs(name_starts_with=prefix)
+                      for blob in blobs:
+                          try:
+                              container_client.delete_blob(blob.name)
+                              deleted_blobs += 1
+                          except Exception as e:
+                              print(f"  Warning: Could not delete {blob.name}: {e}")
+                  
+                  print(f"Deleted {deleted_blobs} blobs from storage")
+          except ResourceNotFoundError:
+              print("  Blob container 'content' does not exist yet - nothing to purge")
+          except Exception as e:
+              print(f"  Warning: Could not access Blob Storage: {e}")
+          
           print("Purge complete - ready for fresh generation")
           PY
 
