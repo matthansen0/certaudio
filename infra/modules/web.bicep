@@ -70,15 +70,16 @@ resource funcStorageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   }
 }
 
-// App Service Plan for Functions (Elastic Premium)
-// Using Premium avoids Linux Consumption deployment flows that rely on storage-account keys.
+// App Service Plan for Functions (Basic)
+// B1 plan - ~$13/mo, supports managed identity when shared key is disabled on storage
+// Note: Consumption (Y1) requires shared key access for AzureWebJobsStorage which is blocked by policy
 resource appServicePlan 'Microsoft.Web/serverfarms@2023-12-01' = {
   name: appServicePlanName
   location: location
   tags: tags
   sku: {
-    name: 'EP1'
-    tier: 'ElasticPremium'
+    name: 'B1'
+    tier: 'Basic'
   }
   properties: {
     reserved: true // Linux
@@ -110,7 +111,7 @@ resource functionsApp 'Microsoft.Web/sites@2023-12-01' = {
     siteConfig: {
       linuxFxVersion: 'Python|3.11'
       pythonVersion: '3.11'
-      alwaysOn: true
+      // alwaysOn not supported on Consumption plan - cold starts expected
       cors: {
         allowedOrigins: ['*']
         supportCredentials: false
