@@ -77,14 +77,22 @@ def auto_revise(
     if not openai_endpoint:
         raise ValueError("OPENAI_ENDPOINT environment variable required")
 
-    credential = DefaultAzureCredential()
-    client = AzureOpenAI(
-        azure_endpoint=openai_endpoint,
-        azure_ad_token_provider=lambda: credential.get_token(
-            "https://cognitiveservices.azure.com/.default"
-        ).token,
-        api_version="2024-02-01",
-    )
+    token_credential = DefaultAzureCredential()
+    openai_api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("AZURE_OPENAI_API_KEY")
+    if openai_api_key:
+        client = AzureOpenAI(
+            azure_endpoint=openai_endpoint,
+            api_key=openai_api_key,
+            api_version="2024-02-01",
+        )
+    else:
+        client = AzureOpenAI(
+            azure_endpoint=openai_endpoint,
+            azure_ad_token_provider=lambda: token_credential.get_token(
+                "https://cognitiveservices.azure.com/.default"
+            ).token,
+            api_version="2024-02-01",
+        )
 
     # Build revision prompt
     issues_text = "\n".join(

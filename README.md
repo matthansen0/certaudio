@@ -176,7 +176,6 @@ Run the **Generate Content** workflow to create audio episodes.
 |-----------|---------|-------------|
 | `certificationId` | `ai-102` | Microsoft certification ID (see supported list above) |
 | `audioFormat` | `instructional` | `instructional` or `podcast` |
-| `discoveryMode` | `comprehensive` | `skills`, `deep`, or `comprehensive` (recommended - full coverage) |
 | `instructionalVoice` | `en-US-AndrewNeural` | Voice for instructional format |
 | `podcastHostVoice` | `en-US-BrianNeural` | Host voice for podcast format |
 | `podcastExpertVoice` | `en-US-AvaNeural` | Expert voice for podcast format |
@@ -205,11 +204,9 @@ Run the **Generate Content** workflow to create audio episodes.
 
 ## Audio Generation
 
-### Discovery Modes
+### Discovery Strategy (Combined)
 
-- **Skills Mode**: Scrapes exam skills outline page for topics (~2-3 hours)
-- **Deep Mode**: Uses Microsoft Learn Catalog API to discover learning paths, modules, and units (~5-7 hours for DP-700)
-- **Comprehensive Mode** (recommended): Combines BOTH learning paths AND exam skills outline for full official coverage (~10-12 hours for DP-700). See [docs/CONTENT_DISCOVERY.md](docs/CONTENT_DISCOVERY.md) for details.
+Content generation always uses the **combined** strategy: Microsoft Learn learning paths **plus** the exam study guide skills outline for full official coverage. See [docs/CONTENT_DISCOVERY.md](docs/CONTENT_DISCOVERY.md) for details.
 
 ### Instructional Format
 
@@ -239,6 +236,28 @@ The **Refresh Content** workflow runs weekly to:
 
 ## Local Development
 
+### Run Content Generation Locally
+
+The easiest way to run content generation is directly from the dev container. All "compute" happens on Azure's side (OpenAI, Speech) - your machine just sends HTTP requests.
+
+```bash
+# Make sure you're logged in to Azure
+az login
+
+# Run full generation
+./scripts/run-local.sh dp-700                           # Defaults: instructional
+./scripts/run-local.sh az-104 podcast                   # Podcast format
+
+# Force regenerate existing episodes
+FORCE_REGENERATE=true ./scripts/run-local.sh dp-700
+```
+
+The local runner:
+1. Resolves service endpoints from Azure (OpenAI, Speech, Cosmos, Storage)
+2. Creates an ephemeral AI Search service for indexing
+3. Runs the full pipeline: discover → index → generate
+4. Cleans up the Search service when done
+
 ### Run the Web App
 
 ```bash
@@ -247,7 +266,7 @@ python -m http.server 8080
 # Open http://localhost:8080
 ```
 
-### Run the Pipeline
+### Run Individual Pipeline Tools
 
 ```bash
 cd src/pipeline

@@ -6,9 +6,11 @@ import argparse
 import hashlib
 import json
 import os
+import time
 from typing import Optional
 
 import requests
+from azure.core.credentials import AzureKeyCredential
 from azure.identity import DefaultAzureCredential
 from azure.search.documents import SearchClient
 from azure.search.documents.indexes import SearchIndexClient
@@ -26,6 +28,7 @@ from azure.search.documents.indexes.models import (
 )
 from bs4 import BeautifulSoup
 from openai import AzureOpenAI
+from openai import AuthenticationError
 
 
 def create_search_index(index_client: SearchIndexClient, index_name: str) -> None:
@@ -151,6 +154,42 @@ def get_embedding(text: str, openai_client: AzureOpenAI) -> list[float]:
     return response.data[0].embedding
 
 
+def wait_for_openai_embeddings_access(
+    openai_client: AzureOpenAI,
+    max_wait_seconds: int = 600,
+    poll_seconds: int = 30,
+) -> None:
+    """Wait for Azure OpenAI embeddings access (useful after RBAC changes)."""
+    deadline = time.time() + max_wait_seconds
+    last_error: Optional[Exception] = None
+    attempt = 0
+
+    while time.time() < deadline:
+        attempt += 1
+        try:
+            openai_client.embeddings.create(model="text-embedding-3-large", input="ping")
+            return
+        except AuthenticationError as e:
+            last_error = e
+            # Common when principal lacks data action or RBAC hasn't propagated
+            remaining = int(deadline - time.time())
+            print(
+                f"OpenAI embeddings not ready yet (auth). Retrying in {poll_seconds}s (remaining ~{remaining}s)..."
+            )
+            time.sleep(poll_seconds)
+        except Exception as e:
+            last_error = e
+            remaining = int(deadline - time.time())
+            print(
+                f"OpenAI embeddings not ready yet ({type(e).__name__}). Retrying in {poll_seconds}s (remaining ~{remaining}s)..."
+            )
+            time.sleep(poll_seconds)
+
+    if last_error:
+        raise last_error
+    raise TimeoutError("Timed out waiting for Azure OpenAI embeddings access")
+
+
 def index_content(
     certification_id: str,
     source_urls: list[str],
@@ -159,40 +198,60 @@ def index_content(
     update_mode: bool = False,
 ) -> None:
     """Index content from source URLs into Azure AI Search."""
-    
-    credential = DefaultAzureCredential()
+
+    token_credential = DefaultAzureCredential()
+    search_admin_key = os.environ.get("SEARCH_ADMIN_KEY")
+    search_credential = AzureKeyCredential(search_admin_key) if search_admin_key else token_credential
     
     # Initialize clients
     index_name = f"{certification_id}-content"
     
     index_client = SearchIndexClient(
         endpoint=search_endpoint,
-        credential=credential,
+        credential=search_credential,
     )
     
     search_client = SearchClient(
         endpoint=search_endpoint,
         index_name=index_name,
-        credential=credential,
+        credential=search_credential,
     )
     
-    openai_client = AzureOpenAI(
-        azure_endpoint=openai_endpoint,
-        azure_ad_token_provider=lambda: credential.get_token(
-            "https://cognitiveservices.azure.com/.default"
-        ).token,
-        api_version="2024-02-01",
-    )
+    openai_api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("AZURE_OPENAI_API_KEY")
+    if openai_api_key:
+        openai_client = AzureOpenAI(
+            azure_endpoint=openai_endpoint,
+            api_key=openai_api_key,
+            api_version="2024-02-01",
+        )
+    else:
+        openai_client = AzureOpenAI(
+            azure_endpoint=openai_endpoint,
+            azure_ad_token_provider=lambda: token_credential.get_token(
+                "https://cognitiveservices.azure.com/.default"
+            ).token,
+            api_version="2024-02-01",
+        )
     
     # Create index if needed
     if not update_mode:
         create_search_index(index_client, index_name)
+
+    # Ensure OpenAI embeddings are available before we start heavy work
+    wait_for_openai_embeddings_access(openai_client)
     
     # Process each URL
     documents = []
-    
-    for url in source_urls:
-        print(f"Processing: {url}")
+
+    total_sources = len(source_urls)
+    try:
+        progress_every = max(1, int(os.environ.get("INDEX_PROGRESS_EVERY", "10")))
+    except ValueError:
+        progress_every = 10
+
+    for source_index, url in enumerate(source_urls, start=1):
+        if source_index == 1 or source_index == total_sources or source_index % progress_every == 0:
+            print(f"Processing source {source_index}/{total_sources}: {url}")
         chunks = fetch_and_chunk_content(url)
         
         for chunk in chunks:

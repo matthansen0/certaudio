@@ -24,6 +24,7 @@ from xml.sax.saxutils import escape
 from pathlib import Path
 
 from azure.cosmos import CosmosClient
+from azure.core.credentials import AzureKeyCredential
 from azure.identity import DefaultAzureCredential
 from azure.search.documents import SearchClient
 from azure.search.documents.models import VectorizedQuery
@@ -34,6 +35,38 @@ from openai import AzureOpenAI, RateLimitError
 from .synthesize_audio import synthesize_audio, synthesize_audio_segments
 from .upload_to_blob import upload_to_blob
 from .save_episode import save_episode
+
+
+def create_cosmos_client_with_retry(
+    cosmos_endpoint: str,
+    credential,
+    database_name: str = "certaudio",
+    max_wait_seconds: int = 600,
+    poll_seconds: int = 30,
+) -> CosmosClient:
+    deadline = time.time() + max_wait_seconds
+    last_error: Exception | None = None
+
+    while time.time() < deadline:
+        try:
+            client = CosmosClient(cosmos_endpoint, credential)
+            # Touch the account/database to validate auth (fails fast if RBAC missing)
+            client.get_database_client(database_name).read()
+            return client
+        except Exception as e:
+            last_error = e
+            msg = str(e)
+            if "Request blocked by Auth" in msg or "Microsoft.DocumentDB" in msg or "Forbidden" in msg:
+                remaining = int(deadline - time.time())
+                print(
+                    f"Cosmos RBAC not ready/assigned yet; retrying in {poll_seconds}s (remaining ~{remaining}s)...",
+                    file=sys.stderr,
+                )
+                time.sleep(poll_seconds)
+                continue
+            raise
+
+    raise last_error or TimeoutError("Timed out waiting for Cosmos RBAC")
 
 
 def call_openai_with_retry(openai_client: AzureOpenAI, max_retries: int = 5, **kwargs):
@@ -827,7 +860,7 @@ def finalize_episode(
     return episode_doc
 
 
-
+def main() -> None:
     """Main entry point for episode generation."""
     parser = argparse.ArgumentParser(description="Generate audio episodes for certification")
     parser.add_argument("--certification-id", required=True, help="Certification ID (e.g., dp-700)")
@@ -912,23 +945,34 @@ def finalize_episode(
         sys.exit(1)
 
     # Initialize clients
-    credential = DefaultAzureCredential()
+    token_credential = DefaultAzureCredential()
+    search_admin_key = os.environ.get("SEARCH_ADMIN_KEY")
+    search_credential = AzureKeyCredential(search_admin_key) if search_admin_key else token_credential
 
     search_client = SearchClient(
         endpoint=search_endpoint,
         index_name=f"{args.certification_id}-content",
-        credential=credential,
+        credential=search_credential,
     )
 
-    openai_client = AzureOpenAI(
-        azure_endpoint=openai_endpoint,
-        azure_ad_token_provider=lambda: credential.get_token(
-            "https://cognitiveservices.azure.com/.default"
-        ).token,
-        api_version="2024-02-01",
-    )
+    openai_api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("AZURE_OPENAI_API_KEY")
+    if openai_api_key:
+        openai_client = AzureOpenAI(
+            azure_endpoint=openai_endpoint,
+            api_key=openai_api_key,
+            api_version="2024-02-01",
+        )
+    else:
+        openai_client = AzureOpenAI(
+            azure_endpoint=openai_endpoint,
+            azure_ad_token_provider=lambda: token_credential.get_token(
+                "https://cognitiveservices.azure.com/.default"
+            ).token,
+            api_version="2024-02-01",
+        )
 
-    cosmos_client = CosmosClient(cosmos_endpoint, credential)
+    # Cosmos DB account has disableLocalAuth=true, so we must use Entra ID tokens.
+    cosmos_client = create_cosmos_client_with_retry(cosmos_endpoint, token_credential)
 
     # Set up Jinja2 environment for prompts
     prompts_dir = Path(__file__).parent.parent / "prompts"

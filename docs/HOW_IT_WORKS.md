@@ -330,14 +330,11 @@ This is where the magic happens. The pipeline transforms Microsoft Learn content
 **Why Both**:
 Learning paths teach concepts. Exam skills define what you'll be tested on. They're complementary, not identical. Many exam skills have NO dedicated learning path content.
 
-**Discovery Modes**:
-```yaml
-# In workflow
-discoveryMode:
-  - comprehensive  # Both sources (recommended)
-  - deep           # Learning paths only
-  - skills         # Exam outline only (fast but shallow)
-```
+**Discovery Strategy (Combined)**:
+
+The platform now always uses the **combined** strategy: learning paths **plus** the exam study guide skills outline. This provides the most complete coverage and avoids surprising gaps.
+
+(You can still run the underlying tools directly for "learning-paths-only" or "skills-only" exploration, but it’s no longer exposed as a workflow/local-run option.)
 
 **Key Code**:
 ```python
@@ -643,41 +640,45 @@ Each batch processes ~10 episodes with parallel TTS synthesis (10 concurrent by 
 
 ---
 
-### Alternative: Azure Container Instance (ACI)
+### Alternative: Run Locally from Dev Container
 
-If you're hitting **GitHub Actions limits** (6-hour timeout, free tier minutes), you can run generation directly in Azure:
+If you're hitting **GitHub Actions limits** (6-hour timeout, free tier minutes), you can run generation directly from your dev container:
 
 ```bash
-# Run full generation as an ACI job (no timeout, no batching)
-./scripts/run-aci-job.sh dp-700 comprehensive instructional
+# Run full generation locally (combined discovery strategy)
+./scripts/run-local.sh dp-700 instructional
 ```
 
-**Why ACI?**
-| Aspect | GitHub Actions | ACI |
-|--------|---------------|-----|
+**Why Local?**
+| Aspect | GitHub Actions | Local |
+|--------|---------------|-------|
 | **Timeout** | 6 hours max | None |
-| **Minutes** | 2000/month free | ~$0.50/hour |
-| **Auth** | OIDC (expires) | Managed Identity |
-| **Complexity** | Batched | Single job |
+| **Minutes** | 2000/month free | Unlimited |
+| **Auth** | OIDC (5-min tokens) | Azure CLI (persistent) |
+| **Complexity** | Batched workflow | Single script |
 
-**Setup**:
-1. Build and push Docker image:
-   ```bash
-   docker build -t ghcr.io/yourorg/certaudio:latest .
-   docker push ghcr.io/yourorg/certaudio:latest
-   ```
+All the "compute" happens on Azure's side (OpenAI, Speech). Your machine just sends HTTP requests and waits.
 
-2. Run the job:
-   ```bash
-   ./scripts/run-aci-job.sh dp-700
-   ```
+**Usage**:
+```bash
+# Make sure you're logged in to Azure
+az login
 
-3. Monitor:
-   ```bash
-   az container logs -n certaudio-dp-700-20260119-140000 -g rg-certaudio-dev --follow
-   ```
+# Run generation
+./scripts/run-local.sh dp-700                           # Defaults: instructional
+./scripts/run-local.sh az-104 podcast                   # Podcast format
 
-The ACI runner uses the same code with managed identity (no token expiration issues).
+# Force regenerate existing episodes
+FORCE_REGENERATE=true ./scripts/run-local.sh dp-700
+```
+
+**What the script does**:
+1. Resolves all service endpoints from Azure (OpenAI, Speech, Cosmos, Storage)
+2. Creates an ephemeral AI Search service for indexing
+3. Runs the full pipeline: discover → index → generate
+4. Cleans up the Search service when done (or on error)
+
+The local runner uses `az login` credentials via `DefaultAzureCredential`, which persists for hours/days instead of the 5-minute OIDC tokens used in workflows.
 
 ---
 

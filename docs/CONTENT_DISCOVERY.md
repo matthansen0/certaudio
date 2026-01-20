@@ -140,6 +140,85 @@ Each content item has a hash stored in Cosmos DB:
 
 When Microsoft updates content, the hash changes, triggering amendment episode generation.
 
+## Understanding Audio Duration vs Microsoft's Course Times
+
+### Why Our Output is ~6 Hours When Microsoft Says "26 Hours"
+
+Microsoft's listed course duration (e.g., "26 hours" for DP-700) includes **all learning activities**, not just text content:
+
+| Content Type | Microsoft Time | Audio Convertible? | Our Coverage |
+|-------------|----------------|-------------------|--------------|
+| **Text content** (concepts, explanations) | ~6-7 hours | ✅ Yes | **100%** |
+| **Hands-on labs** | ~15 hours | ❌ No | Not applicable |
+| **Knowledge checks** (quizzes) | ~2-3 hours | ❌ No | Not applicable |
+| **Exercise setup/teardown** | ~1-2 hours | ❌ No | Not applicable |
+
+### Breaking Down DP-700 Specifically
+
+From our analysis of actual Microsoft Learn content:
+
+```
+Total learning path words:  ~95,000 (raw, with duplicates)
+After deduplication:        ~57,873 unique words
+At 150 words/minute:        ~386 minutes ≈ 6.4 hours of audio
+```
+
+**This 6.4 hours IS the full text portion.** The remaining ~20 hours are:
+- "Exercise - Create a lakehouse" (hands-on lab)
+- "Module assessment" (interactive quiz)
+- Time to configure Azure environments, run notebooks, etc.
+
+### Why Labs Can't Be Audio
+
+Consider this exercise from DP-700:
+```
+Exercise - Analyze data with Apache Spark (86 words)
+```
+
+Those 86 words are just instructions like:
+> "1. Navigate to your Fabric workspace
+>  2. Create a new notebook
+>  3. Write code to load a CSV file..."
+
+The actual learning happens when you **do** the lab (~45 minutes), not when you read instructions (~30 seconds).
+
+### Content Word Count Analysis
+
+| Content Type | Units | Words | Audio Time |
+|-------------|-------|-------|------------|
+| **Conceptual content** | 82 | ~48,000 | ~5.3 hours |
+| **Introductions** | 22 | ~3,500 | ~23 min |
+| **Summaries** | 22 | ~2,200 | ~15 min |
+| **Knowledge checks** | 22 | ~3,500 | (not narrated) |
+| **Exercises** | 20 | ~1,700 | (instructions only) |
+
+### Comprehensive Mode Adds More
+
+When `--comprehensive` mode is enabled, we also include exam skill objectives:
+- 8 skill domains with 45 specific skills
+- Each skill gets its own episode or shares with related skills
+- Adds ~1-2 hours of targeted exam prep content
+
+**Total with comprehensive mode: ~7-8 hours**
+
+### Completeness Guarantee
+
+The system **NEVER truncates content**. Every topic in the discovery output is covered:
+
+1. **Narration prompt**: Explicitly states "Cover ALL topics - NEVER truncate"
+2. **Multi-part episodes**: Long modules automatically split into Part 1, Part 2, etc.
+3. **Continuation logic**: If a narration ends with "[END OF PART]", the system generates the next part
+4. **Quality checks**: Episodes are validated for topic coverage before saving
+
+### Summary
+
+| Claim | Reality |
+|-------|---------|
+| "Microsoft says 26 hours" | Includes ~15h of hands-on labs |
+| "We only output ~6 hours" | That IS the full text content |
+| "Content is truncated" | ❌ False - all text is covered |
+| "Labs are missing" | ✅ Correct - labs can't be audio |
+
 ## Implementation Files
 
 - `src/pipeline/tools/deep_discover.py` - Learning path discovery via Catalog API

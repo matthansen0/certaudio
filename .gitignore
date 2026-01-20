@@ -1,3 +1,6 @@
+# Local run logs and state
+.runs/
+*.log
 
 # Bicep build outputs
 infra/main.json

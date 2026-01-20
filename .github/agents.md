@@ -4,10 +4,7 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 
 ## Recent Implementation Notes (Post v1 Plan)
 
-- **Discovery Modes**: Content generation supports three discovery modes:
-  - `skills` - Basic exam skills outline scraping (~2-3 hours)
-  - `deep` - Learning paths via Microsoft Learn Catalog API (~5-7 hours for DP-700)
-  - `comprehensive` - **Recommended**: Combines learning paths AND exam skills outline for full official coverage (~10-12 hours for DP-700). See [docs/CONTENT_DISCOVERY.md](../docs/CONTENT_DISCOVERY.md) for details.
+- **Discovery Strategy (Combined)**: Content generation always uses the combined strategy (learning paths **plus** exam skills outline) for full coverage. See [docs/CONTENT_DISCOVERY.md](../docs/CONTENT_DISCOVERY.md) for details.
 - **Hierarchy API for URLs**: Unit URLs are fetched from `/api/hierarchy/modules/{uid}` because the catalog API doesn't provide actual URLs, and URL patterns can be non-sequential (e.g., `3b-optimize` instead of `4-optimize`).
 - **Voice Selection**: Generate Content workflow allows choosing voices for instructional, podcast host, and podcast expert formats from 11 Azure Neural voices.
 - **Episode Resumption**: Episodes that already exist in Cosmos DB are skipped by default. Use `forceRegenerate=true` to regenerate all episodes (e.g., after changing voices).

@@ -66,15 +66,6 @@ on:
           - mb-800     # Dynamics 365 Business Central Functional Consultant
           - mb-820     # Dynamics 365 Business Central Developer
         default: 'test'
-      discoveryMode:
-        description: 'Content discovery mode (comprehensive recommended for full coverage)'
-        required: true
-        type: choice
-        options:
-          - comprehensive  # Learning paths + exam skills (recommended)
-          - deep           # Learning paths only
-          - skills         # Skills outline only (quick)
-        default: 'comprehensive'
       audioFormat:
         description: 'Audio format'
         required: true
@@ -137,10 +128,6 @@ on:
         required: false
         type: boolean
         default: false
-      examPageUrl:
-        description: 'Override exam page URL (optional, auto-discovered if empty)'
-        required: false
-        default: ''
 
 permissions:
   id-token: write
@@ -381,8 +368,6 @@ jobs:
         id: discover
         env:
           CERTIFICATION_ID: ${{ inputs.certificationId }}
-          EXAM_PAGE_URL: ${{ inputs.examPageUrl }}
-          DISCOVERY_MODE: ${{ inputs.discoveryMode }}
         run: |
           cd src/pipeline
           
@@ -390,22 +375,12 @@ jobs:
           if [ "$CERTIFICATION_ID" = "test" ]; then
             echo "Running TEST MODE discovery (single unit, ~\$0.15)"
             python3 -m tools.deep_discover --test --output-file /tmp/discovery_results.json
-          elif [ "$DISCOVERY_MODE" = "comprehensive" ]; then
-            echo "Running COMPREHENSIVE discovery (learning paths + exam skills)"
+          else
+            # Combined strategy (learning paths + exam skills)
+            echo "Running COMBINED discovery (learning paths + exam skills)"
             python3 -m tools.deep_discover \
               --certification-id "$CERTIFICATION_ID" \
               --comprehensive \
-              --output-file /tmp/discovery_results.json
-          elif [ "$DISCOVERY_MODE" = "deep" ]; then
-            echo "Running DEEP discovery (learning paths only)"
-            python3 -m tools.deep_discover \
-              --certification-id "$CERTIFICATION_ID" \
-              --output-file /tmp/discovery_results.json
-          else
-            echo "Running SKILLS OUTLINE discovery (quick mode)"
-            python3 -m tools.discover_exam_content \
-              --certification-id "$CERTIFICATION_ID" \
-              --exam-page-url "$EXAM_PAGE_URL" \
               --output-file /tmp/discovery_results.json
           fi
           
@@ -815,7 +790,6 @@ jobs:
           PODCAST_HOST_VOICE: ${{ inputs.podcastHostVoice }}
           PODCAST_EXPERT_VOICE: ${{ inputs.podcastExpertVoice }}
           FORCE_REGENERATE: ${{ inputs.forceRegenerate }}
-          DISCOVERY_MODE: ${{ inputs.discoveryMode }}
           SKILLS_OUTLINE: ${{ needs.discover-content.outputs.skillsOutline }}
           BATCH_INDEX: ${{ matrix.batch }}
         run: |
@@ -835,11 +809,8 @@ jobs:
           
           cd src/pipeline
 
-          MIN_WORDS_PER_PART=1200
-          if [ "$DISCOVERY_MODE" = "deep" ]; then
-            MIN_WORDS_PER_PART=1400
-          fi
-          export MIN_WORDS_PER_PART
+          # Combined discovery tends to produce broad coverage; keep a stable minimum.
+          export MIN_WORDS_PER_PART=1200
           
           # Build command with optional --force-regenerate flag
           REGEN_FLAG=""

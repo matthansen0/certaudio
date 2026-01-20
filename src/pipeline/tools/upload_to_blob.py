@@ -16,6 +16,18 @@ def get_blob_service_client() -> BlobServiceClient:
     if not storage_account:
         raise ValueError("STORAGE_ACCOUNT_NAME environment variable required")
 
+    # Prefer connection string / account key when provided (more reliable for local dev)
+    conn_str = os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
+    if conn_str:
+        return BlobServiceClient.from_connection_string(conn_str)
+
+    account_key = os.environ.get("STORAGE_ACCOUNT_KEY")
+    if account_key:
+        return BlobServiceClient(
+            account_url=f"https://{storage_account}.blob.core.windows.net",
+            credential=account_key,
+        )
+
     credential = DefaultAzureCredential()
     account_url = f"https://{storage_account}.blob.core.windows.net"
 
@@ -68,33 +80,54 @@ def upload_to_blob(
     script_blob_path = f"{certification_id}/{audio_format}/scripts/{episode_id}.md"
     ssml_blob_path = f"{certification_id}/{audio_format}/ssml/{episode_id}.ssml"
 
-    # Upload audio file
-    print(f"Uploading audio: {audio_blob_path}")
-    with open(audio_file_path, "rb") as audio_file:
-        audio_container.upload_blob(
-            name=audio_blob_path,
-            data=audio_file,
+    def _upload_all() -> None:
+        # Upload audio file
+        print(f"Uploading audio: {audio_blob_path}")
+        with open(audio_file_path, "rb") as audio_file:
+            audio_container.upload_blob(
+                name=audio_blob_path,
+                data=audio_file,
+                overwrite=True,
+                content_settings=ContentSettings(content_type="audio/mpeg"),
+            )
+
+        # Upload script
+        print(f"Uploading script: {script_blob_path}")
+        scripts_container.upload_blob(
+            name=script_blob_path,
+            data=script_content,
             overwrite=True,
-            content_settings=ContentSettings(content_type="audio/mpeg"),
+            content_settings=ContentSettings(content_type="text/markdown"),
         )
 
-    # Upload script
-    print(f"Uploading script: {script_blob_path}")
-    scripts_container.upload_blob(
-        name=script_blob_path,
-        data=script_content,
-        overwrite=True,
-        content_settings=ContentSettings(content_type="text/markdown"),
-    )
+        # Upload SSML
+        print(f"Uploading SSML: {ssml_blob_path}")
+        scripts_container.upload_blob(
+            name=ssml_blob_path,
+            data=ssml_content,
+            overwrite=True,
+            content_settings=ContentSettings(content_type="application/ssml+xml"),
+        )
 
-    # Upload SSML
-    print(f"Uploading SSML: {ssml_blob_path}")
-    scripts_container.upload_blob(
-        name=ssml_blob_path,
-        data=ssml_content,
-        overwrite=True,
-        content_settings=ContentSettings(content_type="application/ssml+xml"),
-    )
+    try:
+        _upload_all()
+    except Exception as e:
+        # If the storage account disallows shared key auth, retry using Entra ID tokens.
+        if "KeyBasedAuthenticationNotPermitted" in str(e):
+            storage_account = os.environ.get("STORAGE_ACCOUNT_NAME")
+            if not storage_account:
+                raise
+
+            credential = DefaultAzureCredential()
+            blob_service = BlobServiceClient(
+                account_url=f"https://{storage_account}.blob.core.windows.net",
+                credential=credential,
+            )
+            audio_container = blob_service.get_container_client("audio")
+            scripts_container = blob_service.get_container_client("scripts")
+            _upload_all()
+        else:
+            raise
 
     # Construct URLs (these will be accessed via Functions API, not directly)
     storage_account = os.environ.get("STORAGE_ACCOUNT_NAME")

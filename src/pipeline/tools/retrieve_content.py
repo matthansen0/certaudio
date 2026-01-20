@@ -7,6 +7,7 @@ import os
 from dataclasses import dataclass
 
 from azure.identity import DefaultAzureCredential
+from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
 from azure.search.documents.models import VectorizedQuery
 from openai import AzureOpenAI
@@ -55,22 +56,32 @@ def retrieve_content(
     if not search_endpoint or not openai_endpoint:
         raise ValueError("SEARCH_ENDPOINT and OPENAI_ENDPOINT environment variables required")
 
-    credential = DefaultAzureCredential()
+    token_credential = DefaultAzureCredential()
+    search_admin_key = os.environ.get("SEARCH_ADMIN_KEY")
+    search_credential = AzureKeyCredential(search_admin_key) if search_admin_key else token_credential
 
     # Initialize clients
     search_client = SearchClient(
         endpoint=search_endpoint,
         index_name=f"{certification_id}-content",
-        credential=credential,
+        credential=search_credential,
     )
 
-    openai_client = AzureOpenAI(
-        azure_endpoint=openai_endpoint,
-        azure_ad_token_provider=lambda: credential.get_token(
-            "https://cognitiveservices.azure.com/.default"
-        ).token,
-        api_version="2024-02-01",
-    )
+    openai_api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("AZURE_OPENAI_API_KEY")
+    if openai_api_key:
+        openai_client = AzureOpenAI(
+            azure_endpoint=openai_endpoint,
+            api_key=openai_api_key,
+            api_version="2024-02-01",
+        )
+    else:
+        openai_client = AzureOpenAI(
+            azure_endpoint=openai_endpoint,
+            azure_ad_token_provider=lambda: token_credential.get_token(
+                "https://cognitiveservices.azure.com/.default"
+            ).token,
+            api_version="2024-02-01",
+        )
 
     # Build search query from domain and topics
     query_text = f"{skill_domain}\n" + "\n".join(skill_topics)

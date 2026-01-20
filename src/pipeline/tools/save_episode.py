@@ -53,6 +53,7 @@ def save_episode(
     if not cosmos_endpoint:
         raise ValueError("COSMOS_DB_ENDPOINT environment variable required")
 
+    # Cosmos DB account has disableLocalAuth=true, so we must use Entra ID tokens
     credential = DefaultAzureCredential()
     client = CosmosClient(cosmos_endpoint, credential)
     database = client.get_database_client(database_name)
