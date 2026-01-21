@@ -17,6 +17,10 @@ param uniqueSuffix string = uniqueString(resourceGroup().id)
 @allowed(['eastus', 'eastus2', 'westus', 'westus3', 'northcentralus', 'southcentralus', 'westeurope', 'swedencentral'])
 param openAiLocation string = 'eastus2'
 
+@description('Location for Azure Speech (HD voices only available in eastus, westeurope, southeastasia)')
+@allowed(['eastus', 'westeurope', 'southeastasia'])
+param speechLocation string = 'eastus'
+
 @description('Optional AAD object ID of the automation principal (e.g., GitHub OIDC service principal) that runs content-generation workflows. If provided, it is granted Cosmos SQL Data Contributor at the database scope.')
 param automationPrincipalId string = ''
 
@@ -43,6 +47,7 @@ module aiServices 'modules/ai-services.bicep' = {
     resourcePrefix: resourcePrefix
     location: location
     openAiLocation: openAiLocation
+    speechLocation: speechLocation
     uniqueSuffix: uniqueSuffix
     automationPrincipalId: automationPrincipalId
     tags: tags
@@ -95,5 +100,6 @@ output functionsAppName string = web.outputs.functionsAppName
 output funcStorageAccountName string = web.outputs.funcStorageAccountName
 output openAiEndpoint string = aiServices.outputs.openAiEndpoint
 output speechEndpoint string = aiServices.outputs.speechEndpoint
+output speechRegion string = aiServices.outputs.speechRegion
 output searchEndpoint string = aiServices.outputs.searchEndpoint
 output documentIntelligenceEndpoint string = aiServices.outputs.documentIntelligenceEndpoint

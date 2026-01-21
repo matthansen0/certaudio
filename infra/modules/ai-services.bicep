@@ -11,6 +11,8 @@ param uniqueSuffix string
 param tags object
 @description('Location for Azure OpenAI (may differ from main location due to model availability)')
 param openAiLocation string = 'eastus2'
+@description('Location for Azure Speech (HD voices only in eastus, westeurope, southeastasia)')
+param speechLocation string = 'eastus'
 @description('Optional AAD object ID of an automation principal (e.g., GitHub OIDC service principal) that runs content-generation workflows. If provided, it is granted Azure AI Search Index Data Contributor on the Search service.')
 param automationPrincipalId string = ''
 // ============================================================================
@@ -84,9 +86,10 @@ resource embeddingDeployment 'Microsoft.CognitiveServices/accounts/deployments@2
 }
 
 // Azure AI Speech Service
+// Deployed to speechLocation (eastus by default) for HD voice support
 resource speech 'Microsoft.CognitiveServices/accounts@2024-04-01-preview' = {
   name: speechName
-  location: location
+  location: speechLocation
   tags: tags
   kind: 'SpeechServices'
   sku: {
@@ -159,6 +162,7 @@ output openAiId string = openAi.id
 
 output speechName string = speech.name
 output speechEndpoint string = speech.properties.endpoint
+output speechRegion string = speechLocation
 output speechId string = speech.id
 
 output documentIntelligenceName string = documentIntelligence.name
