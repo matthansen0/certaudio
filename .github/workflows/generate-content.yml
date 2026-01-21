@@ -792,16 +792,25 @@ jobs:
           FORCE_REGENERATE: ${{ inputs.forceRegenerate }}
           SKILLS_OUTLINE: ${{ needs.discover-content.outputs.skillsOutline }}
           BATCH_INDEX: ${{ matrix.batch }}
+          # Pass OIDC credentials for periodic re-authentication
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         run: |
-          # Start background token refresh to prevent OIDC token expiration
-          # GitHub Actions OIDC tokens have short lifetimes (~5 min), but the Azure CLI
-          # can refresh them if we periodically request tokens before expiry.
+          # Start background token refresh to prevent OIDC token expiration.
+          # GitHub Actions OIDC tokens cannot be refreshed - they expire after ~5 minutes.
+          # We must periodically re-authenticate using az login with federated credentials.
+          # The ACTIONS_ID_TOKEN_REQUEST_* vars are set by azure/login and enable OIDC re-auth.
           (
             while true; do
-              sleep 180  # Refresh every 3 minutes (before 5-min expiry)
-              az account get-access-token --resource https://management.azure.com > /dev/null 2>&1 || true
-              az account get-access-token --resource https://cognitiveservices.azure.com > /dev/null 2>&1 || true
-              az account get-access-token --resource https://storage.azure.com > /dev/null 2>&1 || true
+              sleep 240  # Re-authenticate every 4 minutes (before 5-min expiry)
+              echo "[$(date -Iseconds)] Refreshing OIDC authentication..."
+              az login --service-principal \
+                -u "$AZURE_CLIENT_ID" \
+                -t "$AZURE_TENANT_ID" \
+                --federated-token "$(curl -sLS "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api://AzureADTokenExchange" -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" | jq -r '.value')" \
+                > /dev/null 2>&1 || echo "[$(date -Iseconds)] Warning: Token refresh failed"
+              az account set --subscription "$AZURE_SUBSCRIPTION_ID" > /dev/null 2>&1 || true
             done
           ) &
           TOKEN_REFRESH_PID=$!
