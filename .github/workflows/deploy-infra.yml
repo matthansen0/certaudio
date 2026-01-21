@@ -203,6 +203,91 @@ jobs:
               exit 1
             fi
 
+      - name: Assign role permissions to Functions managed identity
+        uses: azure/cli@v2
+        env:
+          DEPLOYMENT_NAME: certaudio-${{ github.run_id }}-${{ github.run_attempt }}
+        with:
+          inlineScript: |
+            set -euo pipefail
+            
+            # Get resource names from deployment outputs
+            FUNC_APP_NAME=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.functionsAppName.value" -o tsv)
+            FUNC_STORAGE_NAME=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.funcStorageAccountName.value" -o tsv)
+            DATA_STORAGE_NAME=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.storageAccountName.value" -o tsv)
+            COSMOS_NAME=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.cosmosDbAccountName.value" -o tsv)
+            COSMOS_DB_NAME=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.cosmosDbDatabaseName.value" -o tsv)
+            
+            # Get Function App managed identity principal ID
+            PRINCIPAL_ID=$(az functionapp identity show --name "$FUNC_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query principalId -o tsv)
+            echo "Function App: $FUNC_APP_NAME"
+            echo "Principal ID: $PRINCIPAL_ID"
+            
+            # Role definition IDs (built-in roles)
+            BLOB_CONTRIBUTOR="ba92f5b4-2d11-453d-a403-e96b0029c9fe"
+            QUEUE_CONTRIBUTOR="974c5e8b-45b9-4653-ba55-5f855dd0fb88"
+            TABLE_CONTRIBUTOR="0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3"
+            BLOB_READER="2a2b9908-6ea1-4ae2-8e65-a410df84e7d1"
+            
+            # Helper function: assign role if not already assigned
+            assign_role() {
+              local scope="$1"
+              local role_id="$2"
+              local role_name="$3"
+              
+              existing=$(az role assignment list --scope "$scope" --assignee "$PRINCIPAL_ID" --role "$role_id" --query "[].id" -o tsv 2>/dev/null || echo "")
+              if [[ -n "$existing" ]]; then
+                echo "✓ $role_name already assigned"
+              else
+                echo "→ Assigning $role_name..."
+                az role assignment create --scope "$scope" --assignee-object-id "$PRINCIPAL_ID" --assignee-principal-type ServicePrincipal --role "$role_id" -o none
+                echo "✓ $role_name assigned"
+              fi
+            }
+            
+            # Functions storage account: Blob, Queue, Table Contributor
+            FUNC_STORAGE_SCOPE="/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.Storage/storageAccounts/$FUNC_STORAGE_NAME"
+            echo ""
+            echo "=== Functions Storage: $FUNC_STORAGE_NAME ==="
+            assign_role "$FUNC_STORAGE_SCOPE" "$BLOB_CONTRIBUTOR" "Storage Blob Data Contributor"
+            assign_role "$FUNC_STORAGE_SCOPE" "$QUEUE_CONTRIBUTOR" "Storage Queue Data Contributor"
+            assign_role "$FUNC_STORAGE_SCOPE" "$TABLE_CONTRIBUTOR" "Storage Table Data Contributor"
+            
+            # Data storage account: Blob Reader
+            DATA_STORAGE_SCOPE="/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.Storage/storageAccounts/$DATA_STORAGE_NAME"
+            echo ""
+            echo "=== Data Storage: $DATA_STORAGE_NAME ==="
+            assign_role "$DATA_STORAGE_SCOPE" "$BLOB_READER" "Storage Blob Data Reader"
+            
+            # Cosmos DB: SQL Data Contributor
+            echo ""
+            echo "=== Cosmos DB: $COSMOS_NAME ==="
+            COSMOS_ROLE_DEF="/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.DocumentDB/databaseAccounts/$COSMOS_NAME/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002"
+            COSMOS_SCOPE="/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.DocumentDB/databaseAccounts/$COSMOS_NAME/dbs/$COSMOS_DB_NAME"
+            
+            # Check if Cosmos role assignment exists
+            existing_cosmos=$(az cosmosdb sql role assignment list \
+              --account-name "$COSMOS_NAME" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query "[?principalId=='$PRINCIPAL_ID'].id" -o tsv 2>/dev/null || echo "")
+            
+            if [[ -n "$existing_cosmos" ]]; then
+              echo "✓ Cosmos DB SQL Data Contributor already assigned"
+            else
+              echo "→ Assigning Cosmos DB SQL Data Contributor..."
+              az cosmosdb sql role assignment create \
+                --account-name "$COSMOS_NAME" \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
+                --role-definition-id "$COSMOS_ROLE_DEF" \
+                --principal-id "$PRINCIPAL_ID" \
+                --scope "$COSMOS_SCOPE" \
+                -o none
+              echo "✓ Cosmos DB SQL Data Contributor assigned"
+            fi
+            
+            echo ""
+            echo "=== Role assignment complete ==="
+
       - name: Get deployment outputs
         id: outputs
         env:
