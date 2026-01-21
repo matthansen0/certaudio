@@ -967,9 +967,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Generate audio episodes for certification")
     parser.add_argument("--certification-id", required=True, help="Certification ID (e.g., dp-700)")
     parser.add_argument("--audio-format", default="instructional", choices=["instructional", "podcast"])
-    parser.add_argument("--instructional-voice", default="en-US-Andrew:DragonHDLatestNeural", 
+    parser.add_argument("--instructional-voice", default="en-US-AndrewNeural", 
                         help="Voice for instructional format (see .env.example for options)")
-    parser.add_argument("--podcast-host-voice", default="en-US-Ava:DragonHDLatestNeural",
+    parser.add_argument("--podcast-host-voice", default="en-US-AvaNeural",
                         help="Host voice for podcast format (see .env.example for options)")
     parser.add_argument("--podcast-expert-voice", default="en-US-Andrew:DragonHDLatestNeural",
                         help="Expert voice for podcast format (see .env.example for options)")

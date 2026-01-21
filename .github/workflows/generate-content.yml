@@ -97,7 +97,7 @@ on:
           - en-US-JennyNeural       # Female, conversational
           - en-US-AriaNeural        # Female, newscast style
           - en-US-SaraNeural        # Female, friendly
-        default: 'en-US-Andrew:DragonHDLatestNeural'
+        default: 'en-US-AndrewNeural'
       podcastHostVoice:
         description: 'Host voice for podcast format'
         required: false
@@ -123,7 +123,7 @@ on:
           - en-US-EmmaNeural
           - en-US-JennyNeural
           - en-US-AriaNeural
-        default: 'en-US-Ava:DragonHDLatestNeural'
+        default: 'en-US-AvaNeural'
       podcastExpertVoice:
         description: 'Expert voice for podcast format'
         required: false
@@ -150,7 +150,7 @@ on:
           - en-US-EmmaNeural
           - en-US-JennyNeural
           - en-US-AriaNeural
-        default: 'en-US-Andrew:DragonHDLatestNeural'
+        default: 'en-US-AndrewNeural'
       forceRegenerate:
         description: 'Regenerate all episodes (purges existing episodes first, use for major changes)'
         required: false

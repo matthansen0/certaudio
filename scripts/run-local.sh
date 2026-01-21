@@ -39,9 +39,9 @@ fi
 # Voices (can be overridden via env vars or .env.local)
 # Default to Dragon HD GA voices; Preview voices (Ava3/Andrew3) only work in eastus/westeurope/southeastasia.
 # See .env.example for options.
-INSTRUCTIONAL_VOICE="${INSTRUCTIONAL_VOICE:-en-US-Andrew:DragonHDLatestNeural}"
-PODCAST_HOST_VOICE="${PODCAST_HOST_VOICE:-en-US-Ava:DragonHDLatestNeural}"
-PODCAST_EXPERT_VOICE="${PODCAST_EXPERT_VOICE:-en-US-Andrew:DragonHDLatestNeural}"
+INSTRUCTIONAL_VOICE="${INSTRUCTIONAL_VOICE:-en-US-AndrewNeural}"
+PODCAST_HOST_VOICE="${PODCAST_HOST_VOICE:-en-US-AvaNeural}"
+PODCAST_EXPERT_VOICE=${PODCAST_EXPERT_VOICE:-"en-US-AndrewNeural"}
 
 # Configuration
 RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-rg-certaudio-dev}"
