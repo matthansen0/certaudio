@@ -103,12 +103,15 @@ on:
         required: false
         type: choice
         options:
-          # Dragon HD voices (highest quality, podcast-optimized)
-          - en-US-Ava3:DragonHDLatestNeural     # Female, podcast-optimized (HD)
-          - en-US-Ava:DragonHDLatestNeural      # Female (HD)
-          - en-US-Andrew3:DragonHDLatestNeural  # Male, podcast-optimized (HD)
-          - en-US-Andrew:DragonHDLatestNeural   # Male (HD)
-          - en-US-Adam:DragonHDLatestNeural     # Male (HD)
+          # Dragon HD voices (highest quality)
+          - en-US-Ava:DragonHDLatestNeural      # Female (HD, GA)
+          - en-US-Emma:DragonHDLatestNeural     # Female (HD, GA)
+          - en-US-Andrew:DragonHDLatestNeural   # Male (HD, GA)
+          - en-US-Andrew2:DragonHDLatestNeural  # Male, conversational (HD, GA)
+          - en-US-Adam:DragonHDLatestNeural     # Male (HD, GA)
+          # Preview HD voices (eastus/westeurope/southeastasia only)
+          - en-US-Ava3:DragonHDLatestNeural     # Female, podcast-optimized (HD, Preview)
+          - en-US-Andrew3:DragonHDLatestNeural  # Male, podcast-optimized (HD, Preview)
           # Standard Neural voices
           - en-US-AvaNeural
           - en-US-AndrewNeural
@@ -120,19 +123,22 @@ on:
           - en-US-EmmaNeural
           - en-US-JennyNeural
           - en-US-AriaNeural
-        default: 'en-US-Ava3:DragonHDLatestNeural'
+        default: 'en-US-Ava:DragonHDLatestNeural'
       podcastExpertVoice:
         description: 'Expert voice for podcast format'
         required: false
         type: choice
         options:
-          # Dragon HD voices (highest quality, podcast-optimized)
-          - en-US-Andrew3:DragonHDLatestNeural  # Male, podcast-optimized (HD)
-          - en-US-Andrew:DragonHDLatestNeural   # Male (HD)
-          - en-US-Adam:DragonHDLatestNeural     # Male (HD)
-          - en-US-Ava3:DragonHDLatestNeural     # Female, podcast-optimized (HD)
-          - en-US-Ava:DragonHDLatestNeural      # Female (HD)
-          - en-US-Aria:DragonHDLatestNeural     # Female (HD)
+          # Dragon HD voices (highest quality)
+          - en-US-Andrew:DragonHDLatestNeural   # Male (HD, GA)
+          - en-US-Andrew2:DragonHDLatestNeural  # Male, conversational (HD, GA)
+          - en-US-Adam:DragonHDLatestNeural     # Male (HD, GA)
+          - en-US-Ava:DragonHDLatestNeural      # Female (HD, GA)
+          - en-US-Emma:DragonHDLatestNeural     # Female (HD, GA)
+          # Preview HD voices (eastus/westeurope/southeastasia only)
+          - en-US-Andrew3:DragonHDLatestNeural  # Male, podcast-optimized (HD, Preview)
+          - en-US-Ava3:DragonHDLatestNeural     # Female, podcast-optimized (HD, Preview)
+          - en-US-Aria:DragonHDLatestNeural     # Female (HD, Preview)
           # Standard Neural voices
           - en-US-AndrewNeural
           - en-US-BrianNeural
@@ -144,7 +150,7 @@ on:
           - en-US-EmmaNeural
           - en-US-JennyNeural
           - en-US-AriaNeural
-        default: 'en-US-Andrew3:DragonHDLatestNeural'
+        default: 'en-US-Andrew:DragonHDLatestNeural'
       forceRegenerate:
         description: 'Regenerate all episodes (purges existing episodes first, use for major changes)'
         required: false

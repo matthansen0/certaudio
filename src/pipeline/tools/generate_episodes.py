@@ -969,9 +969,9 @@ def main() -> None:
     parser.add_argument("--audio-format", default="instructional", choices=["instructional", "podcast"])
     parser.add_argument("--instructional-voice", default="en-US-Andrew:DragonHDLatestNeural", 
                         help="Voice for instructional format (see .env.example for options)")
-    parser.add_argument("--podcast-host-voice", default="en-US-Ava3:DragonHDLatestNeural",
+    parser.add_argument("--podcast-host-voice", default="en-US-Ava:DragonHDLatestNeural",
                         help="Host voice for podcast format (see .env.example for options)")
-    parser.add_argument("--podcast-expert-voice", default="en-US-Andrew3:DragonHDLatestNeural",
+    parser.add_argument("--podcast-expert-voice", default="en-US-Andrew:DragonHDLatestNeural",
                         help="Expert voice for podcast format (see .env.example for options)")
     parser.add_argument("--skills-outline", required=True, help="JSON skills outline from discover step")
     parser.add_argument("--batch-index", type=int, default=0, help="Batch index for parallel processing")

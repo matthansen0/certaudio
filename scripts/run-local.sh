@@ -37,10 +37,11 @@ elif [[ -f ".env" ]]; then
 fi
 
 # Voices (can be overridden via env vars or .env.local)
-# Default to Dragon HD voices for highest quality; see .env.example for options.
+# Default to Dragon HD GA voices; Preview voices (Ava3/Andrew3) only work in eastus/westeurope/southeastasia.
+# See .env.example for options.
 INSTRUCTIONAL_VOICE="${INSTRUCTIONAL_VOICE:-en-US-Andrew:DragonHDLatestNeural}"
-PODCAST_HOST_VOICE="${PODCAST_HOST_VOICE:-en-US-Ava3:DragonHDLatestNeural}"
-PODCAST_EXPERT_VOICE="${PODCAST_EXPERT_VOICE:-en-US-Andrew3:DragonHDLatestNeural}"
+PODCAST_HOST_VOICE="${PODCAST_HOST_VOICE:-en-US-Ava:DragonHDLatestNeural}"
+PODCAST_EXPERT_VOICE="${PODCAST_EXPERT_VOICE:-en-US-Andrew:DragonHDLatestNeural}"
 
 # Configuration
 RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-rg-certaudio-dev}"
