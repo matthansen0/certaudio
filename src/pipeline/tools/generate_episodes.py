@@ -22,6 +22,7 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from xml.sax.saxutils import escape
 from pathlib import Path
+import requests
 
 from azure.cosmos import CosmosClient
 from azure.core.credentials import AzureKeyCredential
@@ -35,6 +36,95 @@ from openai import AzureOpenAI, RateLimitError
 from .synthesize_audio import synthesize_audio, synthesize_audio_segments
 from .upload_to_blob import upload_to_blob
 from .save_episode import save_episode
+
+
+def _get_speech_region() -> str:
+    return os.environ.get("SPEECH_REGION") or "centralus"
+
+
+def _get_speech_headers() -> dict:
+    speech_key = os.environ.get("SPEECH_KEY")
+    if speech_key:
+        return {"Ocp-Apim-Subscription-Key": speech_key}
+
+    # Fall back to Entra auth - need to exchange for a Speech token via issueToken endpoint.
+    # When using custom subdomain resources (required for Entra auth), we must use
+    # the resource's own issueToken endpoint, not the regional one.
+    speech_endpoint = os.environ.get("SPEECH_ENDPOINT", "")
+    if not speech_endpoint:
+        raise ValueError(
+            "SPEECH_ENDPOINT is required for Entra authentication with the Voice List API. "
+            "Set SPEECH_KEY to use API key auth instead."
+        )
+    
+    credential = DefaultAzureCredential()
+    aad_token = credential.get_token("https://cognitiveservices.azure.com/.default")
+    
+    # Exchange the Entra token for a Speech service token via the resource's issueToken endpoint
+    # Custom subdomain endpoint format: https://<resource>.cognitiveservices.azure.com/
+    issue_token_url = speech_endpoint.rstrip("/") + "/sts/v1.0/issueToken"
+    resp = requests.post(
+        issue_token_url,
+        headers={"Authorization": f"Bearer {aad_token.token}"},
+        timeout=15,
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(
+            f"Failed to get Speech token via issueToken ({resp.status_code}): {resp.text[:200]}"
+        )
+    speech_token = resp.text
+    return {"Authorization": f"Bearer {speech_token}"}
+
+
+def _fetch_speech_voices() -> tuple[str, set[str]]:
+    region = _get_speech_region()
+    url = f"https://{region}.tts.speech.microsoft.com/cognitiveservices/voices/list"
+    headers = _get_speech_headers()
+    resp = requests.get(url, headers=headers, timeout=20)
+    if resp.status_code != 200:
+        raise RuntimeError(
+            f"Voice list request failed ({resp.status_code}): {resp.text[:200]}"
+        )
+    data = resp.json()
+    voice_names = {v.get("Name") for v in data if v.get("Name")}
+    return region, voice_names
+
+
+def preflight_validate_voices(voices: list[str]) -> None:
+    """
+    Validate that the requested voices are available in the configured Speech region.
+    
+    This check uses the Speech Voice List API, which requires either:
+    - SPEECH_KEY (API key auth), or
+    - SPEECH_ENDPOINT + Cognitive Services Speech User role with issueToken permission
+    
+    If auth fails, a warning is printed but execution continues (fail-open for local dev).
+    Set SKIP_VOICE_PREFLIGHT=true to skip entirely.
+    """
+    if not voices:
+        return
+
+    if os.environ.get("SKIP_VOICE_PREFLIGHT", "false").lower() == "true":
+        print("Voice preflight skipped (SKIP_VOICE_PREFLIGHT=true)")
+        return
+
+    try:
+        region, available = _fetch_speech_voices()
+    except Exception as e:
+        # Fail-open: warn but don't block if we can't reach the Voice List API.
+        # The actual synthesis call will fail later if the voice is invalid.
+        print(f"Voice preflight warning: Could not validate voices ({e}). Continuing anyway.")
+        return
+
+    missing = [v for v in voices if v not in available]
+    if missing:
+        raise ValueError(
+            "Voice preflight failed. The following voice(s) are not available in "
+            f"region '{region}': {', '.join(missing)}. "
+            "Check your Speech region or choose a supported voice."
+        )
+
+    print(f"Voice preflight OK for region '{region}': {', '.join(voices)}")
 
 
 def create_cosmos_client_with_retry(
@@ -891,6 +981,12 @@ def main() -> None:
                         help="Regenerate episodes even if they already exist (e.g., to change voice)")
 
     args = parser.parse_args()
+
+    # Preflight voice availability to fail fast on unsupported voices/regions.
+    voices_to_check = [args.instructional_voice]
+    if args.audio_format == "podcast":
+        voices_to_check = [args.podcast_host_voice, args.podcast_expert_voice]
+    preflight_validate_voices(voices_to_check)
 
     # Parse skills outline
     try:
