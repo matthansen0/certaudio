@@ -135,12 +135,14 @@ resource openAiUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = i
 }
 
 // Data-plane RBAC: allow automation principal to synthesize speech.
+// Using broader "Cognitive Services User" role (instead of Speech User) to enable
+// issueToken for voice preflight validation via the Voice List API.
 resource speechUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (automationPrincipalId != '') {
-  name: guid(speech.id, automationPrincipalId, 'Cognitive Services Speech User')
+  name: guid(speech.id, automationPrincipalId, 'Cognitive Services User')
   scope: speech
   properties: {
-    // Built-in role: Cognitive Services Speech User
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'f2dc8367-1007-4938-bd23-fe263f013447')
+    // Built-in role: Cognitive Services User (broader than Speech User, includes issueToken)
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'a97b65f3-24c7-4388-baec-2e87135dc908')
     principalId: automationPrincipalId
     principalType: 'ServicePrincipal'
   }
