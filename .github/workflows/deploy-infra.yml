@@ -584,7 +584,39 @@ jobs:
               --name "$SWA_NAME" \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --environment-name default \
-              -o jsonc
+              -o jsonc || true
+
+            # NOTE: SWA backend linking re-enables EasyAuth on the Functions app.
+            # We must disable it AFTER the link, not before.
+            echo "Disabling EasyAuth on Functions app (SWA backend link re-enables it)..."
+            siteId=$(az functionapp show \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --name "$FUNCTIONS_APP_NAME" \
+              --query id -o tsv)
+
+            authUri="https://management.azure.com${siteId}/config/authsettingsV2?api-version=2022-03-01"
+
+            az rest \
+              --method put \
+              --uri "$authUri" \
+              --body '{
+                "properties": {
+                  "platform": { "enabled": false },
+                  "globalValidation": {
+                    "requireAuthentication": false,
+                    "unauthenticatedClientAction": "AllowAnonymous"
+                  }
+                }
+              }'
+
+            echo "Restarting Functions app to apply auth changes..."
+            az functionapp restart \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --name "$FUNCTIONS_APP_NAME" \
+              --only-show-errors
+
+            # Wait for restart to propagate
+            sleep 30
 
             # Smoke test with retry - backend link can take time to propagate
             echo "Smoke test: calling SWA /api/healthz (with retry)"
