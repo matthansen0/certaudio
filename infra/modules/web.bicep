@@ -106,7 +106,7 @@ resource functionsApp 'Microsoft.Web/sites@2023-12-01' = {
     siteConfig: {
       linuxFxVersion: 'Python|3.11'
       pythonVersion: '3.11'
-      // alwaysOn not supported on Consumption plan - cold starts expected
+      alwaysOn: true // Prevents cold starts - supported on Basic tier and above
       cors: {
         allowedOrigins: ['*']
         supportCredentials: false
