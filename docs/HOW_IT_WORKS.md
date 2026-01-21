@@ -266,28 +266,28 @@ Cost: ~$9/month. Worth it for the linked backend feature alone.
 
 **What We Deployed**:
 - Python 3.11 on Linux
-- Elastic Premium (EP1) plan
+- Basic (B1) App Service Plan
 - System-assigned Managed Identity
 
-**Why Elastic Premium (not Consumption)**:
+**Why Basic (B1) (not Consumption)**:
 ```bicep
 resource appServicePlan 'Microsoft.Web/serverfarms@2023-12-01' = {
   sku: {
-    name: 'EP1'
-    tier: 'ElasticPremium'
+    name: 'B1'
+    tier: 'Basic'
   }
 }
 ```
 
 Here's where it gets interesting. Linux Consumption Functions with `allowSharedKeyAccess: false` on storage is... problematic. The deployment mechanism needs storage access, and key-less auth on Consumption has edge cases.
 
-Elastic Premium:
+Basic (B1):
 - ✅ Works cleanly with Managed Identity storage
-- ✅ Scales to zero when idle (after warm-up period)
-- ✅ No cold starts (stays warm)
-- ❌ Minimum cost ~$80/month (vs. ~$0 for Consumption)
+- ✅ Always running (no cold starts)
+- ✅ Reasonable cost (~$13/month)
+- ❌ Doesn't scale to zero (fixed cost)
 
-**If you want to save money**: You could switch to Consumption and enable `allowSharedKeyAccess: true` on the Functions storage account. It's less secure but saves ~$80/month.
+**If you want to save money**: You could switch to Consumption and enable `allowSharedKeyAccess: true` on the Functions storage account. It's less secure but could save ~$13/month.
 
 **The API Endpoints**:
 ```
@@ -581,11 +581,11 @@ jobs:
 | Cosmos DB | Serverless | ~$2-5 |
 | Storage | LRS, ~5GB | ~$0.10 |
 | Static Web Apps | Standard | ~$9 |
-| Functions | EP1 | ~$80* |
+| Functions | B1 Basic | ~$13* |
 | OpenAI | Pay-per-token | ~$0 (no usage) |
 | Speech | Pay-per-char | ~$0 (no usage) |
 | **AI Search** | **Ephemeral** | **~$0** |
-| **Total** | | **~$90-100/month** |
+| **Total** | | **~$25-30/month** |
 
 *Functions cost can drop to ~$0 with Consumption plan (see tradeoffs above)
 
@@ -742,8 +742,8 @@ Switch to Consumption plan. In [`infra/modules/web.bicep`](../infra/modules/web.
 ```bicep
 resource appServicePlan 'Microsoft.Web/serverfarms@2023-12-01' = {
   sku: {
-    name: 'Y1'        // Changed from EP1
-    tier: 'Dynamic'   // Changed from ElasticPremium
+    name: 'Y1'        // Changed from B1
+    tier: 'Dynamic'   // Changed from Basic
   }
 }
 ```

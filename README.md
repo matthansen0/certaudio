@@ -261,13 +261,13 @@ Content generation always uses the **combined** strategy: Microsoft Learn learni
 ### Podcast Format
 
 - Two voices for natural dialogue:
-  - Host: Configurable (default `en-US-BrianNeural`) - friendly, conversational
-  - Expert: Configurable (default `en-US-AvaNeural`) - authoritative, detailed
+  - Host: Configurable (default `en-US-GuyNeural`) - newscast style, conversational
+  - Expert: Configurable (default `en-US-TonyNeural`) - expressive, detailed
 - Back-and-forth Q&A style
 
 ### Voice Options
 
-Available voices: `en-US-AndrewNeural`, `en-US-BrianNeural`, `en-US-AvaNeural`, `en-US-EmmaNeural`, `en-US-JennyNeural`, `en-US-GuyNeural`, `en-US-AriaNeural`, `en-US-DavisNeural`, `en-US-TonyNeural`, `en-US-SaraNeural`, `en-US-JaneNeural`
+Available voices: `en-US-AndrewNeural`, `en-US-BrianNeural`, `en-US-GuyNeural`, `en-US-DavisNeural`, `en-US-JasonNeural`, `en-US-TonyNeural`, `en-US-AvaNeural`, `en-US-EmmaNeural`, `en-US-JennyNeural`, `en-US-AriaNeural`, `en-US-SaraNeural`
 
 ## Content Updates
 
@@ -320,18 +320,25 @@ python -m tools.discover_exam_content --certification-id ai-102
 
 ## Cost Estimation
 
-Approximate monthly costs (varies by usage):
+Approximate monthly costs (idle baseline - no content generation):
 
 | Service | Estimated Cost |
 |---------|---------------|
-| Azure OpenAI (GPT-4o) | $20-50 |
-| Azure AI Speech | $5-15 |
-| Azure AI Search (Basic) | $70 |
-| Azure Cosmos DB (Serverless) | $5-10 |
 | Azure Static Web Apps (Standard) | $9 |
-| Azure Functions (Consumption) | $0-5 |
-| Azure Storage | $1-5 |
-| **Total** | **~$110-165/month** |
+| Azure Functions (B1 Basic) | $13 |
+| Azure Cosmos DB (Serverless) | $2-5 |
+| Azure Storage | $0.10 |
+| **Monthly Idle Cost** | **~$25-30/month** |
+
+**Per-Generation Cost** (one certification):
+
+| Service | Cost |
+|---------|------|
+| Azure AI Search (ephemeral, 2-4 hours) | ~$0.50 |
+| Azure OpenAI (GPT-4o) | ~$15-25 |
+| Azure OpenAI (Embeddings) | ~$0.25 |
+| Azure AI Speech (TTS) | ~$15-20 |
+| **Per-Generation Total** | **~$30-50** |
 
 ## Contributing
 

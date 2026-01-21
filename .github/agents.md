@@ -11,16 +11,18 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 - **Longer Episodes**: Target episode length is 2,500-3,500 words (~20-25 minutes) for comprehensive coverage.
 - **No Markdown in Narration**: Prompts explicitly prohibit markdown to prevent TTS from saying "hashtag" for headers.
 - **Keyless Storage (policy-friendly)**: The platform runs with `allowSharedKeyAccess=false` on storage accounts and uses **Managed Identity / Entra ID** + **data-plane RBAC** instead of account keys.
-- **Functions hosting**: Azure Functions is deployed on **Elastic Premium (EP1)** to avoid Linux Consumption deployment/runtime flows that implicitly depend on storage keys in some locked-down tenants.
+- **Functions hosting**: Azure Functions is deployed on **Basic (B1)** plan (~$13/mo) to support Managed Identity authentication when shared key access is disabled on storage accounts.
 - **Cosmos SQL RBAC scope**: Cosmos DB SQL role assignment scope must be the fully-qualified DB scope `${cosmosDb.id}/dbs/${cosmosDbDatabaseName}`.
 - **Cosmos RBAC for GitHub OIDC**: The deploy-infra workflow extracts the service principal `oid` from the ARM access token and passes it as `automationPrincipalId` to Bicep, which grants Cosmos SQL Data Contributor at the database scope. The generate-content workflow also idempotently ensures this RBAC exists before running pipeline tools.
 - **Search RBAC for GitHub OIDC**: Azure AI Search data-plane operations (create/update indexes, upload documents) require RBAC. Infra grants the automation principal **Search Index Data Contributor** on the Search service, and the generate-content workflow also idempotently ensures this role assignment to prevent `Forbidden` failures during indexing.
+- **OIDC Token Refresh**: Long-running generate-content jobs use a background process to periodically re-authenticate via OIDC (every 4 minutes) to prevent token expiry during multi-hour content generation.
 - **SWA deploy token**: Static Web Apps deploy token is retrieved at runtime in CI (no long-lived repo secret).
 - **Deployment sprawl control**: CI supports an optional pinned suffix secret `AZURE_UNIQUE_SUFFIX` to avoid creating a full new resource set every run.
 - **RG cleanup helper**: [scripts/cleanup-rg.sh](../scripts/cleanup-rg.sh) can delete old tagged deployment sets while keeping the active suffix.
 - **Dynamic certification list**: Frontend dropdown is populated from the API (`GET /api/certifications`) with a safe fallback that includes `dp-700`.
 - **Auto-resolved endpoints**: Generate Content workflow no longer requires endpoint secrets; it resolves them at runtime via [scripts/get-endpoints.sh](../scripts/get-endpoints.sh), which picks the newest (or pinned) deployment suffix.
 - **Workflow triggers**: Deploy Infrastructure triggers on `infra/**`, `src/web/**`, `src/functions/**`, or workflow file changes. Content generation is manual via `workflow_dispatch`.
+- **Local Development**: Use `./scripts/run-local.sh` to run content generation from the dev container. Uses `az login` credentials and handles ephemeral Search service lifecycle.
 
 ## Agents
 
@@ -85,10 +87,7 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 
 **Key Files**:
 - `src/web/index.html` - Main application shell
-- `src/web/js/app.js` - Application logic
-- `src/web/js/player.js` - Audio player component
-- `src/web/js/progress.js` - Progress tracking
-- `src/web/js/auth.js` - B2C authentication (optional)
+- `src/web/js/app.js` - Application logic (includes player, progress, and auth)
 - `src/web/css/styles.css` - Styling
 - `src/web/staticwebapp.config.json` - Static Web Apps routing
 
@@ -150,7 +149,7 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 
 ### refresh
 
-**Scope**: `src/pipeline/tools/check_content_delta.py`, `src/functions/trigger-refresh/**`
+**Scope**: `src/pipeline/tools/check_content_delta.py`, `.github/workflows/refresh-content.yml`
 
 **Description**: Content update detection and amendment episode generation.
 
@@ -163,8 +162,7 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 
 **Key Files**:
 - `src/pipeline/tools/check_content_delta.py` - Delta detection logic
-- `src/functions/trigger-refresh/` - Manual refresh HTTP trigger
-- `src/pipeline/prompts/system_amendment.txt` - Amendment episode prompts
+- `.github/workflows/refresh-content.yml` - Scheduled refresh workflow
 
 **Context**:
 - Runs on schedule (weekly) or manual trigger

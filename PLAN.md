@@ -13,9 +13,9 @@ A fully automated Azure-native system that auto-discovers Microsoft Learn conten
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Audio format | Selectable per-course (not per-episode) | Consistency across learning experience |
-| Episode length | ~10 minutes target, split if longer | Research-backed optimal retention; never truncate content |
-| Instructional voice | `en-US-GuyNeural` with `newscast-casual` style | Authoritative yet approachable per learning science |
-| Podcast voices | `en-US-GuyNeural` (host) + `en-US-TonyNeural` (expert) | Contrasting pitch for natural dialogue |
+| Episode length | ~10-25 minutes target, split into parts if longer | Research-backed optimal retention; multi-part for long content |
+| Instructional voice | `en-US-AndrewNeural` (configurable) | Warm, professional per learning science |
+| Podcast voices | `en-US-GuyNeural` (host) + `en-US-TonyNeural` (expert) configurable | Contrasting voices for natural dialogue |
 | Content updates | Amendment episodes with new sequential numbers | Links to original via metadata |
 | Authentication | Optional Azure AD B2C (feature flag) | Same subscription; disabled by default for flexibility |
 | Content source | Auto-discover from exam page | Stays current with Microsoft Learn changes |
@@ -136,33 +136,31 @@ python3 -m tools.deep_discover \
 │       ├── web.bicep                # Static Web Apps, Functions
 │       └── identity.bicep           # B2C (conditional)
 ├── src/
-│   ├── functions/                   # Azure Functions backend
+│   ├── functions/                   # Azure Functions backend (v2 programming model)
+│   │   ├── function_app.py          # All HTTP endpoints (healthz, episodes, audio, etc.)
 │   │   ├── host.json
-│   │   ├── get-episodes/            # List episodes for a certification
-│   │   ├── get-audio/               # Proxy audio from Blob via MI
-│   │   ├── update-progress/         # Save user progress
-│   │   └── trigger-refresh/         # Manual refresh trigger
+│   │   └── requirements.txt
 │   ├── web/                         # Static Web Apps frontend
 │   │   ├── index.html
-│   │   ├── css/
-│   │   ├── js/
+│   │   ├── css/styles.css
+│   │   ├── js/app.js
 │   │   └── staticwebapp.config.json
-│   └── pipeline/                    # PromptFlow + ingestion
+│   └── pipeline/                    # Content generation pipeline
 │       ├── flow.dag.yaml
 │       ├── requirements.txt
 │       ├── prompts/
-│       │   ├── system_course_plan.txt
-│       │   ├── system_narration_instructional.txt
-│       │   ├── system_narration_podcast.txt
-│       │   ├── system_amendment.txt
-│       │   ├── system_ssml.txt
-│       │   └── ...
+│       │   ├── narration.jinja2     # Episode script generation
+│       │   ├── quality_check.jinja2 # Script quality validation
+│       │   └── ssml.jinja2          # Text-to-speech markup conversion
 │       └── tools/
 │           ├── discover_exam_content.py     # Skills outline discovery
-│           ├── deep_discover.py             # Full learning path discovery
-│           ├── check_content_delta.py
-│           ├── synthesize_audio.py
-│           └── upload_to_blob.py
+│           ├── deep_discover.py             # Full learning path discovery (Catalog API)
+│           ├── index_content.py             # RAG indexing into AI Search
+│           ├── generate_episodes.py         # Episode generation with GPT-4o
+│           ├── synthesize_audio.py          # Azure AI Speech TTS
+│           ├── upload_to_blob.py            # Blob storage upload
+│           ├── save_episode.py              # Cosmos DB metadata storage
+│           └── check_content_delta.py       # Content change detection
 ├── PLAN.md                          # This document
 └── README.md                        # User-facing documentation
 ```
