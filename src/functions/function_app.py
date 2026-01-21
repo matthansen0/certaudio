@@ -19,6 +19,53 @@ app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 # Logging
 logger = logging.getLogger(__name__)
 
+# =============================================================================
+# CACHED CLIENTS (avoid re-auth on every request)
+# =============================================================================
+_credential = None
+_blob_service = None
+_user_delegation_key = None
+_delegation_key_expiry = None
+
+
+def _get_credential():
+    """Get cached DefaultAzureCredential."""
+    global _credential
+    if _credential is None:
+        _credential = DefaultAzureCredential()
+    return _credential
+
+
+def _get_blob_service():
+    """Get cached BlobServiceClient."""
+    global _blob_service
+    if _blob_service is None:
+        account = os.environ.get("STORAGE_ACCOUNT_NAME")
+        _blob_service = BlobServiceClient(
+            account_url=f"https://{account}.blob.core.windows.net",
+            credential=_get_credential(),
+        )
+    return _blob_service
+
+
+def _get_user_delegation_key():
+    """Get cached user delegation key (refreshed every 50 minutes)."""
+    global _user_delegation_key, _delegation_key_expiry
+    now = datetime.now(timezone.utc)
+    
+    # Refresh if key is missing or will expire within 10 minutes
+    if _user_delegation_key is None or _delegation_key_expiry is None or \
+       now + timedelta(minutes=10) >= _delegation_key_expiry:
+        start_time = now
+        _delegation_key_expiry = now + timedelta(hours=1)
+        _user_delegation_key = _get_blob_service().get_user_delegation_key(
+            key_start_time=start_time,
+            key_expiry_time=_delegation_key_expiry,
+        )
+        logger.info("Refreshed user delegation key")
+    
+    return _user_delegation_key, _delegation_key_expiry
+
 
 # =============================================================================
 # GET /api/healthz
@@ -59,21 +106,22 @@ def _format_cert_name(cert_id: str) -> str:
     return curated.get(cert_id.lower(), cert_id.upper())
 
 
+# Cached Cosmos client
+_cosmos_client = None
+
+
 def get_cosmos_client():
-    """Get Cosmos DB client using managed identity."""
-    endpoint = os.environ.get("COSMOS_DB_ENDPOINT")
-    credential = DefaultAzureCredential()
-    return CosmosClient(endpoint, credential)
+    """Get cached Cosmos DB client using managed identity."""
+    global _cosmos_client
+    if _cosmos_client is None:
+        endpoint = os.environ.get("COSMOS_DB_ENDPOINT")
+        _cosmos_client = CosmosClient(endpoint, _get_credential())
+    return _cosmos_client
 
 
 def get_blob_service():
-    """Get Blob Service client using managed identity."""
-    account = os.environ.get("STORAGE_ACCOUNT_NAME")
-    credential = DefaultAzureCredential()
-    return BlobServiceClient(
-        account_url=f"https://{account}.blob.core.windows.net",
-        credential=credential,
-    )
+    """Get cached Blob Service client using managed identity."""
+    return _get_blob_service()
 
 
 # =============================================================================
@@ -246,20 +294,8 @@ def get_audio(req: func.HttpRequest) -> func.HttpResponse:
         episode_id = _normalize_episode_id(episode_num)
         blob_name = f"{cert_id}/{audio_format}/episodes/{episode_id}.mp3"
 
-        # Generate a short-lived SAS token using user delegation key
-        credential = DefaultAzureCredential()
-        blob_service = BlobServiceClient(
-            account_url=f"https://{account_name}.blob.core.windows.net",
-            credential=credential,
-        )
-        
-        # Get user delegation key (valid for 1 hour)
-        start_time = datetime.now(timezone.utc)
-        expiry_time = start_time + timedelta(hours=1)
-        user_delegation_key = blob_service.get_user_delegation_key(
-            key_start_time=start_time,
-            key_expiry_time=expiry_time,
-        )
+        # Use cached user delegation key for fast SAS generation
+        user_delegation_key, expiry_time = _get_user_delegation_key()
         
         # Generate SAS URL
         sas_token = generate_blob_sas(
