@@ -726,15 +726,15 @@ jobs:
           existing=$(az role assignment list \
             --assignee "$principalObjectId" \
             --scope "$speechId" \
-            --query "[?roleDefinitionName=='Cognitive Services Speech User'] | length(@)" \
+            --query "[?roleDefinitionName=='Cognitive Services User'] | length(@)" \
             -o tsv || echo "0")
 
           if [[ "$existing" == "0" ]]; then
-            echo "Creating Cognitive Services Speech User role assignment..."
+            echo "Creating Cognitive Services User role assignment on Speech resource..."
             az role assignment create \
               --assignee-object-id "$principalObjectId" \
               --assignee-principal-type ServicePrincipal \
-              --role "Cognitive Services Speech User" \
+              --role "Cognitive Services User" \
               --scope "$speechId" \
               --only-show-errors
 
