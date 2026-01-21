@@ -5,12 +5,13 @@ Azure Functions for Certification Audio Platform API.
 import json
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import azure.functions as func
 from azure.cosmos import CosmosClient
 from azure.identity import DefaultAzureCredential
-from azure.storage.blob import BlobServiceClient
+from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions
 
 # Initialize function app
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
@@ -225,10 +226,8 @@ def get_episodes(req: func.HttpRequest) -> func.HttpResponse:
 )
 def get_audio(req: func.HttpRequest) -> func.HttpResponse:
     """
-    Stream audio file for an episode.
-
-    Returns:
-        Audio file (MP3) with proper headers
+    Redirect to a SAS URL for direct blob download.
+    This avoids proxying large audio files through the Function.
     """
     cert_id = req.route_params.get("certificationId")
     audio_format = req.route_params.get("format")
@@ -242,51 +241,49 @@ def get_audio(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     try:
-        blob_service = get_blob_service()
-        # Fixed container name with path prefix for organization
+        account_name = os.environ.get("STORAGE_ACCOUNT_NAME")
         container_name = "audio"
         episode_id = _normalize_episode_id(episode_num)
         blob_name = f"{cert_id}/{audio_format}/episodes/{episode_id}.mp3"
 
-        blob_client = blob_service.get_blob_client(
-            container=container_name, blob=blob_name
+        # Generate a short-lived SAS token using user delegation key
+        credential = DefaultAzureCredential()
+        blob_service = BlobServiceClient(
+            account_url=f"https://{account_name}.blob.core.windows.net",
+            credential=credential,
         )
-
-        # Download blob
-        download = blob_client.download_blob()
-        audio_data = download.readall()
-
-        # Support range requests for seeking
-        range_header = req.headers.get("Range")
-        if range_header:
-            # Parse range header
-            range_match = range_header.replace("bytes=", "").split("-")
-            start = int(range_match[0]) if range_match[0] else 0
-            end = int(range_match[1]) if len(range_match) > 1 and range_match[1] else len(audio_data) - 1
-
-            # Return partial content
-            return func.HttpResponse(
-                audio_data[start : end + 1],
-                status_code=206,
-                mimetype="audio/mpeg",
-                headers={
-                    "Content-Range": f"bytes {start}-{end}/{len(audio_data)}",
-                    "Accept-Ranges": "bytes",
-                    "Content-Length": str(end - start + 1),
-                },
-            )
-
+        
+        # Get user delegation key (valid for 1 hour)
+        start_time = datetime.now(timezone.utc)
+        expiry_time = start_time + timedelta(hours=1)
+        user_delegation_key = blob_service.get_user_delegation_key(
+            key_start_time=start_time,
+            key_expiry_time=expiry_time,
+        )
+        
+        # Generate SAS URL
+        sas_token = generate_blob_sas(
+            account_name=account_name,
+            container_name=container_name,
+            blob_name=blob_name,
+            user_delegation_key=user_delegation_key,
+            permission=BlobSasPermissions(read=True),
+            expiry=expiry_time,
+        )
+        
+        sas_url = f"https://{account_name}.blob.core.windows.net/{container_name}/{blob_name}?{sas_token}"
+        
+        # Redirect client to download directly from blob storage
         return func.HttpResponse(
-            audio_data,
-            mimetype="audio/mpeg",
+            status_code=302,
             headers={
-                "Accept-Ranges": "bytes",
-                "Content-Length": str(len(audio_data)),
+                "Location": sas_url,
+                "Cache-Control": "no-cache",
             },
         )
 
     except Exception as e:
-        logger.error(f"Error streaming audio: {e}")
+        logger.error(f"Error generating audio URL: {e}")
         return func.HttpResponse(
             json.dumps({"error": str(e)}),
             status_code=500,
