@@ -39,7 +39,8 @@ fi
 short="${suffix:0:10}"
 
 openai="certaudio-dev-openai-$suffix"
-speech="certaudio-dev-speech-$suffix"
+# Speech service is in eastus for HD voice support (not tied to suffix)
+speech="certaudio-dev-speech-eastus-$suffix"
 docintel="certaudio-dev-docintel-$suffix"
 cosmos="certaudio-dev-cosmos-$suffix"
 
