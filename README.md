@@ -125,33 +125,77 @@ git clone https://github.com/YOUR_USERNAME/certaudio.git
 cd certaudio
 ```
 
-### 2. Create Azure Resources
+### 2. Create Azure Resources and Configure OIDC
+
+GitHub Actions uses **OpenID Connect (OIDC)** for secure, keyless authentication to Azure. This is more secure than storing credentials as secrets.
 
 ```bash
 # Login to Azure
 az login
 
-# Create resource group
-az group create --name rg-certaudio-dev --location canadacentral
+# Set your subscription
+SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+TENANT_ID=$(az account show --query tenantId -o tsv)
 
-# Create service principal for GitHub Actions
-az ad sp create-for-rbac \
-  --name "sp-certaudio-github" \
-  --role contributor \
-  --scopes /subscriptions/YOUR_SUBSCRIPTION_ID/resourceGroups/rg-certaudio-dev \
-  --sdk-auth
+# Create resource group
+az group create --name rg-certaudio-dev --location centralus
+
+# Create an App Registration for GitHub Actions
+APP_NAME="sp-certaudio-github-$(whoami)"
+APP_ID=$(az ad app create --display-name "$APP_NAME" --query appId -o tsv)
+echo "App (Client) ID: $APP_ID"
+
+# Create service principal and assign Contributor role
+SP_ID=$(az ad sp create --id "$APP_ID" --query id -o tsv)
+az role assignment create \
+  --assignee "$APP_ID" \
+  --role "Contributor" \
+  --scope "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/rg-certaudio-dev"
+
+# Add federated credential for GitHub Actions OIDC
+# Replace YOUR_GITHUB_USERNAME with your GitHub username or org
+GITHUB_REPO="YOUR_GITHUB_USERNAME/certaudio"
+az ad app federated-credential create \
+  --id "$APP_ID" \
+  --parameters '{
+    "name": "github-actions-main",
+    "issuer": "https://token.actions.githubusercontent.com",
+    "subject": "repo:'"$GITHUB_REPO"':ref:refs/heads/main",
+    "audiences": ["api://AzureADTokenExchange"]
+  }'
+
+# Also allow workflow_dispatch (manual triggers)
+az ad app federated-credential create \
+  --id "$APP_ID" \
+  --parameters '{
+    "name": "github-actions-workflow-dispatch",
+    "issuer": "https://token.actions.githubusercontent.com", 
+    "subject": "repo:'"$GITHUB_REPO"':environment:production",
+    "audiences": ["api://AzureADTokenExchange"]
+  }'
+
+echo ""
+echo "=== Add these as GitHub Secrets ==="
+echo "AZURE_CLIENT_ID: $APP_ID"
+echo "AZURE_TENANT_ID: $TENANT_ID"
+echo "AZURE_SUBSCRIPTION_ID: $SUBSCRIPTION_ID"
+echo "AZURE_RESOURCE_GROUP: rg-certaudio-dev"
+echo "AZURE_UNIQUE_SUFFIX: (optional) e.g., 001 - pins deployments to stable resource names"
 ```
 
 ### 3. Configure GitHub Secrets
 
-Add these secrets to your GitHub repository:
+Go to your repository **Settings > Secrets and variables > Actions** and add:
 
-| Secret | Description |
-|--------|-------------|
-| `AZURE_CLIENT_ID` | Service principal client ID |
-| `AZURE_TENANT_ID` | Azure AD tenant ID |
-| `AZURE_SUBSCRIPTION_ID` | Azure subscription ID |
-| `AZURE_RESOURCE_GROUP` | Resource group name |
+| Secret | Description | Example |
+|--------|-------------|---------|
+| `AZURE_CLIENT_ID` | App registration client ID | `12345678-1234-...` |
+| `AZURE_TENANT_ID` | Azure AD tenant ID | `87654321-4321-...` |
+| `AZURE_SUBSCRIPTION_ID` | Azure subscription ID | `abcdef12-...` |
+| `AZURE_RESOURCE_GROUP` | Resource group name | `rg-certaudio-dev` |
+| `AZURE_UNIQUE_SUFFIX` | (Optional) Pin resource names | `001` |
+
+> **Note:** `AZURE_UNIQUE_SUFFIX` is recommended to prevent creating new resources on every workflow run. Without it, each run creates a full new set of resources.
 
 ### 4. Deploy Infrastructure
 

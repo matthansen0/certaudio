@@ -1,6 +1,12 @@
 # Local run logs and state
 .runs/
 *.log
+.logs/
+
+# Local environment files (may contain secrets)
+.env
+.env.*
+.env.local
 
 # Bicep build outputs
 infra/main.json
