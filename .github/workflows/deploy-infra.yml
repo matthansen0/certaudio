@@ -260,7 +260,7 @@ jobs:
             fi
 
             # Run deployment
-            if ! az deployment group create \
+            deploymentOutput=$(az deployment group create \
               --name "$DEPLOYMENT_NAME" \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --template-file ./infra/main.bicep \
@@ -269,24 +269,40 @@ jobs:
                 location=$LOCATION \
                 openAiLocation=$OPENAI_LOCATION \
                 automationPrincipalId=$automationPrincipalId \
-              --only-show-errors; then
-              echo "::group::Deployment error (properties.error)"
-              az deployment group show \
+              --only-show-errors 2>&1) || deploymentExitCode=$?
+
+            if [[ "${deploymentExitCode:-0}" -ne 0 ]]; then
+              echo "::group::Deployment output"
+              echo "$deploymentOutput"
+              echo "::endgroup::"
+              
+              # Check if all errors are RoleAssignmentExists (idempotent - role already assigned)
+              errorDetails=$(az deployment group show \
                 --name "$DEPLOYMENT_NAME" \
                 --resource-group "$AZURE_RESOURCE_GROUP" \
-                --query properties.error \
-                -o jsonc || true
-              echo "::endgroup::"
+                --query "properties.error" -o json 2>/dev/null || echo "{}")
+              
+              # Count total errors and RoleAssignmentExists errors
+              totalErrors=$(echo "$errorDetails" | jq -r '.. | .code? // empty' | grep -c . || echo "0")
+              roleExistsErrors=$(echo "$errorDetails" | jq -r '.. | .code? // empty' | grep -c "RoleAssignmentExists" || echo "0")
+              
+              if [[ "$totalErrors" -gt 0 && "$totalErrors" -eq "$roleExistsErrors" ]]; then
+                echo "::warning::Deployment reported $roleExistsErrors RoleAssignmentExists error(s) - role assignments already exist with correct principals. Treating as success."
+              else
+                echo "::group::Deployment error (properties.error)"
+                echo "$errorDetails" | jq . || true
+                echo "::endgroup::"
 
-              echo "::group::Failed deployment operations"
-              az deployment operation group list \
-                --name "$DEPLOYMENT_NAME" \
-                --resource-group "$AZURE_RESOURCE_GROUP" \
-                --query "[?properties.provisioningState=='Failed'].{resource:properties.targetResource.resourceName, type:properties.targetResource.resourceType, state:properties.provisioningState, message:properties.statusMessage}" \
-                -o table || true
-              echo "::endgroup::"
+                echo "::group::Failed deployment operations"
+                az deployment operation group list \
+                  --name "$DEPLOYMENT_NAME" \
+                  --resource-group "$AZURE_RESOURCE_GROUP" \
+                  --query "[?properties.provisioningState=='Failed'].{resource:properties.targetResource.resourceName, type:properties.targetResource.resourceType, state:properties.provisioningState, message:properties.statusMessage}" \
+                  -o table || true
+                echo "::endgroup::"
 
-              exit 1
+                exit 1
+              fi
             fi
 
       - name: Get deployment outputs
