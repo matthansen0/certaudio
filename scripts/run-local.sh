@@ -36,10 +36,11 @@ elif [[ -f ".env" ]]; then
     set +a
 fi
 
-# Voices (can be overridden via env vars)
-INSTRUCTIONAL_VOICE="${INSTRUCTIONAL_VOICE:-en-US-AndrewNeural}"
-PODCAST_HOST_VOICE="${PODCAST_HOST_VOICE:-en-US-GuyNeural}"
-PODCAST_EXPERT_VOICE="${PODCAST_EXPERT_VOICE:-en-US-TonyNeural}"
+# Voices (can be overridden via env vars or .env.local)
+# Default to Dragon HD voices for highest quality; see .env.example for options.
+INSTRUCTIONAL_VOICE="${INSTRUCTIONAL_VOICE:-en-US-Andrew:DragonHDLatestNeural}"
+PODCAST_HOST_VOICE="${PODCAST_HOST_VOICE:-en-US-Ava3:DragonHDLatestNeural}"
+PODCAST_EXPERT_VOICE="${PODCAST_EXPERT_VOICE:-en-US-Andrew3:DragonHDLatestNeural}"
 
 # Configuration
 RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-rg-certaudio-dev}"

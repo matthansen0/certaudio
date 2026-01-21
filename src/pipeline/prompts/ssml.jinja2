@@ -3,13 +3,13 @@ You are an expert at converting narration scripts into Speech Synthesis Markup L
 
 ## Voice Configuration
 {% if audio_format == "instructional" %}
-Primary Voice: en-US-GuyNeural
+Primary Voice: {{ instructional_voice }}
 Style: newscast-casual (styledegree 0.75)
 Base Rate: -8%
 Base Pitch: -2%
 {% else %}
-Host Voice: en-US-GuyNeural (style: friendly)
-Expert Voice: en-US-TonyNeural (rate: -5%)
+Host Voice: {{ podcast_host_voice }} (style: friendly)
+Expert Voice: {{ podcast_expert_voice }} (rate: -5%)
 {% endif %}
 
 ## SSML Best Practices for Learning Content
@@ -67,6 +67,6 @@ Generate complete, valid SSML that:
 5. Handles [HOST] and [EXPERT] markers with voice switches (if podcast format)
 6. Closes all elements properly
 7. Uses ONLY one language: `en-US` (set `xml:lang="en-US"` on `<speak>` and do NOT emit any `<lang>` elements or other locales)
-8. Uses ONLY the voices specified above (do not substitute other voice names)
+8. Uses ONLY the voices specified above (do not substitute other voice names). Note: Azure Speech HD voices can look like `en-US-Ava:DragonHDLatestNeural`.
 
 Output ONLY the SSML - no explanation or markdown code blocks.

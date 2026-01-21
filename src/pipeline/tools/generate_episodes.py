@@ -260,7 +260,13 @@ def generate_ssml(
         )
 
     template = jinja_env.get_template("ssml.jinja2")
-    prompt = template.render(narration=narration, audio_format=audio_format)
+    prompt = template.render(
+        narration=narration,
+        audio_format=audio_format,
+        instructional_voice=instructional_voice,
+        podcast_host_voice=podcast_host_voice,
+        podcast_expert_voice=podcast_expert_voice,
+    )
 
     parts = prompt.split("user:")
     system_prompt = parts[0].replace("system:", "").strip()
@@ -282,7 +288,13 @@ def generate_ssml(
         lines = ssml.split("\n")
         ssml = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
 
-    return sanitize_ssml(ssml, audio_format)
+    return sanitize_ssml(
+        ssml,
+        audio_format,
+        instructional_voice=instructional_voice,
+        podcast_host_voice=podcast_host_voice,
+        podcast_expert_voice=podcast_expert_voice,
+    )
 
 
 def build_ssml_from_narration(
@@ -865,12 +877,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Generate audio episodes for certification")
     parser.add_argument("--certification-id", required=True, help="Certification ID (e.g., dp-700)")
     parser.add_argument("--audio-format", default="instructional", choices=["instructional", "podcast"])
-    parser.add_argument("--instructional-voice", default="en-US-AndrewNeural", 
-                        help="Voice for instructional format")
-    parser.add_argument("--podcast-host-voice", default="en-US-GuyNeural",
-                        help="Host voice for podcast format")
-    parser.add_argument("--podcast-expert-voice", default="en-US-TonyNeural",
-                        help="Expert voice for podcast format")
+    parser.add_argument("--instructional-voice", default="en-US-Andrew:DragonHDLatestNeural", 
+                        help="Voice for instructional format (see .env.example for options)")
+    parser.add_argument("--podcast-host-voice", default="en-US-Ava3:DragonHDLatestNeural",
+                        help="Host voice for podcast format (see .env.example for options)")
+    parser.add_argument("--podcast-expert-voice", default="en-US-Andrew3:DragonHDLatestNeural",
+                        help="Expert voice for podcast format (see .env.example for options)")
     parser.add_argument("--skills-outline", required=True, help="JSON skills outline from discover step")
     parser.add_argument("--batch-index", type=int, default=0, help="Batch index for parallel processing")
     parser.add_argument("--batch-size", type=int, default=10, help="Number of episode units per batch")
