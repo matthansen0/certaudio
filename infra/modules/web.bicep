@@ -86,11 +86,6 @@ resource appServicePlan 'Microsoft.Web/serverfarms@2023-12-01' = {
   }
 }
 
-// Reference to existing storage account for data access
-resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' existing = {
-  name: storageAccountName
-}
-
 // Reference to existing Cosmos DB account
 resource cosmosDb 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' existing = {
   name: cosmosDbAccountName
@@ -208,38 +203,10 @@ resource functionsAuth 'Microsoft.Web/sites/config@2022-03-01' = {
   }
 }
 
-// Data-plane permissions for AzureWebJobsStorage using managed identity
-// NOTE: The deploy-infra workflow cleans up stale role assignments before deployment,
-// which prevents 'RoleAssignmentUpdateNotPermitted' errors when the managed identity changes.
-resource funcStorageBlobContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(funcStorageAccount.id, functionsApp.id, 'Storage Blob Data Contributor')
-  scope: funcStorageAccount
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
-    principalId: functionsApp.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-resource funcStorageQueueContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(funcStorageAccount.id, functionsApp.id, 'Storage Queue Data Contributor')
-  scope: funcStorageAccount
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '974c5e8b-45b9-4653-ba55-5f855dd0fb88')
-    principalId: functionsApp.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-resource funcStorageTableContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(funcStorageAccount.id, functionsApp.id, 'Storage Table Data Contributor')
-  scope: funcStorageAccount
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3')
-    principalId: functionsApp.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
+// NOTE: Role assignments for the Functions managed identity are created via Azure CLI
+// in the deploy-infra workflow AFTER the Function App is deployed. This avoids
+// Bicep idempotency issues with role assignments (RoleAssignmentUpdateNotPermitted,
+// RoleAssignmentExists) that occur when the managed identity principalId changes.
 
 // Azure Static Web Apps
 resource staticWebApp 'Microsoft.Web/staticSites@2023-12-01' = {
@@ -273,17 +240,6 @@ resource staticWebAppBackend 'Microsoft.Web/staticSites/linkedBackends@2023-12-0
   }
 }
 
-// Role assignment: Functions can read from Storage Account
-resource storageBlobDataReaderRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(storageAccount.id, functionsApp.id, 'Storage Blob Data Reader')
-  scope: storageAccount
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1')
-    principalId: functionsApp.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
 // Role assignment: Functions can read/write to Cosmos DB
 // Note: Cosmos DB data-plane RBAC uses sqlRoleAssignments/sqlRoleDefinitions (not Microsoft.Authorization roleDefinitions).
 var cosmosSqlDataContributorRoleDefinitionId = resourceId(
@@ -292,17 +248,8 @@ var cosmosSqlDataContributorRoleDefinitionId = resourceId(
   '00000000-0000-0000-0000-000000000002'
 )
 
-resource cosmosDbSqlDataContributorRole 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = {
-  parent: cosmosDb
-  name: guid(cosmosDb.id, functionsApp.id, 'sqlDataContributor')
-  properties: {
-    roleDefinitionId: cosmosSqlDataContributorRoleDefinitionId
-    principalId: functionsApp.identity.principalId
-    // Cosmos SQL RBAC expects a fully-qualified scope path (starts with /subscriptions)
-    // and uses the data-plane database segment (/dbs/<dbName>).
-    scope: '${cosmosDb.id}/dbs/${cosmosDbDatabaseName}'
-  }
-}
+// NOTE: Cosmos role assignment for Functions MI is created via Azure CLI in the workflow
+// to avoid Bicep idempotency issues with role assignments.
 
 resource cosmosDbSqlDataContributorRoleAutomation 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = if (!empty(automationPrincipalId)) {
   parent: cosmosDb
@@ -328,6 +275,7 @@ output functionsAppName string = functionsApp.name
 output functionsAppUrl string = 'https://${functionsApp.properties.defaultHostName}'
 output functionsAppId string = functionsApp.id
 output functionsAppPrincipalId string = functionsApp.identity.principalId
+output funcStorageAccountName string = funcStorageAccount.name
 
 output appInsightsName string = appInsights.name
 output appInsightsConnectionString string = appInsights.properties.ConnectionString
