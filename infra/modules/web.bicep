@@ -209,10 +209,10 @@ resource functionsAuth 'Microsoft.Web/sites/config@2022-03-01' = {
 }
 
 // Data-plane permissions for AzureWebJobsStorage using managed identity
-// NOTE: Role assignment name includes principalId so a new assignment is created if the managed identity changes.
-// This avoids 'RoleAssignmentUpdateNotPermitted' errors when redeploying after Function App recreation.
+// NOTE: The deploy-infra workflow cleans up stale role assignments before deployment,
+// which prevents 'RoleAssignmentUpdateNotPermitted' errors when the managed identity changes.
 resource funcStorageBlobContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(funcStorageAccount.id, functionsApp.identity.principalId, 'Storage Blob Data Contributor')
+  name: guid(funcStorageAccount.id, functionsApp.id, 'Storage Blob Data Contributor')
   scope: funcStorageAccount
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
@@ -222,7 +222,7 @@ resource funcStorageBlobContributorRole 'Microsoft.Authorization/roleAssignments
 }
 
 resource funcStorageQueueContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(funcStorageAccount.id, functionsApp.identity.principalId, 'Storage Queue Data Contributor')
+  name: guid(funcStorageAccount.id, functionsApp.id, 'Storage Queue Data Contributor')
   scope: funcStorageAccount
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '974c5e8b-45b9-4653-ba55-5f855dd0fb88')
@@ -232,7 +232,7 @@ resource funcStorageQueueContributorRole 'Microsoft.Authorization/roleAssignment
 }
 
 resource funcStorageTableContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(funcStorageAccount.id, functionsApp.identity.principalId, 'Storage Table Data Contributor')
+  name: guid(funcStorageAccount.id, functionsApp.id, 'Storage Table Data Contributor')
   scope: funcStorageAccount
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3')
@@ -275,7 +275,7 @@ resource staticWebAppBackend 'Microsoft.Web/staticSites/linkedBackends@2023-12-0
 
 // Role assignment: Functions can read from Storage Account
 resource storageBlobDataReaderRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(storageAccount.id, functionsApp.identity.principalId, 'Storage Blob Data Reader')
+  name: guid(storageAccount.id, functionsApp.id, 'Storage Blob Data Reader')
   scope: storageAccount
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1')
@@ -294,7 +294,7 @@ var cosmosSqlDataContributorRoleDefinitionId = resourceId(
 
 resource cosmosDbSqlDataContributorRole 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = {
   parent: cosmosDb
-  name: guid(cosmosDb.id, functionsApp.identity.principalId, 'sqlDataContributor')
+  name: guid(cosmosDb.id, functionsApp.id, 'sqlDataContributor')
   properties: {
     roleDefinitionId: cosmosSqlDataContributorRoleDefinitionId
     principalId: functionsApp.identity.principalId
