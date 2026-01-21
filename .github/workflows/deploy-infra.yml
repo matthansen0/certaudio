@@ -282,9 +282,9 @@ jobs:
                 --resource-group "$AZURE_RESOURCE_GROUP" \
                 --query "properties.error" -o json 2>/dev/null || echo "{}")
               
-              # Count total errors and RoleAssignmentExists errors
-              totalErrors=$(echo "$errorDetails" | jq -r '.. | .code? // empty' | grep -c . || echo "0")
-              roleExistsErrors=$(echo "$errorDetails" | jq -r '.. | .code? // empty' | grep -c "RoleAssignmentExists" || echo "0")
+              # Count total errors and RoleAssignmentExists errors using jq
+              totalErrors=$(echo "$errorDetails" | jq '[.. | .code? // empty | select(. != "")] | length' 2>/dev/null || echo "0")
+              roleExistsErrors=$(echo "$errorDetails" | jq '[.. | .code? // empty | select(. == "RoleAssignmentExists")] | length' 2>/dev/null || echo "0")
               
               if [[ "$totalErrors" -gt 0 && "$totalErrors" -eq "$roleExistsErrors" ]]; then
                 echo "::warning::Deployment reported $roleExistsErrors RoleAssignmentExists error(s) - role assignments already exist with correct principals. Treating as success."
