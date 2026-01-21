@@ -86,7 +86,8 @@ def _fetch_speech_voices() -> tuple[str, set[str]]:
             f"Voice list request failed ({resp.status_code}): {resp.text[:200]}"
         )
     data = resp.json()
-    voice_names = {v.get("Name") for v in data if v.get("Name")}
+    # Use ShortName which is the format used in SSML voice names (e.g., "en-US-JennyNeural")
+    voice_names = {v.get("ShortName") for v in data if v.get("ShortName")}
     return region, voice_names
 
 
