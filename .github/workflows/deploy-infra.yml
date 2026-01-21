@@ -286,6 +286,7 @@ jobs:
               totalErrors=$(echo "$errorDetails" | jq '[.. | .code? // empty | select(. != "")] | length' 2>/dev/null || echo "0")
               roleExistsErrors=$(echo "$errorDetails" | jq '[.. | .code? // empty | select(. == "RoleAssignmentExists")] | length' 2>/dev/null || echo "0")
               
+              echo "DEBUG: totalErrors=$totalErrors, roleExistsErrors=$roleExistsErrors"
               if [[ "$totalErrors" -gt 0 && "$totalErrors" -eq "$roleExistsErrors" ]]; then
                 echo "::warning::Deployment reported $roleExistsErrors RoleAssignmentExists error(s) - role assignments already exist with correct principals. Treating as success."
               else
