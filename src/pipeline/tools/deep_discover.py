@@ -75,6 +75,11 @@ CERTIFICATION_PATH_UIDS = {
         "learn.wwl.implement-access-management-for-apps",
         "learn.wwl.plan-implement-identity-governance-strategy",
     ],
+    "ab-731": [
+        "learn.wwl.explore-business-value-generative-ai-solutions",
+        "learn.wwl.drive-value-generative-ai-solutions",
+        "learn.wwl.transform-your-business-with-microsoft-ai",
+    ],
 }
 
 
