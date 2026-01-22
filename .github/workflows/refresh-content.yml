@@ -81,7 +81,57 @@ on:
           - podcast
         default: 'instructional'
       instructionalVoice:
-        description: 'Voice for instructional format'
+        description: 'Voice for instructional format (https://speech.microsoft.com/portal/voicegallery)'
+        required: false
+        type: choice
+        options:
+          # Dragon HD voices (highest quality)
+          - en-US-Andrew:DragonHDLatestNeural   # Male, warm and professional (HD)
+          - en-US-Ava:DragonHDLatestNeural      # Female, warm and engaging (HD)
+          - en-US-Andrew2:DragonHDLatestNeural  # Male, conversational (HD)
+          - en-US-Adam:DragonHDLatestNeural     # Male (HD)
+          - en-US-Aria:DragonHDLatestNeural     # Female, newscast (HD)
+          # Standard Neural voices
+          - en-US-AndrewNeural      # Male, warm and professional
+          - en-US-BrianNeural       # Male, conversational
+          - en-US-GuyNeural         # Male, newscast style
+          - en-US-DavisNeural       # Male, calm and clear
+          - en-US-JasonNeural       # Male, friendly
+          - en-US-TonyNeural        # Male, expressive
+          - en-US-AvaNeural         # Female, warm and engaging
+          - en-US-EmmaNeural        # Female, professional
+          - en-US-JennyNeural       # Female, conversational
+          - en-US-AriaNeural        # Female, newscast style
+          - en-US-SaraNeural        # Female, friendly
+        default: 'en-US-Andrew:DragonHDLatestNeural'
+      podcastHostVoice:
+        description: 'Host voice for podcast format'
+        required: false
+        type: choice
+        options:
+          # Dragon HD voices (highest quality)
+          - en-US-Ava:DragonHDLatestNeural      # Female (HD, GA)
+          - en-US-Emma:DragonHDLatestNeural     # Female (HD, GA)
+          - en-US-Andrew:DragonHDLatestNeural   # Male (HD, GA)
+          - en-US-Andrew2:DragonHDLatestNeural  # Male, conversational (HD, GA)
+          - en-US-Adam:DragonHDLatestNeural     # Male (HD, GA)
+          # Preview HD voices (eastus/westeurope/southeastasia only)
+          - en-US-Ava3:DragonHDLatestNeural     # Female, podcast-optimized (HD, Preview)
+          - en-US-Andrew3:DragonHDLatestNeural  # Male, podcast-optimized (HD, Preview)
+          # Standard Neural voices
+          - en-US-AvaNeural
+          - en-US-AndrewNeural
+          - en-US-BrianNeural
+          - en-US-GuyNeural
+          - en-US-DavisNeural
+          - en-US-JasonNeural
+          - en-US-TonyNeural
+          - en-US-EmmaNeural
+          - en-US-JennyNeural
+          - en-US-AriaNeural
+        default: 'en-US-Ava:DragonHDLatestNeural'
+      podcastExpertVoice:
+        description: 'Expert voice for podcast format'
         required: false
         type: choice
         options:
@@ -106,7 +156,6 @@ on:
           - en-US-EmmaNeural
           - en-US-JennyNeural
           - en-US-AriaNeural
-          - en-US-SaraNeural
         default: 'en-US-Andrew:DragonHDLatestNeural'
       forceRefresh:
         description: 'Force refresh all content (ignore delta check)'
@@ -491,6 +540,8 @@ jobs:
           CERTIFICATION_ID: ${{ inputs.certificationId || 'ai-102' }}
           AUDIO_FORMAT: ${{ inputs.audioFormat || 'instructional' }}
           INSTRUCTIONAL_VOICE: ${{ inputs.instructionalVoice || 'en-US-Andrew:DragonHDLatestNeural' }}
+          PODCAST_HOST_VOICE: ${{ inputs.podcastHostVoice || 'en-US-Ava:DragonHDLatestNeural' }}
+          PODCAST_EXPERT_VOICE: ${{ inputs.podcastExpertVoice || 'en-US-Andrew:DragonHDLatestNeural' }}
           CHANGED_SOURCES: ${{ needs.check-updates.outputs.changedSources }}
           AFFECTED_EPISODES: ${{ needs.check-updates.outputs.affectedEpisodes }}
           OPENAI_ENDPOINT: ${{ needs.resolve-endpoints.outputs.openaiEndpoint }}
@@ -506,7 +557,9 @@ jobs:
           python -m tools.generate_episodes \
             --certification-id "$CERTIFICATION_ID" \
             --audio-format "$AUDIO_FORMAT" \
-            --voice "$INSTRUCTIONAL_VOICE" \
+            --instructional-voice "$INSTRUCTIONAL_VOICE" \
+            --podcast-host-voice "$PODCAST_HOST_VOICE" \
+            --podcast-expert-voice "$PODCAST_EXPERT_VOICE" \
             --amendment-mode true \
             --changed-sources "$CHANGED_SOURCES" \
             --affected-episodes "$AFFECTED_EPISODES" || echo "Amendment generation completed"
@@ -528,7 +581,12 @@ jobs:
           echo "### Configuration" >> $GITHUB_STEP_SUMMARY
           echo "- Certification: ${{ inputs.certificationId || 'ai-102' }}" >> $GITHUB_STEP_SUMMARY
           echo "- Format: ${{ inputs.audioFormat || 'instructional' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Voice: ${{ inputs.instructionalVoice || 'en-US-Andrew:DragonHDLatestNeural' }}" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.audioFormat || 'instructional' }}" = "podcast" ]; then
+            echo "- Host Voice: ${{ inputs.podcastHostVoice || 'en-US-Ava:DragonHDLatestNeural' }}" >> $GITHUB_STEP_SUMMARY
+            echo "- Expert Voice: ${{ inputs.podcastExpertVoice || 'en-US-Andrew:DragonHDLatestNeural' }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- Voice: ${{ inputs.instructionalVoice || 'en-US-Andrew:DragonHDLatestNeural' }}" >> $GITHUB_STEP_SUMMARY
+          fi
 
   # =========================================================================
   # CLEANUP - Always delete ephemeral Search

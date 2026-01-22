@@ -32,7 +32,7 @@ on:
           - dp-203     # Azure Data Engineer
           - dp-300     # Azure Database Administrator
           - dp-600     # Microsoft Fabric Analytics Engineer
-          - dp-700     # Microsoft Fabric Data Engineer (if available)
+          - dp-700     # Microsoft Fabric Data Engineer
           # === SECURITY ===
           - sc-900     # Security, Compliance, Identity Fundamentals
           - sc-100     # Cybersecurity Architect Expert
