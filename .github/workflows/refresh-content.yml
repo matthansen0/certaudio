@@ -217,7 +217,6 @@ jobs:
       speechEndpoint: ${{ steps.endpoints.outputs.speechEndpoint }}
       cosmosEndpoint: ${{ steps.endpoints.outputs.cosmosEndpoint }}
       storageAccount: ${{ steps.endpoints.outputs.storageAccount }}
-      cosmosDatabase: ${{ steps.endpoints.outputs.cosmosDatabase }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -241,15 +240,14 @@ jobs:
             
             echo "openaiEndpoint=$OPENAI_ENDPOINT" >> $GITHUB_OUTPUT
             echo "speechEndpoint=$SPEECH_ENDPOINT" >> $GITHUB_OUTPUT
-            echo "cosmosEndpoint=$COSMOS_ENDPOINT" >> $GITHUB_OUTPUT
-            echo "storageAccount=$STORAGE_ACCOUNT" >> $GITHUB_OUTPUT
-            echo "cosmosDatabase=$COSMOS_DATABASE" >> $GITHUB_OUTPUT
+            echo "cosmosEndpoint=$COSMOS_DB_ENDPOINT" >> $GITHUB_OUTPUT
+            echo "storageAccount=$STORAGE_ACCOUNT_NAME" >> $GITHUB_OUTPUT
             
             echo "## Resolved Endpoints" >> $GITHUB_STEP_SUMMARY
             echo "- OpenAI: $OPENAI_ENDPOINT" >> $GITHUB_STEP_SUMMARY
             echo "- Speech: $SPEECH_ENDPOINT" >> $GITHUB_STEP_SUMMARY
-            echo "- Cosmos: $COSMOS_ENDPOINT" >> $GITHUB_STEP_SUMMARY
-            echo "- Storage: $STORAGE_ACCOUNT" >> $GITHUB_STEP_SUMMARY
+            echo "- Cosmos: $COSMOS_DB_ENDPOINT" >> $GITHUB_STEP_SUMMARY
+            echo "- Storage: $STORAGE_ACCOUNT_NAME" >> $GITHUB_STEP_SUMMARY
 
   check-updates:
     name: Check for Content Updates
@@ -286,7 +284,7 @@ jobs:
           CERTIFICATION_ID: ${{ inputs.certificationId || 'ai-102' }}
           FORCE_REFRESH: ${{ inputs.forceRefresh || 'false' }}
           COSMOS_DB_ENDPOINT: ${{ needs.resolve-endpoints.outputs.cosmosEndpoint }}
-          COSMOS_DB_DATABASE: ${{ needs.resolve-endpoints.outputs.cosmosDatabase }}
+          COSMOS_DB_DATABASE: certaudio
         run: |
           cd src/pipeline
           
@@ -549,7 +547,7 @@ jobs:
           SEARCH_ENDPOINT: https://${{ env.SEARCH_NAME }}.search.windows.net
           STORAGE_ACCOUNT_NAME: ${{ needs.resolve-endpoints.outputs.storageAccount }}
           COSMOS_DB_ENDPOINT: ${{ needs.resolve-endpoints.outputs.cosmosEndpoint }}
-          COSMOS_DB_DATABASE: ${{ needs.resolve-endpoints.outputs.cosmosDatabase }}
+          COSMOS_DB_DATABASE: certaudio
         run: |
           cd src/pipeline
           
