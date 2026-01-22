@@ -52,6 +52,7 @@ SPEECH_ENDPOINT=$(az cognitiveservices account show -g "$rg" -n "$speech" --quer
 SPEECH_REGION=$(az cognitiveservices account show -g "$rg" -n "$speech" --query location -o tsv)
 DOCUMENT_INTELLIGENCE_ENDPOINT=$(az cognitiveservices account show -g "$rg" -n "$docintel" --query properties.endpoint -o tsv)
 COSMOS_DB_ENDPOINT=$(az cosmosdb show -g "$rg" -n "$cosmos" --query documentEndpoint -o tsv)
+STORAGE_ACCOUNT_NAME=$storage
 # Note: AI Search is now ephemeral (deployed only during content generation)
 # The SEARCH_ENDPOINT is constructed dynamically in workflows, not fetched here
 
@@ -65,7 +66,7 @@ SPEECH_ENDPOINT=$SPEECH_ENDPOINT
 SPEECH_REGION=$SPEECH_REGION
 DOCUMENT_INTELLIGENCE_ENDPOINT=$DOCUMENT_INTELLIGENCE_ENDPOINT
 COSMOS_DB_ENDPOINT=$COSMOS_DB_ENDPOINT
-STORAGE_ACCOUNT_NAME=$storage
+STORAGE_ACCOUNT_NAME=$STORAGE_ACCOUNT_NAME
 EOF
 
 if [[ "${SET_GH_SECRETS:-false}" == "true" ]]; then
