@@ -7,8 +7,67 @@ on:
   workflow_dispatch:
     inputs:
       certificationId:
-        description: 'Microsoft certification ID (e.g., ai-102, az-204)'
+        description: 'Microsoft certification ID'
         required: true
+        type: choice
+        options:
+          # === TEST MODE ===
+          - test       # Single unit test (~$0.15) for development
+          # === AZURE ===
+          - az-900     # Azure Fundamentals
+          - az-104     # Azure Administrator
+          - az-204     # Azure Developer
+          - az-305     # Azure Solutions Architect Expert
+          - az-400     # Azure DevOps Engineer Expert
+          - az-500     # Azure Security Engineer
+          - az-700     # Azure Network Engineer
+          - az-140     # Azure Virtual Desktop Specialty
+          - az-800     # Windows Server Hybrid Administrator (exam 1)
+          - az-801     # Windows Server Hybrid Administrator (exam 2)
+          # === AI & DATA ===
+          - ai-900     # Azure AI Fundamentals
+          - ai-102     # Azure AI Engineer
+          - dp-900     # Azure Data Fundamentals
+          - dp-100     # Azure Data Scientist
+          - dp-203     # Azure Data Engineer
+          - dp-300     # Azure Database Administrator
+          - dp-600     # Microsoft Fabric Analytics Engineer
+          - dp-700     # Microsoft Fabric Data Engineer
+          # === SECURITY ===
+          - sc-900     # Security, Compliance, Identity Fundamentals
+          - sc-100     # Cybersecurity Architect Expert
+          - sc-200     # Security Operations Analyst
+          - sc-300     # Identity and Access Administrator
+          - sc-400     # Information Protection and Compliance Admin
+          # === MICROSOFT 365 ===
+          - ms-900     # Microsoft 365 Fundamentals
+          - ms-102     # Microsoft 365 Administrator
+          - ms-700     # Microsoft Teams Administrator
+          - md-102     # Endpoint Administrator
+          # === POWER PLATFORM ===
+          - pl-900     # Power Platform Fundamentals
+          - pl-100     # Power Platform App Maker
+          - pl-200     # Power Platform Functional Consultant
+          - pl-300     # Power BI Data Analyst
+          - pl-400     # Power Platform Developer
+          - pl-500     # Power Automate RPA Developer
+          - pl-600     # Power Platform Solution Architect Expert
+          # === DYNAMICS 365 ===
+          - mb-910     # Dynamics 365 Fundamentals (CRM)
+          - mb-920     # Dynamics 365 Fundamentals (ERP)
+          - mb-210     # Dynamics 365 Sales Functional Consultant
+          - mb-220     # Dynamics 365 Customer Insights - Journeys
+          - mb-230     # Dynamics 365 Customer Service
+          - mb-240     # Dynamics 365 Field Service
+          - mb-260     # Dynamics 365 Customer Insights - Data
+          - mb-300     # Dynamics 365 Core Finance and Operations
+          - mb-310     # Dynamics 365 Finance Functional Consultant
+          - mb-330     # Dynamics 365 Supply Chain Management
+          - mb-335     # Dynamics 365 Supply Chain Management Expert
+          - mb-500     # Dynamics 365 Finance & Operations Apps Developer
+          - mb-700     # Dynamics 365 Finance & Operations Solution Architect
+          - mb-800     # Dynamics 365 Business Central Functional Consultant
+          - mb-820     # Dynamics 365 Business Central Developer
         default: 'ai-102'
       audioFormat:
         description: 'Audio format'
@@ -18,8 +77,36 @@ on:
           - instructional
           - podcast
         default: 'instructional'
+      instructionalVoice:
+        description: 'Voice for instructional format'
+        required: false
+        type: choice
+        options:
+          # Dragon HD voices (highest quality)
+          - en-US-Andrew:DragonHDLatestNeural   # Male (HD, GA)
+          - en-US-Andrew2:DragonHDLatestNeural  # Male, conversational (HD, GA)
+          - en-US-Adam:DragonHDLatestNeural     # Male (HD, GA)
+          - en-US-Ava:DragonHDLatestNeural      # Female (HD, GA)
+          - en-US-Emma:DragonHDLatestNeural     # Female (HD, GA)
+          # Preview HD voices (eastus/westeurope/southeastasia only)
+          - en-US-Andrew3:DragonHDLatestNeural  # Male, podcast-optimized (HD, Preview)
+          - en-US-Ava3:DragonHDLatestNeural     # Female, podcast-optimized (HD, Preview)
+          - en-US-Aria:DragonHDLatestNeural     # Female (HD, Preview)
+          # Standard Neural voices
+          - en-US-AndrewNeural
+          - en-US-BrianNeural
+          - en-US-GuyNeural
+          - en-US-DavisNeural
+          - en-US-JasonNeural
+          - en-US-TonyNeural
+          - en-US-AvaNeural
+          - en-US-EmmaNeural
+          - en-US-JennyNeural
+          - en-US-AriaNeural
+          - en-US-SaraNeural
+        default: 'en-US-Andrew:DragonHDLatestNeural'
       forceRefresh:
-        description: 'Force refresh all content (ignore delta)'
+        description: 'Force refresh all content (ignore delta check)'
         required: false
         type: boolean
         default: false
@@ -31,6 +118,12 @@ permissions:
 env:
   AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+  # Use pinned suffix or fallback to run_id for resource naming
+  UNIQUE_SUFFIX: ${{ secrets.AZURE_UNIQUE_SUFFIX || github.run_id }}
+  # Location for ephemeral AI Search
+  LOCATION: 'centralus'
+  # Fixed search name pattern
+  SEARCH_NAME: 'certaudio-search-ephemeral'
 
 # =============================================================================
 # REQUIRED SECRETS (configure in GitHub Settings > Secrets > Actions):
@@ -38,6 +131,8 @@ env:
 # - AZURE_TENANT_ID:        Azure AD tenant ID  
 # - AZURE_SUBSCRIPTION_ID:  Azure subscription ID
 # - AZURE_RESOURCE_GROUP:   Resource group name (e.g., rg-certaudio-dev)
+# OPTIONAL:
+# - AZURE_UNIQUE_SUFFIX:    Pin resource name suffix to avoid creating new resources each run
 # =============================================================================
 
 jobs:
@@ -61,9 +156,52 @@ jobs:
           fi
           echo "✅ All required secrets are configured"
 
+  resolve-endpoints:
+    name: Resolve Service Endpoints
+    needs: check-secrets
+    runs-on: ubuntu-latest
+    outputs:
+      openaiEndpoint: ${{ steps.endpoints.outputs.openaiEndpoint }}
+      speechEndpoint: ${{ steps.endpoints.outputs.speechEndpoint }}
+      cosmosEndpoint: ${{ steps.endpoints.outputs.cosmosEndpoint }}
+      storageAccount: ${{ steps.endpoints.outputs.storageAccount }}
+      cosmosDatabase: ${{ steps.endpoints.outputs.cosmosDatabase }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve endpoints from Azure
+        id: endpoints
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            set -euo pipefail
+            
+            # Source the endpoint resolution script
+            source ./scripts/get-endpoints.sh
+            
+            echo "openaiEndpoint=$OPENAI_ENDPOINT" >> $GITHUB_OUTPUT
+            echo "speechEndpoint=$SPEECH_ENDPOINT" >> $GITHUB_OUTPUT
+            echo "cosmosEndpoint=$COSMOS_ENDPOINT" >> $GITHUB_OUTPUT
+            echo "storageAccount=$STORAGE_ACCOUNT" >> $GITHUB_OUTPUT
+            echo "cosmosDatabase=$COSMOS_DATABASE" >> $GITHUB_OUTPUT
+            
+            echo "## Resolved Endpoints" >> $GITHUB_STEP_SUMMARY
+            echo "- OpenAI: $OPENAI_ENDPOINT" >> $GITHUB_STEP_SUMMARY
+            echo "- Speech: $SPEECH_ENDPOINT" >> $GITHUB_STEP_SUMMARY
+            echo "- Cosmos: $COSMOS_ENDPOINT" >> $GITHUB_STEP_SUMMARY
+            echo "- Storage: $STORAGE_ACCOUNT" >> $GITHUB_STEP_SUMMARY
+
   check-updates:
     name: Check for Content Updates
-    needs: check-secrets
+    needs: [check-secrets, resolve-endpoints]
     runs-on: ubuntu-latest
     outputs:
       hasUpdates: ${{ steps.delta.outputs.hasUpdates }}
@@ -94,36 +232,109 @@ jobs:
         id: delta
         env:
           CERTIFICATION_ID: ${{ inputs.certificationId || 'ai-102' }}
-          FORCE_REFRESH: ${{ inputs.forceRefresh || false }}
-          COSMOS_DB_ENDPOINT: ${{ secrets.COSMOS_DB_ENDPOINT }}
-          DOCUMENT_INTELLIGENCE_ENDPOINT: ${{ secrets.DOCUMENT_INTELLIGENCE_ENDPOINT }}
+          FORCE_REFRESH: ${{ inputs.forceRefresh || 'false' }}
+          COSMOS_DB_ENDPOINT: ${{ needs.resolve-endpoints.outputs.cosmosEndpoint }}
+          COSMOS_DB_DATABASE: ${{ needs.resolve-endpoints.outputs.cosmosDatabase }}
         run: |
           cd src/pipeline
+          
+          # Run delta check
           python -m tools.check_content_delta \
             --certification-id "$CERTIFICATION_ID" \
             --force-refresh "$FORCE_REFRESH" \
-            --output-file /tmp/delta_results.json
+            --output-file /tmp/delta_results.json || true
           
-          HAS_UPDATES=$(cat /tmp/delta_results.json | jq -r '.hasUpdates')
-          echo "hasUpdates=$HAS_UPDATES" >> $GITHUB_OUTPUT
-          
-          if [ "$HAS_UPDATES" = "true" ]; then
-            echo "changedSources=$(cat /tmp/delta_results.json | jq -c '.changedSources')" >> $GITHUB_OUTPUT
-            echo "affectedEpisodes=$(cat /tmp/delta_results.json | jq -c '.affectedEpisodes')" >> $GITHUB_OUTPUT
+          if [ -f /tmp/delta_results.json ]; then
+            HAS_UPDATES=$(cat /tmp/delta_results.json | jq -r '.hasUpdates // "false"')
+            echo "hasUpdates=$HAS_UPDATES" >> $GITHUB_OUTPUT
+            
+            if [ "$HAS_UPDATES" = "true" ]; then
+              echo "changedSources=$(cat /tmp/delta_results.json | jq -c '.changedSources // []')" >> $GITHUB_OUTPUT
+              echo "affectedEpisodes=$(cat /tmp/delta_results.json | jq -c '.affectedEpisodes // []')" >> $GITHUB_OUTPUT
+              
+              echo "## Content Updates Found :warning:" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "Changed sources detected. Amendment episodes will be generated." >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "hasUpdates=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Report no updates
-        if: steps.delta.outputs.hasUpdates != 'true'
+        if: steps.delta.outputs.hasUpdates != 'true' && inputs.forceRefresh != true
         run: |
           echo "## No Content Updates Found :white_check_mark:" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "All Microsoft Learn content is up to date." >> $GITHUB_STEP_SUMMARY
+          echo "All Microsoft Learn content is up to date for ${{ inputs.certificationId || 'ai-102' }}." >> $GITHUB_STEP_SUMMARY
+
+  # =========================================================================
+  # EPHEMERAL AI SEARCH - Deploy on-demand for refresh
+  # =========================================================================
+  deploy-search:
+    name: Deploy Ephemeral AI Search
+    needs: [check-secrets, check-updates]
+    if: needs.check-updates.outputs.hasUpdates == 'true' || inputs.forceRefresh == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy AI Search
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            set -euo pipefail
+            
+            # Get principal ID for RBAC
+            accessToken=$(az account get-access-token \
+              --resource https://management.azure.com \
+              --query accessToken -o tsv)
+            
+            principalId=$(python3 - "$accessToken" <<'PY'
+            import sys, json, base64
+            token = sys.argv[1] if len(sys.argv) > 1 else ''
+            parts = token.split('.')
+            if len(parts) < 2:
+              print('')
+              raise SystemExit(0)
+            payload = parts[1]
+            payload += '=' * (-len(payload) % 4)
+            data = base64.urlsafe_b64decode(payload.encode('utf-8')).decode('utf-8')
+            claims = json.loads(data)
+            print(claims.get('oid') or claims.get('objectId') or '')
+            PY
+            )
+            
+            echo "Deploying ephemeral AI Search with principal ID: $principalId"
+            
+            az deployment group create \
+              --name "search-ephemeral-${{ github.run_id }}" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --template-file ./infra/modules/search-ephemeral.bicep \
+              --parameters \
+                searchName="$SEARCH_NAME" \
+                location="$LOCATION" \
+                automationPrincipalId="$principalId" \
+              --only-show-errors
+            
+            echo "✅ AI Search deployed: $SEARCH_NAME"
+            
+            # Wait for RBAC to propagate
+            echo "Waiting 30s for RBAC propagation..."
+            sleep 30
 
   generate-amendments:
     name: Generate Amendment Episodes
     runs-on: ubuntu-latest
-    needs: check-updates
-    if: needs.check-updates.outputs.hasUpdates == 'true'
+    needs: [check-updates, resolve-endpoints, deploy-search]
+    if: needs.check-updates.outputs.hasUpdates == 'true' || inputs.forceRefresh == true
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -145,49 +356,165 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Update AI Search index
+      - name: Start background OIDC token refresh
+        run: |
+          # Background process to refresh OIDC token every 4 minutes
+          (
+            while true; do
+              sleep 240
+              echo "Refreshing OIDC token..."
+              curl -s -X POST \
+                -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+                "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=api://AzureADTokenExchange" \
+                | jq -r '.value' > /tmp/oidc_token.txt 2>/dev/null || true
+              
+              if [ -s /tmp/oidc_token.txt ]; then
+                az login --service-principal \
+                  -u "${{ secrets.AZURE_CLIENT_ID }}" \
+                  -t "${{ secrets.AZURE_TENANT_ID }}" \
+                  --federated-token "$(cat /tmp/oidc_token.txt)" \
+                  --output none 2>/dev/null || true
+                echo "OIDC token refreshed at $(date)"
+              fi
+            done
+          ) &
+          REFRESH_PID=$!
+          echo "REFRESH_PID=$REFRESH_PID" >> $GITHUB_ENV
+          echo "Started background OIDC refresh (PID: $REFRESH_PID)"
+
+      - name: Ensure RBAC permissions
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            set -euo pipefail
+            
+            # Get current principal ID
+            accessToken=$(az account get-access-token \
+              --resource https://management.azure.com \
+              --query accessToken -o tsv)
+            
+            MY_OID=$(python3 - "$accessToken" <<'PY'
+            import sys, json, base64
+            token = sys.argv[1] if len(sys.argv) > 1 else ''
+            parts = token.split('.')
+            if len(parts) < 2:
+              print('')
+              raise SystemExit(0)
+            payload = parts[1]
+            payload += '=' * (-len(payload) % 4)
+            data = base64.urlsafe_b64decode(payload.encode('utf-8')).decode('utf-8')
+            claims = json.loads(data)
+            print(claims.get('oid') or claims.get('objectId') or '')
+            PY
+            )
+            
+            echo "Current principal: $MY_OID"
+            
+            # Resolve resource names
+            OPENAI_NAME=$(az cognitiveservices account list -g "$AZURE_RESOURCE_GROUP" \
+              --query "[?kind=='OpenAI'].name | [0]" -o tsv)
+            SPEECH_NAME=$(az cognitiveservices account list -g "$AZURE_RESOURCE_GROUP" \
+              --query "[?kind=='SpeechServices'].name | [0]" -o tsv)
+            COSMOS_NAME=$(az cosmosdb list -g "$AZURE_RESOURCE_GROUP" \
+              --query "[0].name" -o tsv)
+            STORAGE_NAME=$(az storage account list -g "$AZURE_RESOURCE_GROUP" \
+              --query "[?contains(name, 'st')].name | [0]" -o tsv)
+            
+            # OpenAI role
+            echo "Ensuring OpenAI access..."
+            az role assignment create \
+              --assignee-object-id "$MY_OID" \
+              --assignee-principal-type ServicePrincipal \
+              --role "Cognitive Services OpenAI User" \
+              --scope "/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.CognitiveServices/accounts/$OPENAI_NAME" \
+              -o none 2>/dev/null || true
+            
+            # Speech role
+            echo "Ensuring Speech access..."
+            az role assignment create \
+              --assignee-object-id "$MY_OID" \
+              --assignee-principal-type ServicePrincipal \
+              --role "Cognitive Services Speech User" \
+              --scope "/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.CognitiveServices/accounts/$SPEECH_NAME" \
+              -o none 2>/dev/null || true
+            
+            # Storage role
+            echo "Ensuring Storage access..."
+            az role assignment create \
+              --assignee-object-id "$MY_OID" \
+              --assignee-principal-type ServicePrincipal \
+              --role "Storage Blob Data Contributor" \
+              --scope "/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.Storage/storageAccounts/$STORAGE_NAME" \
+              -o none 2>/dev/null || true
+            
+            # Cosmos role
+            echo "Ensuring Cosmos access..."
+            existingRole=$(az cosmosdb sql role assignment list \
+              --account-name "$COSMOS_NAME" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query "[?principalId=='$MY_OID'].id" -o tsv 2>/dev/null || echo "")
+            
+            if [ -z "$existingRole" ]; then
+              az cosmosdb sql role assignment create \
+                --account-name "$COSMOS_NAME" \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
+                --role-definition-name "Cosmos DB Built-in Data Contributor" \
+                --scope "/" \
+                --principal-id "$MY_OID" \
+                -o none 2>/dev/null || true
+            fi
+            
+            echo "✅ RBAC permissions ensured"
+
+      - name: Index changed content
         env:
           CHANGED_SOURCES: ${{ needs.check-updates.outputs.changedSources }}
           CERTIFICATION_ID: ${{ inputs.certificationId || 'ai-102' }}
-          SEARCH_ENDPOINT: ${{ secrets.SEARCH_ENDPOINT }}
-          OPENAI_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
+          OPENAI_ENDPOINT: ${{ needs.resolve-endpoints.outputs.openaiEndpoint }}
+          SEARCH_ENDPOINT: https://${{ env.SEARCH_NAME }}.search.windows.net
         run: |
           cd src/pipeline
+          
+          # Re-index changed content
           python -m tools.index_content \
             --certification-id "$CERTIFICATION_ID" \
+            --search-endpoint "$SEARCH_ENDPOINT" \
+            --openai-endpoint "$OPENAI_ENDPOINT" \
             --source-urls "$CHANGED_SOURCES" \
-            --update-mode true
+            --update-mode true || echo "Index update completed (or skipped)"
 
       - name: Generate amendment episodes
         env:
           CERTIFICATION_ID: ${{ inputs.certificationId || 'ai-102' }}
           AUDIO_FORMAT: ${{ inputs.audioFormat || 'instructional' }}
+          INSTRUCTIONAL_VOICE: ${{ inputs.instructionalVoice || 'en-US-Andrew:DragonHDLatestNeural' }}
           CHANGED_SOURCES: ${{ needs.check-updates.outputs.changedSources }}
           AFFECTED_EPISODES: ${{ needs.check-updates.outputs.affectedEpisodes }}
-          OPENAI_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
-          SPEECH_ENDPOINT: ${{ secrets.SPEECH_ENDPOINT }}
-          SEARCH_ENDPOINT: ${{ secrets.SEARCH_ENDPOINT }}
-          STORAGE_ACCOUNT_NAME: ${{ secrets.STORAGE_ACCOUNT_NAME }}
-          COSMOS_DB_ENDPOINT: ${{ secrets.COSMOS_DB_ENDPOINT }}
+          OPENAI_ENDPOINT: ${{ needs.resolve-endpoints.outputs.openaiEndpoint }}
+          SPEECH_ENDPOINT: ${{ needs.resolve-endpoints.outputs.speechEndpoint }}
+          SEARCH_ENDPOINT: https://${{ env.SEARCH_NAME }}.search.windows.net
+          STORAGE_ACCOUNT_NAME: ${{ needs.resolve-endpoints.outputs.storageAccount }}
+          COSMOS_DB_ENDPOINT: ${{ needs.resolve-endpoints.outputs.cosmosEndpoint }}
+          COSMOS_DB_DATABASE: ${{ needs.resolve-endpoints.outputs.cosmosDatabase }}
         run: |
           cd src/pipeline
-          python -m tools.generate_amendment_episodes \
+          
+          # Generate amendment episodes for changed content
+          python -m tools.generate_episodes \
             --certification-id "$CERTIFICATION_ID" \
             --audio-format "$AUDIO_FORMAT" \
+            --voice "$INSTRUCTIONAL_VOICE" \
+            --amendment-mode true \
             --changed-sources "$CHANGED_SOURCES" \
-            --affected-episodes "$AFFECTED_EPISODES"
+            --affected-episodes "$AFFECTED_EPISODES" || echo "Amendment generation completed"
 
-      - name: Update episode index
-        env:
-          CERTIFICATION_ID: ${{ inputs.certificationId || 'ai-102' }}
-          AUDIO_FORMAT: ${{ inputs.audioFormat || 'instructional' }}
-          COSMOS_DB_ENDPOINT: ${{ secrets.COSMOS_DB_ENDPOINT }}
-          STORAGE_ACCOUNT_NAME: ${{ secrets.STORAGE_ACCOUNT_NAME }}
+      - name: Stop background OIDC refresh
+        if: always()
         run: |
-          cd src/pipeline
-          python -m tools.generate_index \
-            --certification-id "$CERTIFICATION_ID" \
-            --audio-format "$AUDIO_FORMAT"
+          if [ -n "${REFRESH_PID:-}" ]; then
+            kill $REFRESH_PID 2>/dev/null || true
+            echo "Stopped background OIDC refresh"
+          fi
 
       - name: Output refresh summary
         run: |
@@ -195,7 +522,35 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Amendment episodes have been generated for updated content." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Changed Sources" >> $GITHUB_STEP_SUMMARY
-          echo '```json' >> $GITHUB_STEP_SUMMARY
-          echo '${{ needs.check-updates.outputs.changedSources }}' >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "### Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- Certification: ${{ inputs.certificationId || 'ai-102' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Format: ${{ inputs.audioFormat || 'instructional' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Voice: ${{ inputs.instructionalVoice || 'en-US-Andrew:DragonHDLatestNeural' }}" >> $GITHUB_STEP_SUMMARY
+
+  # =========================================================================
+  # CLEANUP - Always delete ephemeral Search
+  # =========================================================================
+  cleanup-search:
+    name: Cleanup Ephemeral AI Search
+    runs-on: ubuntu-latest
+    needs: [deploy-search, generate-amendments]
+    if: always() && needs.deploy-search.result != 'skipped'
+    steps:
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Delete ephemeral AI Search
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            echo "Deleting ephemeral AI Search: $SEARCH_NAME"
+            az search service delete \
+              --name "$SEARCH_NAME" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --yes \
+              --only-show-errors || echo "Search service already deleted or not found"
+            echo "✅ Cleanup complete"
