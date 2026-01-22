@@ -21,6 +21,9 @@ on:
           - az-140     # Azure Virtual Desktop Specialty
           - az-800     # Windows Server Hybrid Administrator (exam 1)
           - az-801     # Windows Server Hybrid Administrator (exam 2)
+          # === AGENTIC AI ===
+          - ab-731     # AI Transformation Leader (beta)
+          - ab-100     # Agentic AI Business Solutions Architect
           # === AI & DATA ===
           - ai-900     # Azure AI Fundamentals
           - ai-102     # Azure AI Engineer
