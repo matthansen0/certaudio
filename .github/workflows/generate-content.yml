@@ -255,6 +255,27 @@ jobs:
           inlineScript: |
             set -euo pipefail
             
+            # Check for and clean up any stuck/failed Search service
+            # This prevents "conflict" errors when a previous deployment left a zombie resource
+            echo "Checking for existing Search service..."
+            existingStatus=$(az rest --method get \
+              --url "https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.Search/searchServices/$SEARCH_NAME?api-version=2023-11-01" \
+              --query "properties.provisioningState" -o tsv 2>/dev/null || echo "NotFound")
+            
+            if [[ "$existingStatus" == "failed" ]] || [[ "$existingStatus" == "Failed" ]]; then
+              echo "⚠️  Found Search service in failed state - deleting before redeploy..."
+              az search service delete -g "$AZURE_RESOURCE_GROUP" -n "$SEARCH_NAME" --yes || true
+              sleep 10
+            elif [[ "$existingStatus" != "NotFound" ]] && [[ "$existingStatus" != "succeeded" ]] && [[ "$existingStatus" != "Succeeded" ]]; then
+              echo "⚠️  Found Search service in '$existingStatus' state - deleting before redeploy..."
+              az search service delete -g "$AZURE_RESOURCE_GROUP" -n "$SEARCH_NAME" --yes || true
+              sleep 10
+            elif [[ "$existingStatus" == "succeeded" ]] || [[ "$existingStatus" == "Succeeded" ]]; then
+              echo "✅ Search service already exists and is healthy - skipping deployment"
+              echo "   Endpoint: https://${SEARCH_NAME}.search.windows.net"
+              exit 0
+            fi
+            
             # Get principal ID for RBAC
             accessToken=$(az account get-access-token \
               --resource https://management.azure.com \
