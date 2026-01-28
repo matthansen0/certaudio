@@ -170,8 +170,8 @@ env:
   EPISODE_BATCH_SIZE: 10
   # Use pinned suffix or fallback to run_id for resource naming
   UNIQUE_SUFFIX: ${{ secrets.AZURE_UNIQUE_SUFFIX || github.run_id }}
-  # Location for ephemeral AI Search
-  LOCATION: 'centralus'
+  # Location for ephemeral AI Search (East US has better capacity than Central US)
+  LOCATION: 'eastus'
   # Fixed search name pattern (avoids GitHub secret masking issues with outputs)
   SEARCH_NAME: 'certaudio-search-ephemeral'
 
