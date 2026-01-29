@@ -443,8 +443,8 @@ def build_ssml_from_narration(
                 continue
             voice = host_voice if current == "HOST" else expert_voice
             inner = _normalize_text(tok)
-            if current == "EXPERT":
-                inner = f'<prosody rate="-5%">{inner}</prosody>'
+            # Apply same prosody rate to both voices for consistency
+            inner = f'<prosody rate="-5%">{inner}</prosody>'
             chunks.append(f'<voice name="{voice}">{inner}</voice>')
 
         ssml = speak_open + " ".join(chunks) + speak_close
@@ -494,10 +494,16 @@ def sanitize_ssml(
             flags=re.IGNORECASE,
         )
 
-    # Allow the user-selected voices plus some common fallbacks
-    allowed_voices = {instructional_voice, "en-US-GuyNeural", "en-US-AndrewNeural"}
-    if audio_format == "podcast":
-        allowed_voices = {podcast_host_voice, podcast_expert_voice, "en-US-GuyNeural", "en-US-TonyNeural", "en-US-AndrewNeural", "en-US-BrianNeural"}
+    # Allow the user-selected voices plus common Dragon HD and Neural voices
+    # This list needs to include all voices that might be used in either format
+    common_voices = {
+        "en-US-GuyNeural", "en-US-TonyNeural", "en-US-AndrewNeural", "en-US-BrianNeural",
+        "en-US-AvaNeural", "en-US-JennyNeural", "en-US-AriaNeural",
+        # Dragon HD voices (high quality)
+        "en-US-Andrew:DragonHDLatestNeural", "en-US-Ava:DragonHDLatestNeural",
+        "en-US-Brian:DragonHDLatestNeural", "en-US-Emma:DragonHDLatestNeural",
+    }
+    allowed_voices = common_voices | {instructional_voice, podcast_host_voice, podcast_expert_voice}
 
     # Replace any unexpected voice with the default neural voice.
     default_voice = instructional_voice
