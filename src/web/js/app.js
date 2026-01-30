@@ -61,6 +61,10 @@ const elements = {
     transcriptContent: document.getElementById('transcriptContent'),
     btnCloseTranscript: document.getElementById('btnCloseTranscript'),
     signInBtn: document.getElementById('signInBtn'),
+    // Mobile menu
+    btnMobileMenu: document.getElementById('btnMobileMenu'),
+    sidebar: document.getElementById('sidebar'),
+    sidebarOverlay: document.getElementById('sidebarOverlay'),
 };
 
 // ============================================
@@ -134,6 +138,30 @@ function setupEventListeners() {
     elements.btnCloseTranscript.addEventListener('click', () => {
         elements.transcriptPanel.classList.remove('visible');
     });
+    
+    // Mobile menu toggle
+    if (elements.btnMobileMenu) {
+        elements.btnMobileMenu.addEventListener('click', toggleMobileSidebar);
+    }
+    if (elements.sidebarOverlay) {
+        elements.sidebarOverlay.addEventListener('click', closeMobileSidebar);
+    }
+}
+
+// ============================================
+// Mobile Sidebar
+// ============================================
+
+function toggleMobileSidebar() {
+    const isOpen = elements.sidebar.classList.toggle('open');
+    elements.sidebarOverlay.classList.toggle('visible', isOpen);
+    document.body.style.overflow = isOpen ? 'hidden' : '';
+}
+
+function closeMobileSidebar() {
+    elements.sidebar.classList.remove('open');
+    elements.sidebarOverlay.classList.remove('visible');
+    document.body.style.overflow = '';
 }
 
 // ============================================
@@ -476,6 +504,9 @@ function updateDuration() {
 
 function playEpisode(episode) {
     state.currentEpisode = episode;
+    
+    // Close mobile sidebar when episode is selected
+    closeMobileSidebar();
     
     // Update UI
     updateNowPlaying(episode);
