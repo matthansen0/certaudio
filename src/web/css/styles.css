@@ -172,6 +172,12 @@ body {
         grid-template-columns: 1fr;
     }
     
+    /* Player section takes full width on mobile */
+    .player-section {
+        width: 100%;
+        min-height: auto;
+    }
+    
     /* Show mobile menu button */
     .btn-mobile-menu {
         display: block;
