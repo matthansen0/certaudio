@@ -172,11 +172,29 @@ def synthesize_audio_segments(
         temp_paths.append(part_path)
         total_duration += dur
 
-    # Concatenate MP3 parts. MP3 frames are typically concat-safe when encoded consistently.
+    def _strip_id3_tags(data: bytes) -> bytes:
+        """Remove ID3v2 (start) and ID3v1 (end) tags from MP3 data."""
+        if len(data) >= 10 and data[:3] == b"ID3":
+            # ID3v2 header: bytes 6-9 is a synchsafe size (7 bits each)
+            size_bytes = data[6:10]
+            tag_size = (
+                (size_bytes[0] & 0x7F) << 21
+                | (size_bytes[1] & 0x7F) << 14
+                | (size_bytes[2] & 0x7F) << 7
+                | (size_bytes[3] & 0x7F)
+            )
+            data = data[10 + tag_size :]
+
+        if len(data) >= 128 and data[-128:-125] == b"TAG":
+            data = data[:-128]
+
+        return data
+
+    # Concatenate MP3 parts, stripping tags to avoid audible artifacts between segments.
     with open(output_path, "wb") as out_f:
         for p in temp_paths:
             with open(p, "rb") as in_f:
-                out_f.write(in_f.read())
+                out_f.write(_strip_id3_tags(in_f.read()))
 
     for p in temp_paths:
         try:
