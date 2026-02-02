@@ -759,8 +759,12 @@ def process_skill_domain(
 TTS_MAX_WORKERS = int(os.environ.get("TTS_MAX_WORKERS", "10"))
 
 
-def split_narration_for_tts(narration: str, max_words_per_segment: int = 850) -> list[str]:
-    """Split narration into segments to keep each TTS request under the Speech service limit."""
+def split_narration_for_tts(narration: str, max_words_per_segment: int = 1400) -> list[str]:
+    """Split narration into segments to keep each TTS request under the Speech service limit.
+
+    Note: this affects only audio synthesis chunking. It does NOT change narration generation
+    or transcript length.
+    """
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n", narration) if p.strip()]
     segments: list[str] = []
     current: list[str] = []
@@ -791,7 +795,14 @@ def synthesize_audio_with_chunking(
     """Synthesize audio, splitting into multiple Speech requests when narration is long."""
     # If the SSML is already short, use the simple path.
     narration_words = len(narration.split())
-    if narration_words <= 900:
+    single_request_max_words = int(os.environ.get("TTS_SINGLE_REQUEST_MAX_WORDS", "1600"))
+    max_words_per_segment = int(os.environ.get("TTS_MAX_WORDS_PER_SEGMENT", "1400"))
+
+    # Clamp segment size so we don't accidentally create segments larger than the single-request threshold.
+    if max_words_per_segment > single_request_max_words:
+        max_words_per_segment = single_request_max_words
+
+    if narration_words <= single_request_max_words:
         return synthesize_audio(
             ssml_content=ssml,
             episode_number=episode_number,
@@ -799,7 +810,7 @@ def synthesize_audio_with_chunking(
             audio_format=audio_format,
         )
 
-    segments = split_narration_for_tts(narration)
+    segments = split_narration_for_tts(narration, max_words_per_segment=max_words_per_segment)
     ssml_segments = [build_ssml_from_narration(seg, audio_format) for seg in segments]
 
     # Build output path consistent with synthesize_audio.
