@@ -872,6 +872,11 @@ jobs:
 
           # Combined discovery tends to produce broad coverage; keep a stable minimum.
           export MIN_WORDS_PER_PART=1200
+
+          # TTS chunking thresholds (audio-only). These do NOT affect narration/transcript length.
+          # Keep single-request synthesis under ~10 minutes; 1600 words is a practical upper bound.
+          export TTS_SINGLE_REQUEST_MAX_WORDS=1600
+          export TTS_MAX_WORDS_PER_SEGMENT=1400
           
           # Build command with optional --force-regenerate flag
           REGEN_FLAG=""
