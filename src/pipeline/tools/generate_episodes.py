@@ -388,6 +388,11 @@ def generate_ssml(
     )
 
 
+def _is_dragon_hd_voice(voice_name: str) -> bool:
+    """Check if a voice is a Dragon HD voice (which has SSML compatibility issues)."""
+    return "DragonHD" in voice_name or ":Dragon" in voice_name
+
+
 def build_ssml_from_narration(
     narration: str,
     audio_format: str,
@@ -395,24 +400,41 @@ def build_ssml_from_narration(
     podcast_host_voice: str = "en-US-GuyNeural",
     podcast_expert_voice: str = "en-US-TonyNeural",
 ) -> str:
-    """Generate conservative, Speech-compatible SSML from plain narration text."""
+    """Generate conservative, Speech-compatible SSML from plain narration text.
+    
+    Note: Dragon HD voices have compatibility issues with prosody rate and break tags,
+    so we use simplified SSML for those voices.
+    """
+    
+    # Check if any voice is Dragon HD
+    is_dragon_hd = (
+        _is_dragon_hd_voice(instructional_voice) or
+        _is_dragon_hd_voice(podcast_host_voice) or
+        _is_dragon_hd_voice(podcast_expert_voice)
+    )
 
-    def _normalize_text(text: str) -> str:
+    def _normalize_text(text: str, use_breaks: bool = True) -> str:
         # Remove speaker markers if they appear in instructional.
         text = text.replace("[HOST]", "").replace("[EXPERT]", "")
-        # Convert blank lines into slightly longer pauses.
         lines = [ln.rstrip() for ln in text.splitlines()]
         out_parts: list[str] = []
         for ln in lines:
             if not ln.strip():
-                out_parts.append('<break time="300ms"/>')
+                # For Dragon HD, skip break tags entirely; use space instead
+                if use_breaks:
+                    out_parts.append('<break time="300ms"/>')
                 continue
             # Escape the line FIRST to handle special characters, then replace [PAUSE]
             escaped_ln = escape(ln)
             # Now convert [PAUSE] markers to SSML break tags (after escaping)
-            escaped_ln = escaped_ln.replace("[PAUSE]", '<break time="500ms"/>')
+            # For Dragon HD, just remove them
+            if use_breaks:
+                escaped_ln = escaped_ln.replace("[PAUSE]", '<break time="500ms"/>')
+            else:
+                escaped_ln = escaped_ln.replace("[PAUSE]", "")
             out_parts.append(escaped_ln)
-            out_parts.append('<break time="200ms"/>')
+            if use_breaks:
+                out_parts.append('<break time="200ms"/>')
         return " ".join(out_parts).strip()
 
     speak_open = (
@@ -442,9 +464,10 @@ def build_ssml_from_narration(
             if not tok.strip():
                 continue
             voice = host_voice if current == "HOST" else expert_voice
-            inner = _normalize_text(tok)
-            # Apply same prosody rate to both voices for consistency
-            inner = f'<prosody rate="-5%">{inner}</prosody>'
+            inner = _normalize_text(tok, use_breaks=not is_dragon_hd)
+            # Skip prosody rate for Dragon HD voices - causes audio artifacts
+            if not is_dragon_hd:
+                inner = f'<prosody rate="-5%">{inner}</prosody>'
             chunks.append(f'<voice name="{voice}">{inner}</voice>')
 
         ssml = speak_open + " ".join(chunks) + speak_close
@@ -453,9 +476,10 @@ def build_ssml_from_narration(
 
     # Instructional: single voice using the selected neural voice.
     voice = instructional_voice
-    inner = _normalize_text(narration)
-    # Apply slight rate reduction for clarity and comprehension
-    inner = f'<prosody rate="-5%">{inner}</prosody>'
+    inner = _normalize_text(narration, use_breaks=not is_dragon_hd)
+    # Skip prosody rate for Dragon HD voices - causes audio artifacts
+    if not is_dragon_hd:
+        inner = f'<prosody rate="-5%">{inner}</prosody>'
     ssml = speak_open + f'<voice name="{voice}">{inner}</voice>' + speak_close
     ET.fromstring(ssml)  # validate
     return ssml
