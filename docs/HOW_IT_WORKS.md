@@ -49,10 +49,11 @@ Microsoft Learn → Discovery → RAG Index → AI Narration → Text-to-Speech 
 ├───────────────┤           ├─────────────────┤           ├─────────────────┤
 │ • OpenAI      │           │ • Cosmos DB     │           │ • Static Web    │
 │ • AI Search*  │◄─────────►│   (metadata)    │◄─────────►│   Apps          │
-│ • Speech      │           │ • Blob Storage  │           │ • Functions API │
-└───────────────┘           │   (audio files) │           └─────────────────┘
-                            └─────────────────┘
-                              * Deployed only during generation
+│ • AI Foundry* │           │ • Blob Storage  │           │ • Functions API │
+│ • Speech      │           │   (audio files) │           └─────────────────┘
+└───────────────┘           └─────────────────┘
+                              * AI Search deployed only during generation
+                              * AI Foundry deployed only with Study Partner
 ```
 
 ---
@@ -102,6 +103,93 @@ Here's the thing about Azure OpenAI: GPT-4o isn't available everywhere. We use `
 **🎓 Learn More**:
 - [Azure OpenAI Model Availability](https://learn.microsoft.com/en-us/azure/ai-services/openai/concepts/models#model-summary-table-and-region-availability)
 - [Quotas and limits](https://learn.microsoft.com/en-us/azure/ai-services/openai/quotas-limits)
+
+---
+
+#### Azure AI Foundry (Optional - Study Partner)
+
+**File**: [`infra/modules/ai-foundry.bicep`](../infra/modules/ai-foundry.bicep)
+
+**What We Deployed** (when `enableStudyPartner=true`):
+- AIServices account with `allowProjectManagement: true`
+- AI Foundry Project (`study-partner`) with System-assigned Managed Identity
+- GPT-4o model deployment (`GlobalStandard`, 30K TPM)
+- Project connections to CosmosDB, Storage, and AI Search
+
+**Why AI Foundry (not direct OpenAI calls)**:
+
+The Study Partner feature uses AI Foundry's **Agent Service** rather than direct OpenAI API calls. Here's why:
+
+1. **Built-in tool orchestration** - Agents can use tools (like Azure AI Search) natively
+2. **Conversation threads** - SDK manages conversation state automatically
+3. **Grounding** - Native integration with Azure AI Search for RAG
+4. **Enterprise features** - Content filtering, logging, responsible AI controls
+
+**Architecture**:
+```
+User Query
+    │
+    ▼
+┌───────────────────────────────────────────────────┐
+│              Azure Functions                       │
+│  POST /api/chat                                   │
+│    └─► AIProjectClient (azure-ai-projects SDK)   │
+│         └─► agents.create_and_run_agent()        │
+└───────────────────────────────────────────────────┘
+                    │
+                    ▼
+┌───────────────────────────────────────────────────┐
+│           AI Foundry Project                       │
+│  ┌─────────────────────────────────────────────┐  │
+│  │              GPT-4o Agent                   │  │
+│  │  Instructions: Certification exam prep      │  │
+│  │  Model: gpt-4o                              │  │
+│  │  Tools: [AzureAISearchTool]                 │  │
+│  └─────────────────────────────────────────────┘  │
+│                    │                              │
+│                    ▼                              │
+│  ┌─────────────────────────────────────────────┐  │
+│  │         Azure AI Search Tool                │  │
+│  │  Index: certification-content               │  │
+│  │  Connection: via project connection         │  │
+│  └─────────────────────────────────────────────┘  │
+└───────────────────────────────────────────────────┘
+```
+
+**Key Settings You Should Know**:
+
+| Parameter | Value | Why |
+|-----------|-------|-----|
+| `foundryLocation` | `swedencentral` | Full AI Foundry feature support |
+| `kind: AIServices` | Multi-service | Enables project management |
+| `allowProjectManagement` | `true` | Required for Foundry projects |
+| `model: gpt-4o` | GlobalStandard | Matches core OpenAI deployment |
+
+**Project Connections**:
+The AI Foundry project has connections to existing resources:
+
+| Connection | Resource | Purpose |
+|------------|----------|---------|
+| CosmosDB | `certaudio-dev-cosmos-*` | Thread storage (agent conversations) |
+| Storage | `certaudiodevst*` | File storage (agent attachments) |
+| AI Search | `certaudio-dev-search-*` | Vector store for RAG retrieval |
+
+**Tradeoffs**:
+- ❌ Adds ~$80/month (primarily AI Search Basic tier)
+- ❌ Requires supported region for Foundry (swedencentral)
+- ✅ Native tool integration is cleaner than manual RAG orchestration
+- ✅ Managed conversation threads simplify state management
+- ✅ Enterprise-grade with built-in responsible AI controls
+
+**Implementation Notes**:
+- The capability hosts (for agent capabilities) are disabled in Bicep due to Azure preview API issues
+- The `azure-ai-projects` SDK can create agents without explicit capability hosts
+- Functions app has fallback logic: tries Foundry Agent first, falls back to OpenAI+RAG if unavailable
+
+**🎓 Learn More**:
+- [Azure AI Foundry Overview](https://learn.microsoft.com/en-us/azure/ai-studio/what-is-ai-studio)
+- [Azure AI Projects SDK](https://learn.microsoft.com/en-us/python/api/overview/azure/ai-projects-readme)
+- [Standard Agent Setup](https://learn.microsoft.com/en-us/azure/ai-services/agents/quickstart)
 
 ---
 

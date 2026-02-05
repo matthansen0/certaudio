@@ -4,6 +4,7 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 
 ## Recent Implementation Notes (Post v1 Plan)
 
+- **Study Partner (AI Foundry Agent)**: Optional feature that deploys Azure AI Foundry with a GPT-4o agent for interactive exam prep chat. Enable via `enableStudyPartner=true` in workflow or Bicep params. Adds ~$80/month (primarily AI Search Basic). See [Study Partner section in README](../README.md#study-partner-optional).
 - **Discovery Strategy (Combined)**: Content generation always uses the combined strategy (learning paths **plus** exam skills outline) for full coverage. See [docs/CONTENT_DISCOVERY.md](../docs/CONTENT_DISCOVERY.md) for details.
 - **Hierarchy API for URLs**: Unit URLs are fetched from `/api/hierarchy/modules/{uid}` because the catalog API doesn't provide actual URLs, and URL patterns can be non-sequential (e.g., `3b-optimize` instead of `4-optimize`).
 - **Voice Selection**: Generate Content workflow allows choosing voices for instructional, podcast host, and podcast expert formats from 11 Azure Neural voices.
@@ -31,6 +32,45 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 - **Local Development**: Use `./scripts/run-local.sh` to run content generation from the dev container. Uses `az login` credentials and handles ephemeral Search service lifecycle.
 
 ## Agents
+
+### study-partner
+
+**Scope**: `src/functions/function_app.py` (chat endpoint), `infra/modules/ai-foundry.bicep`
+
+**Description**: AI-powered conversational study partner using Azure AI Foundry Agent Service.
+
+**Responsibilities**:
+- Provide interactive Q&A for certification exam preparation
+- Use RAG (Retrieval-Augmented Generation) to ground answers in indexed exam content
+- Create and manage AI agents with Azure AI Foundry SDK
+- Handle conversation threads for contextual follow-up questions
+- Gracefully fall back to direct OpenAI+RAG if Foundry unavailable
+
+**Key Files**:
+- `src/functions/function_app.py` - Chat API endpoint (`/api/chat`)
+- `infra/modules/ai-foundry.bicep` - AI Foundry infrastructure
+- `src/web/js/study.js` - Study Partner frontend UI
+
+**Context**:
+- Deployed conditionally via `enableStudyPartner=true` parameter
+- Uses Azure AI Foundry's Standard Agent Setup (no BYO storage)
+- Agent has an Azure AI Search tool configured for RAG retrieval
+- GPT-4o model (GlobalStandard, 30K TPM) deployed to the Foundry account
+- Connections to CosmosDB, Storage, and AI Search for agent capabilities
+
+**Agent Configuration**:
+- Model: `gpt-4o` (version 2024-11-20)
+- Instructions: Certification exam prep specialist with concise, accurate answers
+- Tool: Azure AI Search for retrieving relevant exam content
+- Threads: Managed per-conversation for context retention
+
+**Auth & Access**:
+- Functions app uses Managed Identity to authenticate to AI Foundry
+- AI Foundry Project has its own Managed Identity for resource access
+- Function identity granted `Cognitive Services User` on Foundry account
+- Project identity granted roles on CosmosDB, Storage, and AI Search
+
+---
 
 ### content-pipeline
 
@@ -128,6 +168,7 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 - `infra/main.bicep` - Orchestrator module
 - `infra/main.bicepparam` - Parameter file
 - `infra/modules/ai-services.bicep` - OpenAI, Speech, Doc Intel, AI Search
+- `infra/modules/ai-foundry.bicep` - AI Foundry account, project, connections (conditional)
 - `infra/modules/data.bicep` - Cosmos DB, Storage Account
 - `infra/modules/web.bicep` - Static Web Apps, Functions
 - `infra/modules/identity.bicep` - B2C (conditional)
@@ -138,7 +179,7 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 **Context**:
 - All resources prefer Managed Identity for authentication
 - Storage accounts have public access disabled
-- Parameters: `certificationId`, `audioFormat`, `enableB2C`, `location`
+- Parameters: `certificationId`, `audioFormat`, `enableB2C`, `enableStudyPartner`, `location`, `foundryLocation`
 
 **Keyless storage + RBAC**:
 - Functions runtime storage (`AzureWebJobsStorage`) is configured with `AzureWebJobsStorage__credential=managedidentity` and service URIs, and the Functions identity is granted:

@@ -9,6 +9,7 @@ A fully automated Azure-native system that generates podcast-style or instructio
 - 🎙️ **Two formats**: Instructional (single authoritative voice) or Podcast (two-voice dialogue)
 - 🔄 **Amendment episodes** when Microsoft updates exam content
 - 📊 **Progress tracking** with optional Azure AD B2C authentication
+- 🤖 **AI Study Partner** (optional) - Chat with an AI agent that has RAG access to exam content
 - 🚀 **One-click deployment** with Bicep IaC
 
 ## Supported Certifications
@@ -317,6 +318,64 @@ cd src/pipeline
 pip install -r requirements.txt
 python -m tools.discover_exam_content --certification-id ai-102
 ```
+
+## Study Partner (Optional)
+
+The **Study Partner** feature adds an AI-powered chat interface for interactive exam preparation. When enabled, it deploys:
+
+- **Azure AI Foundry** - Account with project for agent orchestration
+- **Azure AI Search** (Basic tier) - Persistent vector store for RAG
+- **GPT-4o Agent** - Conversational AI with access to indexed exam content
+
+### Enabling Study Partner
+
+1. **Via GitHub Actions** (recommended):
+   - Go to Actions → Deploy Infrastructure
+   - Click "Run workflow"
+   - Check "Enable Study Partner" checkbox
+   - Click "Run workflow"
+
+2. **Via Azure CLI**:
+   ```bash
+   az deployment group create \
+     --resource-group rg-certaudio-dev \
+     --template-file infra/main.bicep \
+     --parameters enableStudyPartner=true
+   ```
+
+### Study Partner Architecture
+
+```
+┌──────────────────┐     ┌─────────────────────────────────────────────┐
+│   Web Frontend   │────►│              Azure Functions                │
+│  (Study Partner  │     │  /api/chat → AI Foundry Agent SDK           │
+│      Tab)        │     └──────────────────┬──────────────────────────┘
+└──────────────────┘                        │
+                                            ▼
+                              ┌─────────────────────────────┐
+                              │     Azure AI Foundry        │
+                              │  ┌───────────────────────┐  │
+                              │  │   Study Partner       │  │
+                              │  │      Project          │  │
+                              │  │  ┌─────────────────┐  │  │
+                              │  │  │   GPT-4o Agent  │  │  │
+                              │  │  │  + Search Tool  │──┼──┼──► AI Search
+                              │  │  └─────────────────┘  │  │   (RAG Index)
+                              │  └───────────────────────┘  │
+                              └─────────────────────────────┘
+```
+
+### Additional Cost (when enabled)
+
+| Service | Estimated Cost |
+|---------|---------------|
+| Azure AI Search (Basic) | ~$75/month |
+| Azure AI Foundry | ~$5-10/month (usage-based) |
+| **Study Partner Add-on** | **~$80-85/month** |
+
+> **Note**: Study Partner is disabled by default due to the additional monthly cost.
+
+---
 
 ## Cost Estimation
 
