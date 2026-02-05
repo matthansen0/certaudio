@@ -303,6 +303,22 @@ The local runner:
 3. Runs the full pipeline: discover → index → generate
 4. Cleans up the Search service when done
 
+### Index Content for Study Partner (No Audio)
+
+To populate the Study Partner's search index without generating audio (saves TTS tokens):
+
+```bash
+# Index a single certification into the shared Study Partner index
+./scripts/index-content.sh dp-700 certification-content
+./scripts/index-content.sh ai-102 certification-content
+./scripts/index-content.sh ab-731 certification-content
+
+# Index into a per-cert index (for later audio generation)
+./scripts/index-content.sh dp-700
+```
+
+This script runs discovery and indexing only - no TTS or audio generation.
+
 ### Run the Web App
 
 ```bash

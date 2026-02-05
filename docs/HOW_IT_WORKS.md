@@ -768,6 +768,19 @@ FORCE_REGENERATE=true ./scripts/run-local.sh dp-700
 
 The local runner uses `az login` credentials via `DefaultAzureCredential`, which persists for hours/days instead of the 5-minute OIDC tokens used in workflows.
 
+**Index Content Only (No Audio)**:
+
+If you just want to populate the Study Partner's search index without generating audio (saves TTS tokens):
+
+```bash
+# Index into the shared Study Partner index
+./scripts/index-content.sh dp-700 certification-content
+./scripts/index-content.sh ai-102 certification-content
+
+# Index into per-cert index (for later audio generation)
+./scripts/index-content.sh dp-700
+```
+
 ---
 
 ## Customization Guide

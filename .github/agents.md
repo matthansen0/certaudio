@@ -30,6 +30,7 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 - **Auto-resolved endpoints**: Generate Content workflow no longer requires endpoint secrets; it resolves them at runtime via [scripts/get-endpoints.sh](../scripts/get-endpoints.sh), which picks the newest (or pinned) deployment suffix.
 - **Workflow triggers**: Deploy Infrastructure triggers on `infra/**`, `src/web/**`, `src/functions/**`, or workflow file changes. Content generation is manual via `workflow_dispatch`.
 - **Local Development**: Use `./scripts/run-local.sh` to run content generation from the dev container. Uses `az login` credentials and handles ephemeral Search service lifecycle.
+- **Study Partner Indexing**: Use `./scripts/index-content.sh <cert-id> certification-content` to index exam content for Study Partner without generating audio (saves TTS tokens).
 
 ## Agents
 
