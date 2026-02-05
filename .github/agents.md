@@ -7,7 +7,8 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 - **Discovery Strategy (Combined)**: Content generation always uses the combined strategy (learning paths **plus** exam skills outline) for full coverage. See [docs/CONTENT_DISCOVERY.md](../docs/CONTENT_DISCOVERY.md) for details.
 - **Hierarchy API for URLs**: Unit URLs are fetched from `/api/hierarchy/modules/{uid}` because the catalog API doesn't provide actual URLs, and URL patterns can be non-sequential (e.g., `3b-optimize` instead of `4-optimize`).
 - **Voice Selection**: Generate Content workflow allows choosing voices for instructional, podcast host, and podcast expert formats from 11 Azure Neural voices.
-- **Dragon HD Voices**: Azure Speech Dragon HD voices (e.g., `en-US-AndrewMultilingualNeural`) are only available in **eastus**, **westeurope**, and **southeastasia** regions. The Speech service is deployed to eastus to enable HD voice support.
+- **Dragon HD Voices**: Azure Speech Dragon HD voices (e.g., `en-US-Andrew:DragonHDLatestNeural`) are only available in **eastus**, **westeurope**, and **southeastasia** regions. The Speech service is deployed to eastus to enable HD voice support.
+- **Dragon HD SSML Compatibility**: Dragon HD voices produce **audio clicking/popping artifacts** when SSML contains `<prosody rate>` wrappers with `<break>` tags inside. The `generate_episodes.py` tool detects Dragon HD voices (by `:DragonHDLatestNeural` suffix) and generates simplified SSML without rate adjustments or break elements. Standard Neural voices work fine with the full SSML features.
 - **Episode Resumption**: Episodes that already exist in Cosmos DB are skipped by default. Use `forceRegenerate=true` to regenerate all episodes (e.g., after changing voices).
 - **Longer Episodes**: Target episode length is 2,500-3,500 words (~20-25 minutes) for comprehensive coverage.
 - **No Markdown in Narration**: Prompts explicitly prohibit markdown to prevent TTS from saying "hashtag" for headers.
@@ -62,7 +63,8 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 - Uses Azure OpenAI GPT-4o for script generation
 - Uses Azure AI Speech with configurable neural voices (default: `en-US-AndrewNeural`)
 - Target episode length: ~20-25 minutes (~2,500-3,500 words)
-- SSML includes 500ms pauses after key concepts, -8% rate for comprehension
+- SSML for standard Neural voices: 500ms breaks after key concepts, -5% rate for comprehension
+- SSML for Dragon HD voices: simplified (no prosody rate, no breaks) to avoid audio artifacts
 - Retry with exponential backoff for OpenAI rate limits (429 errors)
 
 **Auth & Access (no keys)**:
