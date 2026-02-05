@@ -175,7 +175,7 @@ jobs:
 
             # Determine enableStudyPartner value
             # For workflow_dispatch, use the input; for push events, use default (false)
-            if [[ "$ENABLE_STUDY_PARTNER" == "true" ]]; then
+            if [[ "${ENABLE_STUDY_PARTNER:-false}" == "true" ]]; then
               enableStudyPartner="true"
             else
               enableStudyPartner="false"
