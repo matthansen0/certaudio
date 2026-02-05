@@ -196,15 +196,26 @@ def index_content(
     search_endpoint: str,
     openai_endpoint: str,
     update_mode: bool = False,
+    index_name: Optional[str] = None,
 ) -> None:
-    """Index content from source URLs into Azure AI Search."""
+    """Index content from source URLs into Azure AI Search.
+    
+    Args:
+        certification_id: Certification ID
+        source_urls: List of URLs to index
+        search_endpoint: Azure AI Search endpoint
+        openai_endpoint: Azure OpenAI endpoint
+        update_mode: If True, update existing index instead of recreating
+        index_name: Custom index name (default: {certification_id}-content)
+    """
 
     token_credential = DefaultAzureCredential()
     search_admin_key = os.environ.get("SEARCH_ADMIN_KEY")
     search_credential = AzureKeyCredential(search_admin_key) if search_admin_key else token_credential
     
     # Initialize clients
-    index_name = f"{certification_id}-content"
+    if not index_name:
+        index_name = f"{certification_id}-content"
     
     index_client = SearchIndexClient(
         endpoint=search_endpoint,
@@ -308,6 +319,10 @@ def main():
         default=False,
         help="Update existing index instead of recreating",
     )
+    parser.add_argument(
+        "--index-name",
+        help="Custom index name (default: {certification-id}-content)",
+    )
     
     args = parser.parse_args()
     
@@ -327,6 +342,7 @@ def main():
         search_endpoint=search_endpoint,
         openai_endpoint=openai_endpoint,
         update_mode=args.update_mode,
+        index_name=args.index_name,
     )
 
 

@@ -96,10 +96,37 @@ def _normalize_episode_id(episode_num: str) -> str:
 def _format_cert_name(cert_id: str) -> str:
     # Basic display name helper. Prefer a curated map when present.
     curated = {
-        "ai-102": "AI-102: Azure AI Engineer",
-        "az-204": "AZ-204: Azure Developer",
-        "az-104": "AZ-104: Azure Administrator",
+        # Agentic AI
+        "ab-731": "AB-731: AI Transformation Leader",
+        "ab-100": "AB-100: Agentic AI Business Solutions Architect",
+        # Azure
         "az-900": "AZ-900: Azure Fundamentals",
+        "az-104": "AZ-104: Azure Administrator",
+        "az-204": "AZ-204: Azure Developer",
+        "az-305": "AZ-305: Azure Solutions Architect",
+        "az-400": "AZ-400: DevOps Engineer",
+        "az-500": "AZ-500: Azure Security Engineer",
+        "az-700": "AZ-700: Azure Network Engineer",
+        # AI & Data
+        "ai-900": "AI-900: Azure AI Fundamentals",
+        "ai-102": "AI-102: Azure AI Engineer",
+        "dp-900": "DP-900: Azure Data Fundamentals",
+        "dp-100": "DP-100: Azure Data Scientist",
+        "dp-203": "DP-203: Azure Data Engineer",
+        "dp-300": "DP-300: Azure Database Administrator",
+        "dp-600": "DP-600: Fabric Analytics Engineer",
+        "dp-700": "DP-700: Fabric Data Engineer",
+        # Security
+        "sc-900": "SC-900: Security Fundamentals",
+        "sc-100": "SC-100: Cybersecurity Architect",
+        "sc-200": "SC-200: Security Operations Analyst",
+        "sc-300": "SC-300: Identity Administrator",
+        "sc-400": "SC-400: Information Protection Admin",
+        # M365
+        "ms-900": "MS-900: Microsoft 365 Fundamentals",
+        "ms-102": "MS-102: Microsoft 365 Administrator",
+        "pl-900": "PL-900: Power Platform Fundamentals",
+        "pl-300": "PL-300: Power BI Data Analyst",
     }
     if not cert_id:
         return ""
