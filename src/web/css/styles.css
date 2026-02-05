@@ -94,6 +94,35 @@ body {
     color: var(--color-text);
 }
 
+/* Navigation Links */
+.nav-links {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.nav-link {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    border-radius: var(--radius-md);
+    color: var(--color-text-secondary);
+    text-decoration: none;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: all var(--transition-fast);
+}
+
+.nav-link:hover {
+    background: var(--color-bg);
+    color: var(--color-primary);
+}
+
+.nav-link.active {
+    background: var(--color-primary-light);
+    color: var(--color-primary);
+}
+
 /* Mobile menu button - hidden on desktop */
 .btn-mobile-menu {
     display: none;
@@ -813,6 +842,12 @@ body {
 /* ============================================
    Responsive
    ============================================ */
+@media (max-width: 768px) {
+    .nav-links {
+        display: none;
+    }
+}
+
 @media (max-width: 600px) {
     .header-content {
         flex-wrap: wrap;

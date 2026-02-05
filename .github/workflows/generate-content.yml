@@ -784,6 +784,48 @@ jobs:
             --certification-id "$CERTIFICATION_ID" \
             --source-urls "$SOURCE_URLS"
 
+      - name: Index content in persistent search (Study Partner)
+        env:
+          SOURCE_URLS: ${{ needs.discover-content.outputs.sourceUrls }}
+          CERTIFICATION_ID: ${{ inputs.certificationId }}
+        run: |
+          set -euo pipefail
+          
+          # Check if persistent search exists by looking for the resource
+          suffix="${{ secrets.AZURE_UNIQUE_SUFFIX }}"
+          if [[ -z "$suffix" ]]; then
+            echo "No AZURE_UNIQUE_SUFFIX configured, skipping persistent search"
+            exit 0
+          fi
+          
+          PERSISTENT_SEARCH_NAME="certaudio-dev-search-${suffix}"
+          
+          # Check if the persistent search service exists
+          exists=$(az search service show \
+            --name "$PERSISTENT_SEARCH_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query name -o tsv 2>/dev/null || echo "")
+          
+          if [[ -z "$exists" ]]; then
+            echo "ℹ️ Persistent search not deployed (Study Partner disabled)"
+            echo "   To enable: deploy with enableStudyPartner=true"
+            exit 0
+          fi
+          
+          echo "✅ Found persistent search: $PERSISTENT_SEARCH_NAME"
+          echo "   Indexing content for Study Partner RAG..."
+          
+          # Set endpoint for persistent search and re-run indexing
+          export SEARCH_ENDPOINT="https://${PERSISTENT_SEARCH_NAME}.search.windows.net"
+          
+          cd src/pipeline
+          python3 -m tools.index_content \
+            --certification-id "$CERTIFICATION_ID" \
+            --source-urls "$SOURCE_URLS" \
+            --update-mode true
+          
+          echo "✅ Content indexed in persistent search for Study Partner"
+
   generate-episodes:
     name: Generate Episodes
     runs-on: ubuntu-latest

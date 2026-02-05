@@ -24,6 +24,9 @@ param speechLocation string = 'eastus'
 @description('Optional AAD object ID of the automation principal (e.g., GitHub OIDC service principal) that runs content-generation workflows. If provided, it is granted Cosmos SQL Data Contributor at the database scope.')
 param automationPrincipalId string = ''
 
+@description('Enable Study Partner feature with persistent AI Search for RAG (~$75/month). When false, the Study Partner page shows "not deployed".')
+param enableStudyPartner bool = false
+
 // ============================================================================
 // VARIABLES
 // ============================================================================
@@ -66,6 +69,20 @@ module data 'modules/data.bicep' = {
   }
 }
 
+// Study Partner: Persistent AI Search for RAG queries (optional, ~$75/month)
+// Module is always called but resources are conditionally deployed based on enableStudyPartner
+module search 'modules/search-persistent.bicep' = {
+  name: 'deploy-search-persistent'
+  params: {
+    resourcePrefix: resourcePrefix
+    location: location
+    uniqueSuffix: uniqueSuffix
+    automationPrincipalId: automationPrincipalId
+    enabled: enableStudyPartner
+    tags: tags
+  }
+}
+
 // Web: Static Web Apps, Functions
 module web 'modules/web.bicep' = {
   name: 'deploy-web'
@@ -79,7 +96,7 @@ module web 'modules/web.bicep' = {
     automationPrincipalId: automationPrincipalId
     openAiEndpoint: aiServices.outputs.openAiEndpoint
     speechEndpoint: aiServices.outputs.speechEndpoint
-    searchEndpoint: aiServices.outputs.searchEndpoint
+    searchEndpoint: search.outputs.searchEndpoint
     tags: tags
   }
 }
@@ -98,8 +115,13 @@ output staticWebAppName string = web.outputs.staticWebAppName
 output staticWebAppUrl string = web.outputs.staticWebAppUrl
 output functionsAppName string = web.outputs.functionsAppName
 output funcStorageAccountName string = web.outputs.funcStorageAccountName
+output openAiName string = aiServices.outputs.openAiName
 output openAiEndpoint string = aiServices.outputs.openAiEndpoint
 output speechEndpoint string = aiServices.outputs.speechEndpoint
 output speechRegion string = aiServices.outputs.speechRegion
-output searchEndpoint string = aiServices.outputs.searchEndpoint
 output documentIntelligenceEndpoint string = aiServices.outputs.documentIntelligenceEndpoint
+
+// Study Partner outputs (conditional)
+output studyPartnerEnabled bool = enableStudyPartner
+output searchName string = search.outputs.searchName
+output searchEndpoint string = search.outputs.searchEndpoint

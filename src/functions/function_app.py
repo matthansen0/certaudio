@@ -517,3 +517,368 @@ def get_script(req: func.HttpRequest) -> func.HttpResponse:
             status_code=500,
             mimetype="application/json",
         )
+
+
+# =============================================================================
+# POST /api/chat - Study Partner AI Chat
+# =============================================================================
+
+# Rate limiting configuration
+RATE_LIMIT_REQUESTS = 50  # Max requests per window
+RATE_LIMIT_WINDOW_SECONDS = 3600  # 1 hour window
+
+# In-memory rate limit tracking (note: resets on function restart, not distributed)
+# Key: client_id, Value: list of request timestamps
+_rate_limit_cache: dict[str, list[float]] = {}
+
+
+def _get_client_id(req: func.HttpRequest) -> str:
+    """Get a client identifier for rate limiting."""
+    # Try X-Forwarded-For header (set by Azure Front Door / Static Web Apps)
+    forwarded_for = req.headers.get("X-Forwarded-For", "")
+    if forwarded_for:
+        # Take the first IP (client IP)
+        return forwarded_for.split(",")[0].strip()
+    
+    # Fallback to a session ID from the request body or a default
+    return "anonymous"
+
+
+def _check_rate_limit(client_id: str) -> tuple[bool, int, int]:
+    """
+    Check if the client is within rate limits.
+    
+    Returns:
+        (allowed, remaining_requests, reset_seconds)
+    """
+    import time
+    
+    now = time.time()
+    window_start = now - RATE_LIMIT_WINDOW_SECONDS
+    
+    # Get or create request history for this client
+    if client_id not in _rate_limit_cache:
+        _rate_limit_cache[client_id] = []
+    
+    # Remove old requests outside the window
+    _rate_limit_cache[client_id] = [
+        ts for ts in _rate_limit_cache[client_id] if ts > window_start
+    ]
+    
+    request_count = len(_rate_limit_cache[client_id])
+    remaining = max(0, RATE_LIMIT_REQUESTS - request_count)
+    
+    # Calculate reset time (when oldest request expires)
+    if _rate_limit_cache[client_id]:
+        oldest = min(_rate_limit_cache[client_id])
+        reset_seconds = int(oldest + RATE_LIMIT_WINDOW_SECONDS - now)
+    else:
+        reset_seconds = RATE_LIMIT_WINDOW_SECONDS
+    
+    if request_count >= RATE_LIMIT_REQUESTS:
+        return False, 0, reset_seconds
+    
+    # Record this request
+    _rate_limit_cache[client_id].append(now)
+    
+    return True, remaining - 1, reset_seconds
+
+
+# Cached OpenAI client
+_openai_client = None
+
+
+def get_openai_client():
+    """Get cached Azure OpenAI client using managed identity."""
+    global _openai_client
+    if _openai_client is None:
+        from openai import AzureOpenAI
+        from azure.identity import get_bearer_token_provider
+
+        endpoint = os.environ.get("OPENAI_ENDPOINT")
+        if not endpoint:
+            return None
+        token_provider = get_bearer_token_provider(
+            _get_credential(), "https://cognitiveservices.azure.com/.default"
+        )
+        _openai_client = AzureOpenAI(
+            azure_endpoint=endpoint,
+            azure_ad_token_provider=token_provider,
+            api_version="2024-06-01",
+        )
+    return _openai_client
+
+
+# Cached Search client
+_search_client = None
+
+
+def get_search_client(index_name: str):
+    """Get Azure AI Search client using managed identity."""
+    global _search_client
+    if _search_client is None:
+        from azure.search.documents import SearchClient
+
+        endpoint = os.environ.get("SEARCH_ENDPOINT")
+        if not endpoint:
+            return None
+        _search_client = SearchClient(
+            endpoint=endpoint,
+            index_name=index_name,
+            credential=_get_credential(),
+        )
+    return _search_client
+
+
+def search_content(cert_id: str, query: str, top_k: int = 5) -> list[dict]:
+    """Search the certification content index for relevant chunks."""
+    index_name = f"{cert_id}-content"
+    client = get_search_client(index_name)
+    if not client:
+        return []
+
+    try:
+        results = client.search(
+            search_text=query,
+            select=["content", "title", "url"],
+            top=top_k,
+        )
+        return [
+            {
+                "content": r.get("content", ""),
+                "title": r.get("title", ""),
+                "url": r.get("url", ""),
+            }
+            for r in results
+        ]
+    except Exception as e:
+        logger.warning(f"Search failed (index may not exist): {e}")
+        return []
+
+
+# Study Partner system prompt with RAG context
+STUDY_PARTNER_SYSTEM_PROMPT = """You are a friendly and knowledgeable Microsoft certification exam study partner.
+Your role is to help users prepare for their {certification} certification exam.
+
+{context_section}
+
+Your capabilities:
+- **Practice Test Mode**: When asked for a test, give 5 multiple-choice questions (A-D), wait for answers, then provide a score and explanations
+- **Quick Question**: Generate a single practice question with options, wait for the user's answer, then reveal the correct response with explanation
+- **Explain Concepts**: Break down complex Azure/Microsoft topics into understandable explanations  
+- **Compare Topics**: Help users understand differences between similar services or concepts (e.g., "What's the difference between X and Y?")
+- **Scenario Practice**: Create realistic exam-style scenario questions
+- **Clarify Confusion**: If someone says "I don't understand X", explain it step by step with examples
+
+Guidelines:
+- Be encouraging and supportive - exam prep can be stressful!
+- Keep explanations concise but thorough
+- Use real-world examples when helpful
+- **For practice tests**: Present all 5 questions together, numbered 1-5 with options A-D. Ask the user to reply with their answers (e.g., "1:A, 2:B, 3:C, 4:D, 5:A"). Then score them and explain each answer.
+- **For single questions**: Wait for the user's answer before revealing the correct response
+- Format responses with markdown for readability (use **bold**, bullet points, code blocks where appropriate)
+- If you're unsure about something, say so rather than guessing
+- When you have reference content, base your answers on it but explain in your own words
+- Focus on the official exam objectives and Microsoft Learn content
+
+Remember: You're a study partner, not just an information source. Engage conversationally and adapt to the user's learning style."""
+
+
+# =============================================================================
+# GET /api/chat/config - Study Partner Configuration
+# =============================================================================
+
+@app.route(
+    route="chat/config",
+    methods=["GET"],
+    auth_level=func.AuthLevel.ANONYMOUS,
+)
+def chat_config(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get Study Partner configuration (rate limits, etc.).
+    
+    Returns:
+        {"rateLimitPerHour": 50}
+    """
+    return func.HttpResponse(
+        json.dumps({
+            "rateLimitPerHour": RATE_LIMIT_REQUESTS,
+        }),
+        mimetype="application/json",
+    )
+
+
+def check_honeypot(body: dict) -> bool:
+    """
+    Check if honeypot field was filled (indicating bot).
+    
+    Returns True if request is suspicious (should be blocked).
+    """
+    hp_value = body.get("hp", "")
+    # If the honeypot field has any value, it's likely a bot
+    return bool(hp_value)
+
+
+@app.route(
+    route="chat",
+    methods=["POST"],
+    auth_level=func.AuthLevel.ANONYMOUS,
+)
+def chat(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    AI-powered study partner chat endpoint with RAG.
+    
+    Request body:
+        {
+            "certificationId": "az-104",
+            "message": "Quiz me on Azure AD",
+            "history": [{"role": "user", "content": "..."}, ...]
+        }
+    
+    Returns:
+        {"response": "AI response text", "rateLimit": {"remaining": N, "resetMinutes": M}}
+        or {"not_deployed": true, "message": "..."} if Study Partner is not enabled
+        or {"rate_limited": true, ...} if rate limit exceeded
+    """
+    # Check if Study Partner is deployed (requires SEARCH_ENDPOINT)
+    search_endpoint = os.environ.get("SEARCH_ENDPOINT", "").strip()
+    if not search_endpoint:
+        return func.HttpResponse(
+            json.dumps({
+                "not_deployed": True,
+                "message": "Study Partner is not enabled. Deploy with enableStudyPartner=true to use this feature."
+            }),
+            mimetype="application/json",
+        )
+
+    # Check rate limit
+    client_id = _get_client_id(req)
+    allowed, remaining, reset_seconds = _check_rate_limit(client_id)
+    
+    if not allowed:
+        reset_minutes = (reset_seconds + 59) // 60  # Round up
+        return func.HttpResponse(
+            json.dumps({
+                "rate_limited": True,
+                "message": f"Rate limit exceeded. Please wait {reset_minutes} minute{'s' if reset_minutes != 1 else ''} before trying again.",
+                "rateLimit": {
+                    "remaining": 0,
+                    "resetMinutes": reset_minutes,
+                    "limit": RATE_LIMIT_REQUESTS,
+                }
+            }),
+            status_code=429,
+            mimetype="application/json",
+        )
+
+    try:
+        body = req.get_json()
+    except ValueError:
+        return func.HttpResponse(
+            json.dumps({"error": "Invalid JSON body"}),
+            status_code=400,
+            mimetype="application/json",
+        )
+
+    # Check honeypot (bot detection)
+    if check_honeypot(body):
+        logger.warning(f"Honeypot triggered from {client_id}")
+        return func.HttpResponse(
+            json.dumps({
+                "error": "Request blocked.",
+                "verification_failed": True,
+            }),
+            status_code=403,
+            mimetype="application/json",
+        )
+
+    cert_id = body.get("certificationId", "").strip()
+    message = body.get("message", "").strip()
+    history = body.get("history", [])
+
+    if not message:
+        return func.HttpResponse(
+            json.dumps({"error": "Message is required"}),
+            status_code=400,
+            mimetype="application/json",
+        )
+
+    # Format certification name for the prompt
+    cert_name = _format_cert_name(cert_id) if cert_id else "Microsoft certification"
+
+    try:
+        client = get_openai_client()
+        if not client:
+            return func.HttpResponse(
+                json.dumps({"error": "OpenAI service not configured"}),
+                status_code=500,
+                mimetype="application/json",
+            )
+
+        # RAG: Search for relevant content
+        search_results = search_content(cert_id, message, top_k=5)
+        
+        # Build context section from search results
+        if search_results:
+            context_parts = ["Here is relevant content from Microsoft Learn that may help answer the question:\n"]
+            for i, r in enumerate(search_results, 1):
+                context_parts.append(f"**Source {i}**: {r['title']}")
+                context_parts.append(r['content'][:1500])  # Limit per chunk
+                context_parts.append("")
+            context_section = "\n".join(context_parts)
+        else:
+            context_section = "(No specific reference content found - answer based on your training knowledge)"
+
+        # Build messages array
+        messages = [
+            {
+                "role": "system",
+                "content": STUDY_PARTNER_SYSTEM_PROMPT.format(
+                    certification=cert_name,
+                    context_section=context_section,
+                ),
+            }
+        ]
+        
+        # Add conversation history (limit to last 10 for token efficiency)
+        for msg in history[-10:]:
+            if msg.get("role") in ("user", "assistant") and msg.get("content"):
+                messages.append({
+                    "role": msg["role"],
+                    "content": msg["content"],
+                })
+        
+        # Add current message (if not already in history)
+        if not history or history[-1].get("content") != message:
+            messages.append({"role": "user", "content": message})
+
+        # Call Azure OpenAI
+        response = client.chat.completions.create(
+            model="gpt-4o",  # Deployment name from ai-services.bicep
+            messages=messages,
+            max_tokens=1500,
+            temperature=0.7,
+        )
+
+        assistant_response = response.choices[0].message.content
+
+        reset_minutes = (reset_seconds + 59) // 60
+        return func.HttpResponse(
+            json.dumps({
+                "response": assistant_response,
+                "rateLimit": {
+                    "remaining": remaining,
+                    "resetMinutes": reset_minutes,
+                    "limit": RATE_LIMIT_REQUESTS,
+                }
+            }),
+            mimetype="application/json",
+        )
+
+    except Exception as e:
+        logger.error(f"Chat error: {e}")
+        return func.HttpResponse(
+            json.dumps({"error": "Failed to generate response. Please try again."}),
+            status_code=500,
+            mimetype="application/json",
+        )

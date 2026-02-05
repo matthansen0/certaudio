@@ -173,6 +173,15 @@ jobs:
               echo "Automation principal objectId: $automationPrincipalId"
             fi
 
+            # Determine enableStudyPartner value
+            # For workflow_dispatch, use the input; for push events, use default (false)
+            if [[ "$ENABLE_STUDY_PARTNER" == "true" ]]; then
+              enableStudyPartner="true"
+            else
+              enableStudyPartner="false"
+            fi
+            echo "Study Partner enabled: $enableStudyPartner"
+
             # Run deployment
             if ! az deployment group create \
               --name "$DEPLOYMENT_NAME" \
@@ -183,6 +192,7 @@ jobs:
                 location=$LOCATION \
                 openAiLocation=$OPENAI_LOCATION \
                 automationPrincipalId=$automationPrincipalId \
+                enableStudyPartner=$enableStudyPartner \
               --only-show-errors; then
               echo "::group::Deployment error (properties.error)"
               az deployment group show \
@@ -258,6 +268,28 @@ jobs:
             echo ""
             echo "=== Data Storage: $DATA_STORAGE_NAME ==="
             assign_role "$DATA_STORAGE_SCOPE" "$BLOB_READER" "Storage Blob Data Reader"
+            assign_role "$DATA_STORAGE_SCOPE" "$BLOB_DELEGATOR" "Storage Blob Delegator"
+            
+            # Azure OpenAI: Cognitive Services OpenAI User (for Study Partner chat)
+            OPENAI_USER="5e0bd9bd-7b93-4f28-af87-19fc36ad61bd"
+            OPENAI_NAME=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.openAiName.value" -o tsv)
+            OPENAI_SCOPE="/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.CognitiveServices/accounts/$OPENAI_NAME"
+            echo ""
+            echo "=== Azure OpenAI: $OPENAI_NAME ==="
+            assign_role "$OPENAI_SCOPE" "$OPENAI_USER" "Cognitive Services OpenAI User"
+            
+            # AI Search: Search Index Data Reader (for Study Partner RAG - only when enabled)
+            SEARCH_NAME=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.searchName.value" -o tsv 2>/dev/null || echo "")
+            if [[ -n "$SEARCH_NAME" ]]; then
+              SEARCH_INDEX_READER="1407120a-92aa-4202-b7e9-c0e197c71c8f"
+              SEARCH_SCOPE="/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.Search/searchServices/$SEARCH_NAME"
+              echo ""
+              echo "=== AI Search: $SEARCH_NAME ==="
+              assign_role "$SEARCH_SCOPE" "$SEARCH_INDEX_READER" "Search Index Data Reader"
+            else
+              echo ""
+              echo "=== AI Search: Not deployed (Study Partner disabled) ==="
+            fi
             
             # Cosmos DB: SQL Data Contributor
             echo ""
