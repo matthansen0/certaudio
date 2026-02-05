@@ -17,6 +17,10 @@ param openAiEndpoint string
 param speechEndpoint string
 @description('AI Search endpoint - optional since Search is deployed ephemerally during content generation')
 param searchEndpoint string = ''
+@description('AI Foundry endpoint - optional, enables agent mode when set')
+param foundryEndpoint string = ''
+@description('AI Foundry search connection name for agent')
+param foundrySearchConnection string = ''
 param tags object
 
 // ============================================================================
@@ -172,6 +176,19 @@ resource functionsApp 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'SEARCH_ENDPOINT'
           value: searchEndpoint
+        }
+        // AI Foundry Agent configuration
+        {
+          name: 'FOUNDRY_ENDPOINT'
+          value: foundryEndpoint
+        }
+        {
+          name: 'FOUNDRY_SEARCH_CONNECTION'
+          value: foundrySearchConnection
+        }
+        {
+          name: 'FOUNDRY_MODEL'
+          value: 'gpt-4o'
         }
         // Python v2 programming model requires worker indexing
         {

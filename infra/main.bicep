@@ -21,10 +21,14 @@ param openAiLocation string = 'eastus2'
 @allowed(['eastus', 'westeurope', 'southeastasia'])
 param speechLocation string = 'eastus'
 
+@description('Location for AI Foundry (Standard Agent Setup requires specific regions)')
+@allowed(['eastus', 'eastus2', 'westus', 'westus2', 'westus3', 'swedencentral', 'westeurope', 'southcentralus', 'canadaeast', 'australiaeast', 'uksouth'])
+param foundryLocation string = 'eastus'
+
 @description('Optional AAD object ID of the automation principal (e.g., GitHub OIDC service principal) that runs content-generation workflows. If provided, it is granted Cosmos SQL Data Contributor at the database scope.')
 param automationPrincipalId string = ''
 
-@description('Enable Study Partner feature with persistent AI Search for RAG (~$75/month). When false, the Study Partner page shows "not deployed".')
+@description('Enable Study Partner feature with AI Foundry Agent (~$75+/month for AI Search + agent infrastructure). When false, the Study Partner page shows "not deployed".')
 param enableStudyPartner bool = false
 
 // ============================================================================
@@ -69,7 +73,7 @@ module data 'modules/data.bicep' = {
   }
 }
 
-// Study Partner: Persistent AI Search for RAG queries (optional, ~$75/month)
+// Study Partner: AI Search for RAG queries (optional, ~$75/month)
 // Module is always called but resources are conditionally deployed based on enableStudyPartner
 module search 'modules/search-persistent.bicep' = {
   name: 'deploy-search-persistent'
@@ -79,6 +83,23 @@ module search 'modules/search-persistent.bicep' = {
     uniqueSuffix: uniqueSuffix
     automationPrincipalId: automationPrincipalId
     enabled: enableStudyPartner
+    tags: tags
+  }
+}
+
+// AI Foundry: Agent Service for Study Partner (optional)
+// Provides true AI agent capabilities with built-in tools for RAG
+// Must be deployed before web module so we can pass endpoints to Functions
+module aiFoundry 'modules/ai-foundry.bicep' = {
+  name: 'deploy-ai-foundry'
+  params: {
+    resourcePrefix: resourcePrefix
+    location: foundryLocation
+    uniqueSuffix: uniqueSuffix
+    enabled: enableStudyPartner
+    cosmosDbAccountName: data.outputs.cosmosDbAccountName
+    storageAccountName: data.outputs.storageAccountName
+    searchServiceName: search.outputs.searchName
     tags: tags
   }
 }
@@ -97,6 +118,8 @@ module web 'modules/web.bicep' = {
     openAiEndpoint: aiServices.outputs.openAiEndpoint
     speechEndpoint: aiServices.outputs.speechEndpoint
     searchEndpoint: search.outputs.searchEndpoint
+    foundryEndpoint: aiFoundry.outputs.foundryAccountEndpoint
+    foundrySearchConnection: aiFoundry.outputs.searchConnectionName
     tags: tags
   }
 }
@@ -125,3 +148,9 @@ output documentIntelligenceEndpoint string = aiServices.outputs.documentIntellig
 output studyPartnerEnabled bool = enableStudyPartner
 output searchName string = search.outputs.searchName
 output searchEndpoint string = search.outputs.searchEndpoint
+
+// AI Foundry outputs (conditional)
+output foundryAccountName string = aiFoundry.outputs.foundryAccountName
+output foundryProjectEndpoint string = aiFoundry.outputs.foundryAccountEndpoint
+output foundryModelDeployment string = aiFoundry.outputs.modelDeploymentName
+output foundryProjectPrincipalId string = aiFoundry.outputs.foundryProjectPrincipalId

@@ -609,6 +609,161 @@ def get_openai_client():
     return _openai_client
 
 
+# =============================================================================
+# AI FOUNDRY AGENT CLIENT
+# =============================================================================
+_ai_project_client = None
+_study_partner_agent = None
+
+
+def get_ai_project_client():
+    """Get cached AI Project client for AI Foundry."""
+    global _ai_project_client
+    if _ai_project_client is None:
+        foundry_endpoint = os.environ.get("FOUNDRY_ENDPOINT", "").strip()
+        if not foundry_endpoint:
+            return None
+        try:
+            from azure.ai.projects import AIProjectClient
+            _ai_project_client = AIProjectClient(
+                endpoint=foundry_endpoint,
+                credential=_get_credential(),
+            )
+            logger.info(f"AI Project client initialized: {foundry_endpoint}")
+        except Exception as e:
+            logger.error(f"Failed to initialize AI Project client: {e}")
+            return None
+    return _ai_project_client
+
+
+def get_or_create_agent():
+    """Get or create the Study Partner agent with AI Search tool."""
+    global _study_partner_agent
+    
+    if _study_partner_agent is not None:
+        return _study_partner_agent
+    
+    client = get_ai_project_client()
+    if not client:
+        return None
+    
+    try:
+        from azure.ai.projects.models import (
+            AzureAISearchTool,
+            AzureAISearchToolResource,
+        )
+        
+        # Get the search connection name from environment
+        search_connection = os.environ.get("FOUNDRY_SEARCH_CONNECTION", "").strip()
+        search_index = os.environ.get("FOUNDRY_SEARCH_INDEX", "certification-content").strip()
+        
+        # Configure AI Search tool
+        ai_search_tool = AzureAISearchTool(
+            index_connection_id=search_connection,
+            index_name=search_index,
+        ) if search_connection else None
+        
+        tools = [ai_search_tool] if ai_search_tool else []
+        
+        # Create or get the agent
+        _study_partner_agent = client.agents.create_agent(
+            model=os.environ.get("FOUNDRY_MODEL", "gpt-4o"),
+            name="study-partner",
+            instructions=AGENT_INSTRUCTIONS,
+            tools=tools,
+        )
+        logger.info(f"Created Study Partner agent: {_study_partner_agent.id}")
+        return _study_partner_agent
+    except Exception as e:
+        logger.error(f"Failed to create agent: {e}")
+        return None
+
+
+# Agent instructions (system prompt)
+AGENT_INSTRUCTIONS = """You are a friendly and knowledgeable Microsoft certification exam study partner.
+
+Your capabilities:
+- **Practice Test Mode**: Give 5 multiple-choice questions (A-D), wait for answers, then provide a score and explanations
+- **Quick Question**: Generate a single practice question with options, wait for the user's answer, then reveal the correct response
+- **Explain Concepts**: Break down complex Azure/Microsoft topics into understandable explanations
+- **Compare Topics**: Help users understand differences between similar services or concepts
+- **Scenario Practice**: Create realistic exam-style scenario questions
+
+Guidelines:
+- Be encouraging and supportive
+- Keep explanations concise but thorough
+- Use real-world examples when helpful
+- For practice tests: Present all 5 questions together, ask the user to reply with answers, then score and explain
+- Format responses with markdown for readability
+- When you have reference content from the search tool, cite your sources
+- Focus on official exam objectives and Microsoft Learn content
+
+You have access to a search tool that can find relevant Microsoft Learn documentation. Use it when users ask about specific topics."""
+
+
+def chat_with_agent(cert_id: str, message: str, history: list) -> str:
+    """Use AI Foundry Agent to respond to user message."""
+    client = get_ai_project_client()
+    agent = get_or_create_agent()
+    
+    if not client or not agent:
+        raise ValueError("AI Foundry Agent not available")
+    
+    # Create a new thread for this conversation
+    thread = client.agents.create_thread()
+    
+    try:
+        # Add conversation history to thread
+        for msg in history[-10:]:
+            if msg.get("role") in ("user", "assistant") and msg.get("content"):
+                client.agents.create_message(
+                    thread_id=thread.id,
+                    role=msg["role"],
+                    content=msg["content"],
+                )
+        
+        # Add context about the certification in the first user message
+        cert_name = _format_cert_name(cert_id) if cert_id else "Microsoft certification"
+        contextualized_message = f"[Context: User is studying for {cert_name}]\n\n{message}"
+        
+        # Add current message
+        client.agents.create_message(
+            thread_id=thread.id,
+            role="user",
+            content=contextualized_message,
+        )
+        
+        # Run the agent
+        run = client.agents.create_and_process_run(
+            thread_id=thread.id,
+            assistant_id=agent.id,
+        )
+        
+        if run.status != "completed":
+            logger.error(f"Agent run failed: {run.status} - {run.last_error}")
+            raise ValueError(f"Agent run failed: {run.status}")
+        
+        # Get the response messages
+        messages = client.agents.list_messages(thread_id=thread.id)
+        
+        # Find the assistant's response (most recent assistant message)
+        for msg in messages.data:
+            if msg.role == "assistant":
+                # Extract text content
+                for content in msg.content:
+                    if hasattr(content, 'text'):
+                        return content.text.value
+        
+        raise ValueError("No response from agent")
+        
+    finally:
+        # Clean up thread
+        try:
+            client.agents.delete_thread(thread.id)
+        except Exception:
+            pass
+
+
 # Cached Search client
 _search_client = None
 
@@ -726,7 +881,9 @@ def check_honeypot(body: dict) -> bool:
 )
 def chat(req: func.HttpRequest) -> func.HttpResponse:
     """
-    AI-powered study partner chat endpoint with RAG.
+    AI-powered study partner chat endpoint.
+    
+    Uses AI Foundry Agent when available, falls back to direct OpenAI + RAG.
     
     Request body:
         {
@@ -740,9 +897,12 @@ def chat(req: func.HttpRequest) -> func.HttpResponse:
         or {"not_deployed": true, "message": "..."} if Study Partner is not enabled
         or {"rate_limited": true, ...} if rate limit exceeded
     """
-    # Check if Study Partner is deployed (requires SEARCH_ENDPOINT)
+    # Check if Study Partner is deployed
+    # Either FOUNDRY_ENDPOINT (Agent) or SEARCH_ENDPOINT (RAG fallback) must be set
+    foundry_endpoint = os.environ.get("FOUNDRY_ENDPOINT", "").strip()
     search_endpoint = os.environ.get("SEARCH_ENDPOINT", "").strip()
-    if not search_endpoint:
+    
+    if not foundry_endpoint and not search_endpoint:
         return func.HttpResponse(
             json.dumps({
                 "not_deployed": True,
@@ -803,64 +963,18 @@ def chat(req: func.HttpRequest) -> func.HttpResponse:
             mimetype="application/json",
         )
 
-    # Format certification name for the prompt
-    cert_name = _format_cert_name(cert_id) if cert_id else "Microsoft certification"
-
     try:
-        client = get_openai_client()
-        if not client:
-            return func.HttpResponse(
-                json.dumps({"error": "OpenAI service not configured"}),
-                status_code=500,
-                mimetype="application/json",
-            )
-
-        # RAG: Search for relevant content
-        search_results = search_content(cert_id, message, top_k=5)
-        
-        # Build context section from search results
-        if search_results:
-            context_parts = ["Here is relevant content from Microsoft Learn that may help answer the question:\n"]
-            for i, r in enumerate(search_results, 1):
-                context_parts.append(f"**Source {i}**: {r['title']}")
-                context_parts.append(r['content'][:1500])  # Limit per chunk
-                context_parts.append("")
-            context_section = "\n".join(context_parts)
+        # Try AI Foundry Agent first if configured
+        if foundry_endpoint:
+            try:
+                assistant_response = chat_with_agent(cert_id, message, history)
+                logger.info("Response generated via AI Foundry Agent")
+            except Exception as agent_err:
+                logger.warning(f"AI Foundry Agent failed, falling back to OpenAI: {agent_err}")
+                assistant_response = chat_with_openai_rag(cert_id, message, history)
         else:
-            context_section = "(No specific reference content found - answer based on your training knowledge)"
-
-        # Build messages array
-        messages = [
-            {
-                "role": "system",
-                "content": STUDY_PARTNER_SYSTEM_PROMPT.format(
-                    certification=cert_name,
-                    context_section=context_section,
-                ),
-            }
-        ]
-        
-        # Add conversation history (limit to last 10 for token efficiency)
-        for msg in history[-10:]:
-            if msg.get("role") in ("user", "assistant") and msg.get("content"):
-                messages.append({
-                    "role": msg["role"],
-                    "content": msg["content"],
-                })
-        
-        # Add current message (if not already in history)
-        if not history or history[-1].get("content") != message:
-            messages.append({"role": "user", "content": message})
-
-        # Call Azure OpenAI
-        response = client.chat.completions.create(
-            model="gpt-4o",  # Deployment name from ai-services.bicep
-            messages=messages,
-            max_tokens=1500,
-            temperature=0.7,
-        )
-
-        assistant_response = response.choices[0].message.content
+            # Fall back to direct OpenAI + RAG
+            assistant_response = chat_with_openai_rag(cert_id, message, history)
 
         reset_minutes = (reset_seconds + 59) // 60
         return func.HttpResponse(
@@ -882,3 +996,60 @@ def chat(req: func.HttpRequest) -> func.HttpResponse:
             status_code=500,
             mimetype="application/json",
         )
+
+
+def chat_with_openai_rag(cert_id: str, message: str, history: list) -> str:
+    """Fallback: Use direct OpenAI + AI Search RAG."""
+    client = get_openai_client()
+    if not client:
+        raise ValueError("OpenAI service not configured")
+
+    # Format certification name for the prompt
+    cert_name = _format_cert_name(cert_id) if cert_id else "Microsoft certification"
+
+    # RAG: Search for relevant content
+    search_results = search_content(cert_id, message, top_k=5)
+    
+    # Build context section from search results
+    if search_results:
+        context_parts = ["Here is relevant content from Microsoft Learn that may help answer the question:\n"]
+        for i, r in enumerate(search_results, 1):
+            context_parts.append(f"**Source {i}**: {r['title']}")
+            context_parts.append(r['content'][:1500])  # Limit per chunk
+            context_parts.append("")
+        context_section = "\n".join(context_parts)
+    else:
+        context_section = "(No specific reference content found - answer based on your training knowledge)"
+
+    # Build messages array
+    messages = [
+        {
+            "role": "system",
+            "content": STUDY_PARTNER_SYSTEM_PROMPT.format(
+                certification=cert_name,
+                context_section=context_section,
+            ),
+        }
+    ]
+    
+    # Add conversation history (limit to last 10 for token efficiency)
+    for msg in history[-10:]:
+        if msg.get("role") in ("user", "assistant") and msg.get("content"):
+            messages.append({
+                "role": msg["role"],
+                "content": msg["content"],
+            })
+    
+    # Add current message (if not already in history)
+    if not history or history[-1].get("content") != message:
+        messages.append({"role": "user", "content": message})
+
+    # Call Azure OpenAI
+    response = client.chat.completions.create(
+        model="gpt-4o",  # Deployment name from ai-services.bicep
+        messages=messages,
+        max_tokens=1500,
+        temperature=0.7,
+    )
+
+    return response.choices[0].message.content

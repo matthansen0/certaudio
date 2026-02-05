@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       enableStudyPartner:
-        description: 'Enable Study Partner (deploys AI Search ~$75/mo)'
+        description: 'Enable Study Partner (deploys AI Search + AI Foundry agent, ~$75+/mo)'
         type: boolean
         default: false
 
@@ -32,6 +32,9 @@ env:
   LOCATION: 'centralus'
   # OpenAI location - separate region since centralus doesn't support GPT-4o GlobalStandard
   OPENAI_LOCATION: 'eastus'
+  # AI Foundry location - requires specific regions for Standard Agent Setup
+  # eastus is a supported region and matches OpenAI location
+  FOUNDRY_LOCATION: 'eastus'
   # Controls the resource-name suffix used by Bicep.
   # - Set secret AZURE_UNIQUE_SUFFIX to pin deployments to a single stable environment (recommended).
   # - If unset, falls back to github.run_id, which avoids name collisions but creates new resources every run.
@@ -199,6 +202,7 @@ jobs:
                 uniqueSuffix=$UNIQUE_SUFFIX \
                 location=$LOCATION \
                 openAiLocation=$OPENAI_LOCATION \
+                foundryLocation=${FOUNDRY_LOCATION:-eastus} \
                 automationPrincipalId=$automationPrincipalId \
                 enableStudyPartner=$enableStudyPartner \
               --only-show-errors; then
@@ -328,6 +332,89 @@ jobs:
             
             echo ""
             echo "=== Role assignment complete ==="
+
+      - name: Assign AI Foundry project role permissions
+        if: ${{ env.ENABLE_STUDY_PARTNER == 'true' }}
+        uses: azure/cli@v2
+        env:
+          DEPLOYMENT_NAME: certaudio-${{ github.run_id }}-${{ github.run_attempt }}
+        with:
+          inlineScript: |
+            set -euo pipefail
+            
+            echo "=== AI Foundry Role Assignments ==="
+            
+            # Get resource info from deployment outputs
+            FOUNDRY_NAME=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.foundryAccountName.value" -o tsv 2>/dev/null || echo "")
+            FOUNDRY_PROJECT_PRINCIPAL=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.foundryProjectPrincipalId.value" -o tsv 2>/dev/null || echo "")
+            COSMOS_NAME=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.cosmosDbAccountName.value" -o tsv)
+            DATA_STORAGE_NAME=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.storageAccountName.value" -o tsv)
+            SEARCH_NAME=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.searchName.value" -o tsv 2>/dev/null || echo "")
+            FUNC_APP_NAME=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.functionsAppName.value" -o tsv)
+            FOUNDRY_PROJECT_ID=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.foundryProjectEndpoint.value" -o tsv 2>/dev/null || echo "")
+            
+            if [[ -z "$FOUNDRY_NAME" || -z "$FOUNDRY_PROJECT_PRINCIPAL" ]]; then
+              echo "AI Foundry not deployed, skipping role assignments"
+              exit 0
+            fi
+            
+            echo "AI Foundry Account: $FOUNDRY_NAME"
+            echo "Project Principal ID: $FOUNDRY_PROJECT_PRINCIPAL"
+            
+            # Role IDs
+            COSMOS_OPERATOR="230815da-be43-4aae-9cb4-875f7bd000aa"
+            STORAGE_CONTRIBUTOR="17d1049b-9a84-46fb-8f53-869881c3d3ab"
+            SEARCH_INDEX_CONTRIBUTOR="8ebe5a00-799e-43f5-93ac-243d3dce84a7"
+            SEARCH_SVC_CONTRIBUTOR="7ca78c08-252a-4471-8644-bb5ff32d4ba0"
+            COGNITIVE_SVC_USER="a97b65f3-24c7-4388-baec-2e87135dc908"
+            
+            # Helper function
+            assign_foundry_role() {
+              local scope="$1"
+              local role_id="$2"
+              local role_name="$3"
+              local principal="$4"
+              
+              existing=$(az role assignment list --scope "$scope" --assignee "$principal" --role "$role_id" --query "[].id" -o tsv 2>/dev/null || echo "")
+              if [[ -n "$existing" ]]; then
+                echo "  ✓ $role_name already assigned"
+              else
+                echo "  → Assigning $role_name..."
+                az role assignment create --scope "$scope" --assignee-object-id "$principal" --assignee-principal-type ServicePrincipal --role "$role_id" -o none
+                echo "  ✓ $role_name assigned"
+              fi
+            }
+            
+            # Cosmos DB Operator for Foundry Project MI
+            COSMOS_SCOPE="/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.DocumentDB/databaseAccounts/$COSMOS_NAME"
+            echo ""
+            echo "--- Cosmos DB: $COSMOS_NAME ---"
+            assign_foundry_role "$COSMOS_SCOPE" "$COSMOS_OPERATOR" "Cosmos DB Operator" "$FOUNDRY_PROJECT_PRINCIPAL"
+            
+            # Storage Account Contributor for Foundry Project MI
+            STORAGE_SCOPE="/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.Storage/storageAccounts/$DATA_STORAGE_NAME"
+            echo ""
+            echo "--- Storage: $DATA_STORAGE_NAME ---"
+            assign_foundry_role "$STORAGE_SCOPE" "$STORAGE_CONTRIBUTOR" "Storage Account Contributor" "$FOUNDRY_PROJECT_PRINCIPAL"
+            
+            # AI Search roles for Foundry Project MI
+            if [[ -n "$SEARCH_NAME" ]]; then
+              SEARCH_SCOPE="/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.Search/searchServices/$SEARCH_NAME"
+              echo ""
+              echo "--- AI Search: $SEARCH_NAME ---"
+              assign_foundry_role "$SEARCH_SCOPE" "$SEARCH_INDEX_CONTRIBUTOR" "Search Index Data Contributor" "$FOUNDRY_PROJECT_PRINCIPAL"
+              assign_foundry_role "$SEARCH_SCOPE" "$SEARCH_SVC_CONTRIBUTOR" "Search Service Contributor" "$FOUNDRY_PROJECT_PRINCIPAL"
+            fi
+            
+            # Cognitive Services User for Functions MI on Foundry Account
+            FUNC_PRINCIPAL=$(az functionapp identity show --name "$FUNC_APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query principalId -o tsv)
+            FOUNDRY_SCOPE="/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.CognitiveServices/accounts/$FOUNDRY_NAME"
+            echo ""
+            echo "--- Functions -> AI Foundry ---"
+            assign_foundry_role "$FOUNDRY_SCOPE" "$COGNITIVE_SVC_USER" "Cognitive Services User" "$FUNC_PRINCIPAL"
+            
+            echo ""
+            echo "=== AI Foundry role assignments complete ==="
 
       - name: Get deployment outputs
         id: outputs

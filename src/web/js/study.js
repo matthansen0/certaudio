@@ -399,10 +399,10 @@ function showNotDeployed() {
             </svg>
         </div>
         <h1>Study Partner Not Available</h1>
-        <p>The Study Partner feature requires AI Search to be deployed. Contact your administrator to enable this feature.</p>
+        <p>The Study Partner feature requires AI Search and AI Foundry to be deployed. Contact your administrator to enable this feature.</p>
         <div class="not-deployed-details">
             <p>To enable Study Partner, deploy with <code>enableStudyPartner=true</code></p>
-            <p class="cost-note">Note: This adds ~$75/month for Azure AI Search</p>
+            <p class="cost-note">Note: This adds ~$75+/month for Azure AI Search + AI Foundry agent</p>
         </div>
         <a href="index.html" class="btn-back-to-player">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
