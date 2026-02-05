@@ -12,6 +12,15 @@ A fully automated Azure-native system that generates podcast-style or instructio
 - 🤖 **AI Study Partner** (optional) - Chat with an AI agent that has RAG access to exam content
 - 🚀 **One-click deployment** with Bicep IaC
 
+## Screenshots
+
+
+![certaudio-player](/media/certaudio-player.png)
+![certaudio-study](/media/certaudio-studyPartner1.png)
+![certaudio-study](/media/certaudio-studyPartner2.png)
+![certaudio-study](/media/certaudio-studyPartner3.png)
+![certaudio-study](/media/certaudio-studyPartner4.png)
+
 ## Supported Certifications
 
 ### Azure
