@@ -822,6 +822,7 @@ jobs:
           python3 -m tools.index_content \
             --certification-id "$CERTIFICATION_ID" \
             --source-urls "$SOURCE_URLS" \
+            --index-name certification-content \
             --update-mode true
           
           echo "✅ Content indexed in persistent search for Study Partner"
