@@ -1,6 +1,7 @@
 // AI Foundry Module for Study Partner Agent
-// Deploys: Foundry Account, Project, Capability Hosts, Connections
-// Role assignments are done via CLI after deployment (see deploy-infra.yml)
+// Deploys: Foundry Account, Project, Connections
+// NOTE: Capability hosts are commented out due to Azure preview API issues
+// The Azure AI Projects SDK can work without explicit capability hosts
 // Deployed only when enableStudyPartner=true
 
 // ============================================================================
@@ -43,8 +44,9 @@ param modelCapacity int = 30
 
 var foundryAccountName = '${resourcePrefix}-foundry-${uniqueSuffix}'
 var projectName = 'study-partner'
-var accountCapHostName = 'caphost-account'
-var projectCapHostName = 'caphost-project'
+// Capability host names (kept for reference but not deployed via Bicep)
+// var accountCapHostName = 'caphost-account'
+// var projectCapHostName = 'caphost-project'
 
 // ============================================================================
 // AI FOUNDRY ACCOUNT
@@ -178,37 +180,38 @@ resource searchConnection 'Microsoft.CognitiveServices/accounts/projects/connect
 }
 
 // ============================================================================
-// CAPABILITY HOSTS (Enable Agent Service)
+// CAPABILITY HOSTS (COMMENTED OUT - Azure preview API issues)
 // ============================================================================
+// The Azure AI Projects SDK can create agents without explicit capability hosts 
+// deployed via Bicep. Capability hosts may be auto-created by the service.
+// If needed, these can be enabled via Azure CLI after deployment.
 
-// Account-level capability host
-resource accountCapabilityHost 'Microsoft.CognitiveServices/accounts/capabilityHosts@2025-04-01-preview' = if (enabled) {
-  parent: foundryAccount
-  name: accountCapHostName
-  properties: {
-    capabilityHostKind: 'Agents'
-  }
-}
+// // Account-level capability host
+// resource accountCapabilityHost 'Microsoft.CognitiveServices/accounts/capabilityHosts@2025-04-01-preview' = if (enabled) {
+//   parent: foundryAccount
+//   name: accountCapHostName
+//   properties: {
+//     capabilityHostKind: 'Agents'
+//   }
+// }
 
-// Project-level capability host with resource connections
-// Note: The vectorStoreConnections, storageConnections, and threadStorageConnections
-// must reference the connection names created above
-resource projectCapabilityHost 'Microsoft.CognitiveServices/accounts/projects/capabilityHosts@2025-04-01-preview' = if (enabled) {
-  parent: foundryProject
-  name: projectCapHostName
-  properties: {
-    capabilityHostKind: 'Agents'
-    vectorStoreConnections: ['${searchServiceName}-connection']
-    storageConnections: ['${storageAccountName}-connection']
-    threadStorageConnections: ['${cosmosDbAccountName}-connection']
-  }
-  dependsOn: [
-    accountCapabilityHost
-    cosmosConnection
-    storageConnection
-    searchConnection
-  ]
-}
+// // Project-level capability host with resource connections
+// resource projectCapabilityHost 'Microsoft.CognitiveServices/accounts/projects/capabilityHosts@2025-04-01-preview' = if (enabled) {
+//   parent: foundryProject
+//   name: projectCapHostName
+//   properties: {
+//     capabilityHostKind: 'Agents'
+//     vectorStoreConnections: ['${searchServiceName}-connection']
+//     storageConnections: ['${storageAccountName}-connection']
+//     threadStorageConnections: ['${cosmosDbAccountName}-connection']
+//   }
+//   dependsOn: [
+//     accountCapabilityHost
+//     cosmosConnection
+//     storageConnection
+//     searchConnection
+//   ]
+// }
 
 // ============================================================================
 // OUTPUTS
