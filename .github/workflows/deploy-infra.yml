@@ -33,8 +33,8 @@ env:
   # OpenAI location - separate region since centralus doesn't support GPT-4o GlobalStandard
   OPENAI_LOCATION: 'eastus'
   # AI Foundry location - requires specific regions for Standard Agent Setup
-  # eastus is a supported region and matches OpenAI location
-  FOUNDRY_LOCATION: 'eastus'
+  # swedencentral is a primary AI region with full feature support
+  FOUNDRY_LOCATION: 'swedencentral'
   # Controls the resource-name suffix used by Bicep.
   # - Set secret AZURE_UNIQUE_SUFFIX to pin deployments to a single stable environment (recommended).
   # - If unset, falls back to github.run_id, which avoids name collisions but creates new resources every run.
@@ -202,7 +202,7 @@ jobs:
                 uniqueSuffix=$UNIQUE_SUFFIX \
                 location=$LOCATION \
                 openAiLocation=$OPENAI_LOCATION \
-                foundryLocation=${FOUNDRY_LOCATION:-eastus} \
+                foundryLocation=${FOUNDRY_LOCATION:-swedencentral} \
                 automationPrincipalId=$automationPrincipalId \
                 enableStudyPartner=$enableStudyPartner \
               --only-show-errors; then
