@@ -778,27 +778,42 @@ jobs:
         env:
           SOURCE_URLS: ${{ needs.discover-content.outputs.sourceUrls }}
           CERTIFICATION_ID: ${{ inputs.certificationId }}
+          # Pass OIDC credentials for background token refresh
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         run: |
+          # Start background token refresh — indexing can take 30+ min but the
+          # OIDC assertion expires after ~5 min. Without this, mid-run token
+          # refreshes by DefaultAzureCredential will fail with AADSTS700024.
+          (
+            while true; do
+              sleep 240
+              echo "[$(date -Iseconds)] Refreshing OIDC authentication..."
+              az login --service-principal \
+                -u "$AZURE_CLIENT_ID" \
+                -t "$AZURE_TENANT_ID" \
+                --federated-token "$(curl -sLS "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api://AzureADTokenExchange" -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" | jq -r '.value')" \
+                > /dev/null 2>&1 || echo "[$(date -Iseconds)] Warning: Token refresh failed"
+              az account set --subscription "$AZURE_SUBSCRIPTION_ID" > /dev/null 2>&1 || true
+            done
+          ) &
+          TOKEN_REFRESH_PID=$!
+          trap "kill $TOKEN_REFRESH_PID 2>/dev/null || true" EXIT
+
           cd src/pipeline
           python3 -m tools.index_content \
             --certification-id "$CERTIFICATION_ID" \
             --source-urls "$SOURCE_URLS"
 
-      # Re-authenticate before persistent search indexing.
-      # The OIDC assertion from the initial azure/login expires after ~5 minutes,
-      # and the cached access token lasts ~1 hour. By this point both may be stale
-      # because the prior indexing step can take 30-60 minutes.
-      - name: Azure Login (refresh for persistent search)
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
       - name: Index content in persistent search (Study Partner)
         env:
           SOURCE_URLS: ${{ needs.discover-content.outputs.sourceUrls }}
           CERTIFICATION_ID: ${{ inputs.certificationId }}
+          # Pass OIDC credentials for background token refresh
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         run: |
           set -euo pipefail
           
@@ -825,6 +840,24 @@ jobs:
           
           echo "✅ Found persistent search: $PERSISTENT_SEARCH_NAME"
           echo "   Indexing content for Study Partner RAG..."
+          
+          # Start background token refresh — indexing 446 sources takes ~25-30 min,
+          # but the OIDC assertion expires after ~5 min. Without periodic re-auth
+          # any mid-run token refresh by DefaultAzureCredential will fail.
+          (
+            while true; do
+              sleep 240  # Re-authenticate every 4 minutes (before 5-min expiry)
+              echo "[$(date -Iseconds)] Refreshing OIDC authentication..."
+              az login --service-principal \
+                -u "$AZURE_CLIENT_ID" \
+                -t "$AZURE_TENANT_ID" \
+                --federated-token "$(curl -sLS "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api://AzureADTokenExchange" -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" | jq -r '.value')" \
+                > /dev/null 2>&1 || echo "[$(date -Iseconds)] Warning: Token refresh failed"
+              az account set --subscription "$AZURE_SUBSCRIPTION_ID" > /dev/null 2>&1 || true
+            done
+          ) &
+          TOKEN_REFRESH_PID=$!
+          trap "kill $TOKEN_REFRESH_PID 2>/dev/null || true" EXIT
           
           # Set endpoint for persistent search and re-run indexing
           export SEARCH_ENDPOINT="https://${PERSISTENT_SEARCH_NAME}.search.windows.net"
