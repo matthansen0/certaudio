@@ -630,9 +630,8 @@ fi
 
 SKILLS_OUTLINE=$(cat "$DISCOVERY_FILE" | jq -c '.skillsOutline')
 SOURCE_URLS=$(cat "$DISCOVERY_FILE" | jq -c '.sourceUrls')
-if [[ -z "$DISCOVERY_RESULTS_FILE" ]]; then
-    rm -f "$DISCOVERY_FILE"
-fi
+# Keep discovery file for Phase 3 (confidence reporting)
+DISCOVERY_JSON_PATH="$DISCOVERY_FILE"
 
 # Used by later Python snippets
 export SKILLS_OUTLINE
@@ -816,8 +815,14 @@ for ((batch=0; batch<NUM_BATCHES; batch++)); do
         --skills-outline "$SKILLS_OUTLINE" \
         --batch-index "$batch" \
         --batch-size "$BATCH_SIZE" \
+        --discovery-json "$DISCOVERY_JSON_PATH" \
         $REGEN_FLAG
 done
+
+# Clean up temp discovery file
+if [[ -z "$DISCOVERY_RESULTS_FILE" ]]; then
+    rm -f "$DISCOVERY_JSON_PATH"
+fi
 
 echo ""
 echo "=========================================="

@@ -260,7 +260,14 @@ Run the **Generate Content** workflow to create audio episodes.
 
 ### Discovery Strategy (Combined)
 
-Content generation always uses the **combined** strategy: Microsoft Learn learning paths **plus** the exam study guide skills outline for full official coverage. See [docs/CONTENT_DISCOVERY.md](docs/CONTENT_DISCOVERY.md) for details.
+Content generation always uses the **combined** strategy: Microsoft Learn learning paths **plus** the exam study guide skills outline for full official coverage.
+
+**Key features**:
+- **Dynamic learning path resolution** — discovers paths by role + product tags instead of hardcoded UIDs (resilient to Microsoft restructuring)
+- **Coverage sweep** — checks every exam topic against discovered content with fallback chain (catalog → search API → explicit gap)
+- **Confidence score** — outputs a weighted coverage percentage (Grade A–F) so you know how complete the content is
+
+See [docs/CONTENT_DISCOVERY.md](docs/CONTENT_DISCOVERY.md) for details.
 
 ### Instructional Format
 

@@ -1021,6 +1021,8 @@ def main() -> None:
     parser.add_argument("--topics-per-episode", type=int, default=5, help="Target topics per episode for optimal length")
     parser.add_argument("--force-regenerate", action="store_true",
                         help="Regenerate episodes even if they already exist (e.g., to change voice)")
+    parser.add_argument("--discovery-json", default=None,
+                        help="Path to deep_discovery_results.json (used to surface confidence score)")
 
     args = parser.parse_args()
 
@@ -1247,6 +1249,31 @@ def main() -> None:
         print(f"\nGenerated:")
         for ep in generated_episodes:
             print(f"  - {ep['id']}: {ep['title']} ({ep['durationSeconds']:.0f}s)")
+
+    # Surface content confidence score from discovery
+    if args.discovery_json:
+        try:
+            with open(args.discovery_json, "r", encoding="utf-8") as f:
+                discovery_data = json.load(f)
+            conf = discovery_data.get("confidence")
+            cov = discovery_data.get("coverageReport")
+            if conf:
+                print(f"\n{'─'*60}")
+                print(f"CONTENT CONFIDENCE: {conf['overallScore']}% (Grade: {conf['grade']})")
+                bd = conf.get("breakdown", {})
+                print(f"  Learning-path covered: {bd.get('learningPath', {}).get('count', '?')}")
+                print(f"  Catalog supplemented:  {bd.get('catalogModule', {}).get('count', '?')}")
+                print(f"  Search supplemented:   {bd.get('learnSearch', {}).get('count', '?')}")
+                print(f"  Gaps:                  {bd.get('gap', {}).get('count', '?')}")
+            if cov and cov.get("gaps"):
+                print(f"\n  Uncovered exam topics ({cov['gapCount']}):")
+                for g in cov["gaps"][:5]:
+                    print(f"    - [{g['skill']}] {g['topic']}")
+                if cov["gapCount"] > 5:
+                    print(f"    ... and {cov['gapCount'] - 5} more")
+        except Exception as e:
+            print(f"\n  (Could not load confidence data: {e})")
+
     print(f"{'='*60}")
 
     if errors:

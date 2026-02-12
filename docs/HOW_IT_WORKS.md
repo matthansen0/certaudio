@@ -404,9 +404,11 @@ This is where the magic happens. The pipeline transforms Microsoft Learn content
 
 **What Happens**:
 1. Fetch Microsoft Learn Catalog API
-2. Find learning paths for the certification
+2. **Dynamically resolve** learning paths by filtering on certification role + product tags
 3. Get all modules and units from each path
-4. Optionally: Scrape the exam study guide for specific skills
+4. Scrape the exam study guide for specific skills (comprehensive mode)
+5. **Coverage sweep**: check each exam topic against discovered content with a fallback chain
+6. **Confidence score**: compute a weighted coverage percentage (Grade A–F)
 
 **The Two Content Sources**:
 
@@ -420,28 +422,44 @@ Learning paths teach concepts. Exam skills define what you'll be tested on. They
 
 **Discovery Strategy (Combined)**:
 
-The platform now always uses the **combined** strategy: learning paths **plus** the exam study guide skills outline. This provides the most complete coverage and avoids surprising gaps.
+The platform always uses the **combined** strategy: learning paths **plus** the exam study guide skills outline. This provides the most complete coverage and avoids surprising gaps.
 
-(You can still run the underlying tools directly for "learning-paths-only" or "skills-only" exploration, but it’s no longer exposed as a workflow/local-run option.)
+**Dynamic Learning Path Resolution**:
 
-**Key Code**:
+Instead of relying on hardcoded learning path UIDs (which go stale when Microsoft renames or restructures content), the platform dynamically discovers paths by filtering the catalog on role + product tags:
+
 ```python
-# Getting learning paths from the Catalog API
-CATALOG_URL = "https://learn.microsoft.com/api/catalog/"
-
-# Known cert-to-path mappings (more reliable than searching)
-CERTIFICATION_PATH_UIDS = {
-    "dp-700": [
-        "learn.wwl.ingest-data-with-microsoft-fabric",
-        "learn.wwl.implement-lakehouse-microsoft-fabric",
-        # ...
-    ],
+# Dynamic: filter by role + product tags (resilient to restructuring)
+CERTIFICATION_ROLE_PRODUCTS = {
+    "ai-102": {
+        "roles": ["ai-engineer"],
+        "products": {"azure-ai-services", "azure-ai-search", "azure-openai", ...},
+    },
 }
+# Hardcoded UIDs kept as fallback (stale UIDs auto-detected and skipped)
 ```
+
+**Coverage Sweep & Confidence Score**:
+
+In comprehensive mode, every exam topic is checked against discovered content with a 3-level fallback chain:
+1. **Title match** against learning path module/unit titles
+2. **Catalog module description search** for uncovered topics
+3. **Learn docs search API** as a last resort
+4. **Explicit gap reporting** for truly uncovered topics
+
+The output includes a confidence score (0–100%) with a letter grade:
+
+| Grade | Score | Meaning |
+|-------|-------|---------|
+| A | ≥ 90% | Excellent — nearly all exam topics have dedicated content |
+| B | ≥ 75% | Good — most topics covered, some supplemented from search |
+| C | ≥ 60% | Adequate — significant supplementation needed |
+| D/F | < 60% | Poor — major content gaps |
 
 **🎓 Learn More**:
 - [Microsoft Learn Catalog API](https://learn.microsoft.com/en-us/training/support/catalog-api)
 - [Exam study guides](https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/dp-700)
+- [Content Discovery Details](CONTENT_DISCOVERY.md)
 
 ---
 

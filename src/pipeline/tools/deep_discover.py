@@ -20,6 +20,7 @@ import os
 import re
 import time
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from typing import Optional
 from urllib.parse import urljoin
 
@@ -32,8 +33,59 @@ HEADERS = {
 }
 REQUEST_DELAY = 0.3  # Be respectful to Microsoft's servers
 CATALOG_URL = "https://learn.microsoft.com/api/catalog/"
+LEARN_SEARCH_URL = "https://learn.microsoft.com/api/search"
 
-# Known certification to learning path mappings (for certs where we know the exact paths)
+# Dynamic cert → role + product mapping for catalog-based learning path resolution.
+# The catalog API tags every learning path with roles and products. By filtering on
+# the role + relevant products we dynamically discover ALL current paths, even when
+# Microsoft renames or restructures them.
+CERTIFICATION_ROLE_PRODUCTS: dict[str, dict] = {
+    "dp-700": {
+        "roles": ["data-engineer"],
+        "products": {
+            "fabric", "microsoft-fabric", "power-bi",
+        },
+    },
+    "ai-102": {
+        "roles": ["ai-engineer"],
+        "products": {
+            "azure-ai-services", "azure-cognitive-services",
+            "azure-ai-search", "azure-cognitive-search",
+            "ai-services", "azure-ai-language", "azure-ai-speech",
+            "azure-ai-vision", "azure-ai-document-intelligence",
+            "azure-ai-translator", "azure-bot-service", "azure-openai",
+        },
+    },
+    "az-104": {
+        "roles": ["administrator"],
+        "products": {
+            "azure", "azure-virtual-machines", "azure-storage",
+            "azure-virtual-network", "azure-resource-manager",
+            "azure-monitor", "entra-id",
+        },
+    },
+    "az-900": {
+        "roles": ["administrator", "developer", "solution-architect"],
+        "products": {"azure"},
+        "title_keywords": ["fundamentals", "azure"],
+    },
+    "sc-300": {
+        "roles": ["identity-access-admin"],
+        "products": {
+            "entra-id", "entra", "azure-active-directory",
+        },
+    },
+    "ab-731": {
+        "roles": ["business-owner"],
+        "products": {
+            "azure-openai", "ai-services",
+            "dynamics-365-copilot", "microsoft-copilot",
+        },
+    },
+}
+
+# Fallback: Known certification to learning path mappings (for certs where we know the exact paths).
+# Used when dynamic resolution fails or for override purposes.
 CERTIFICATION_PATH_UIDS = {
     "dp-700": [
         "learn.wwl.ingest-data-with-microsoft-fabric",
@@ -138,6 +190,349 @@ def fetch_catalog() -> dict:
     print(f"  Found {len(data.get('modules', []))} modules")
     print(f"  Found {len(data.get('units', []))} units")
     return data
+
+
+def resolve_learning_paths_dynamic(
+    certification_id: str, catalog: dict
+) -> tuple[list[str], str]:
+    """
+    Dynamically resolve learning path UIDs by filtering the catalog on role + product tags.
+
+    This replaces the brittle hardcoded UID approach. Microsoft frequently renames
+    or restructures learning paths, causing hardcoded UIDs to go stale.
+
+    Returns:
+        (list of learning path UIDs, resolution method description)
+    """
+    cert_lower = certification_id.lower()
+    mapping = CERTIFICATION_ROLE_PRODUCTS.get(cert_lower)
+
+    if not mapping:
+        # No role/product mapping — fall back to hardcoded or product search
+        return [], "no-mapping"
+
+    target_roles = set(mapping.get("roles", []))
+    target_products = set(mapping.get("products", []))
+    title_keywords = [kw.lower() for kw in mapping.get("title_keywords", [])]
+    matched_uids = []
+
+    for path in catalog.get("learningPaths", []):
+        path_roles = set(path.get("roles", []))
+        path_products = set(path.get("products", []))
+
+        # Must share at least one role
+        if not path_roles.intersection(target_roles):
+            continue
+
+        # Must share at least one product
+        if not path_products.intersection(target_products):
+            continue
+
+        # Optional title keyword filter (for broad certs like az-900)
+        if title_keywords:
+            title_lower = path.get("title", "").lower()
+            if not any(kw in title_lower for kw in title_keywords):
+                continue
+
+        matched_uids.append(path["uid"])
+
+    return matched_uids, "dynamic"
+
+
+# ---------------------------------------------------------------------------
+# Coverage sweep: fallback chain for uncovered exam skills
+# ---------------------------------------------------------------------------
+
+def _normalize(text: str) -> str:
+    """Lowercase, strip punctuation, collapse whitespace for fuzzy matching."""
+    text = re.sub(r"[^\w\s]", " ", text.lower())
+    return " ".join(text.split())
+
+
+def _topic_similarity(topic: str, reference: str) -> float:
+    """Return 0‒1 similarity score between two topic strings."""
+    return SequenceMatcher(None, _normalize(topic), _normalize(reference)).ratio()
+
+
+def _topic_covered(topic: str, reference_titles: list[str], threshold: float = 0.45) -> bool:
+    """Check if a topic is covered by any of the reference module/unit titles."""
+    norm_topic = _normalize(topic)
+    for ref in reference_titles:
+        if _topic_similarity(norm_topic, _normalize(ref)) >= threshold:
+            return True
+        # Also check substring containment (handles short topic labels)
+        if norm_topic in _normalize(ref) or _normalize(ref) in norm_topic:
+            return True
+    return False
+
+
+def search_learn_docs(query: str, top: int = 5) -> list[dict]:
+    """
+    Search Microsoft Learn docs API for pages matching *query*.
+
+    Returns list of {title, url, description}.
+    """
+    try:
+        resp = requests.get(
+            LEARN_SEARCH_URL,
+            params={
+                "search": query,
+                "locale": "en-us",
+                "$top": top,
+                "facet": "category",
+                "$filter": "category eq 'Documentation' or category eq 'Training'",
+            },
+            headers=HEADERS,
+            timeout=15,
+        )
+        resp.raise_for_status()
+        results = resp.json().get("results", [])
+        return [
+            {
+                "title": r.get("title", ""),
+                "url": r.get("url", ""),
+                "description": r.get("description", ""),
+            }
+            for r in results
+        ]
+    except Exception as e:
+        print(f"  Learn search failed for '{query}': {e}")
+        return []
+
+
+def coverage_sweep(
+    exam_skills: list[dict],
+    discovered_modules: list[dict],
+    catalog: dict,
+) -> dict:
+    """
+    Check each exam skill topic against discovered content.
+
+    Fallback chain for uncovered topics:
+      1. Title match against discovered module/unit titles
+      2. Catalog module description search
+      3. Learn docs API search
+      4. Mark as explicit gap
+
+    Args:
+        exam_skills: List of exam skill dicts from fetch_exam_skills_outline()
+        discovered_modules: Flat list of {title, topics, sourceUrls} from learning paths
+        catalog: Full catalog dict for module description search
+
+    Returns:
+        {
+            "covered": [{skill, topic, matchedBy}],
+            "supplemented": [{skill, topic, source, urls}],
+            "gaps": [{skill, topic}],
+            "supplementalUrls": [str],
+        }
+    """
+    print("\n" + "=" * 60)
+    print("COVERAGE SWEEP: checking exam skills against discovered content")
+    print("=" * 60)
+
+    # Build reference corpus from discovered learning path content
+    reference_titles: list[str] = []
+    for mod in discovered_modules:
+        reference_titles.append(mod.get("title", ""))
+        reference_titles.extend(mod.get("topics", []))
+
+    # Build module description index from catalog for fallback
+    catalog_modules = catalog.get("modules", [])
+    catalog_module_descs = [
+        {
+            "title": m.get("title", ""),
+            "summary": m.get("summary", ""),
+            "url": m.get("url", ""),
+            "uid": m.get("uid", ""),
+        }
+        for m in catalog_modules
+    ]
+
+    covered: list[dict] = []
+    supplemented: list[dict] = []
+    gaps: list[dict] = []
+    supplemental_urls: set[str] = set()
+
+    for skill in exam_skills:
+        skill_name = skill.get("name", "Unknown")
+        for topic in skill.get("topics", []):
+            # --- Level 1: title match against discovered content ---
+            if _topic_covered(topic, reference_titles):
+                covered.append({"skill": skill_name, "topic": topic, "matchedBy": "learning-path"})
+                continue
+
+            # --- Level 2: catalog module description search ---
+            norm_topic = _normalize(topic)
+            found_in_catalog = False
+            for cm in catalog_module_descs:
+                combined = _normalize(cm["title"] + " " + cm["summary"])
+                if _topic_similarity(norm_topic, combined) >= 0.40 or norm_topic in combined:
+                    url = cm["url"]
+                    if url and not url.startswith("http"):
+                        url = f"https://learn.microsoft.com{url}"
+                    supplemented.append({
+                        "skill": skill_name,
+                        "topic": topic,
+                        "source": "catalog-module",
+                        "urls": [url] if url else [],
+                        "matchedModule": cm["title"],
+                    })
+                    if url:
+                        supplemental_urls.add(url)
+                    found_in_catalog = True
+                    break
+
+            if found_in_catalog:
+                continue
+
+            # --- Level 3: Learn search API ---
+            search_results = search_learn_docs(topic, top=3)
+            time.sleep(REQUEST_DELAY)  # Rate limit
+            if search_results:
+                urls = [r["url"] for r in search_results if r.get("url")]
+                supplemented.append({
+                    "skill": skill_name,
+                    "topic": topic,
+                    "source": "learn-search",
+                    "urls": urls,
+                    "matchedModule": search_results[0].get("title", ""),
+                })
+                supplemental_urls.update(urls)
+                continue
+
+            # --- Level 4: Explicit gap ---
+            gaps.append({"skill": skill_name, "topic": topic})
+
+    total_topics = sum(len(s.get("topics", [])) for s in exam_skills)
+    print(f"  Total exam skill topics: {total_topics}")
+    print(f"  Covered by learning paths: {len(covered)}")
+    print(f"  Supplemented (catalog): {len([s for s in supplemented if s['source'] == 'catalog-module'])}")
+    print(f"  Supplemented (search):  {len([s for s in supplemented if s['source'] == 'learn-search'])}")
+    print(f"  Remaining gaps: {len(gaps)}")
+    if gaps:
+        print("  Gap details:")
+        for g in gaps[:10]:  # Show first 10
+            print(f"    - [{g['skill']}] {g['topic']}")
+        if len(gaps) > 10:
+            print(f"    ... and {len(gaps) - 10} more")
+
+    return {
+        "covered": covered,
+        "supplemented": supplemented,
+        "gaps": gaps,
+        "supplementalUrls": list(supplemental_urls),
+    }
+
+
+def compute_confidence_score(
+    coverage_result: dict,
+    exam_skills: list[dict],
+) -> dict:
+    """
+    Compute a confidence score showing how completely the exam content is covered.
+
+    Score breakdown:
+      - Topics covered by learning paths:        1.0  (full weight)
+      - Topics supplemented from catalog:         0.8  (good but not pre-curated)
+      - Topics supplemented from Learn search:    0.5  (relevant but unverified)
+      - Explicit gaps (no content found):         0.0
+
+    Returns:
+        {
+            "overallScore": float (0-100),
+            "totalTopics": int,
+            "breakdown": {
+                "learningPath": {"count": int, "weight": 1.0},
+                "catalogModule": {"count": int, "weight": 0.8},
+                "learnSearch":   {"count": int, "weight": 0.5},
+                "gap":           {"count": int, "weight": 0.0},
+            },
+            "perSkillScores": [{skill, score, coveredTopics, totalTopics}],
+            "grade": str,  # "A" / "B" / "C" / "D" / "F"
+        }
+    """
+    covered = coverage_result.get("covered", [])
+    supplemented = coverage_result.get("supplemented", [])
+    gaps = coverage_result.get("gaps", [])
+
+    lp_count = len(covered)
+    catalog_count = len([s for s in supplemented if s["source"] == "catalog-module"])
+    search_count = len([s for s in supplemented if s["source"] == "learn-search"])
+    gap_count = len(gaps)
+    total = lp_count + catalog_count + search_count + gap_count
+
+    if total == 0:
+        return {
+            "overallScore": 0.0,
+            "totalTopics": 0,
+            "breakdown": {},
+            "perSkillScores": [],
+            "grade": "F",
+        }
+
+    # Weighted score
+    weighted_sum = (lp_count * 1.0) + (catalog_count * 0.8) + (search_count * 0.5)
+    overall_score = round((weighted_sum / total) * 100, 1)
+
+    # Per-skill breakdown
+    skill_topic_status: dict[str, dict] = {}
+    for item in covered:
+        sk = item["skill"]
+        skill_topic_status.setdefault(sk, {"covered": 0, "total": 0})
+        skill_topic_status[sk]["covered"] += 1
+        skill_topic_status[sk]["total"] += 1
+    for item in supplemented:
+        sk = item["skill"]
+        skill_topic_status.setdefault(sk, {"covered": 0, "total": 0})
+        skill_topic_status[sk]["covered"] += 0.8 if item["source"] == "catalog-module" else 0.5
+        skill_topic_status[sk]["total"] += 1
+    for item in gaps:
+        sk = item["skill"]
+        skill_topic_status.setdefault(sk, {"covered": 0, "total": 0})
+        skill_topic_status[sk]["total"] += 1
+
+    per_skill = []
+    for sk, counts in skill_topic_status.items():
+        t = counts["total"]
+        score = round((counts["covered"] / t) * 100, 1) if t > 0 else 0.0
+        per_skill.append({
+            "skill": sk,
+            "score": score,
+            "coveredTopics": round(counts["covered"], 1),
+            "totalTopics": t,
+        })
+
+    # Letter grade
+    if overall_score >= 90:
+        grade = "A"
+    elif overall_score >= 75:
+        grade = "B"
+    elif overall_score >= 60:
+        grade = "C"
+    elif overall_score >= 40:
+        grade = "D"
+    else:
+        grade = "F"
+
+    print(f"\n  Confidence Score: {overall_score}% (Grade: {grade})")
+    print(f"    Learning path coverage: {lp_count}/{total}")
+    print(f"    Catalog supplemented:   {catalog_count}/{total}")
+    print(f"    Search supplemented:    {search_count}/{total}")
+    print(f"    Gaps:                   {gap_count}/{total}")
+
+    return {
+        "overallScore": overall_score,
+        "totalTopics": total,
+        "breakdown": {
+            "learningPath": {"count": lp_count, "weight": 1.0},
+            "catalogModule": {"count": catalog_count, "weight": 0.8},
+            "learnSearch": {"count": search_count, "weight": 0.5},
+            "gap": {"count": gap_count, "weight": 0.0},
+        },
+        "perSkillScores": per_skill,
+        "grade": grade,
+    }
 
 
 def fetch_page(url: str, retries: int = 3) -> str:
@@ -328,6 +723,14 @@ def fetch_exam_skills_outline(certification_id: str) -> list[dict]:
                                'trademarks', '© microsoft']
                 if not any(x in skill_text.lower() for x in skip_phrases):
                     current_domain["topics"].append(skill_text)
+
+                    # Extract inline links as source URLs for this skill
+                    for link in element.find_all("a", href=True):
+                        href = link["href"]
+                        if href.startswith("/"):
+                            href = f"https://learn.microsoft.com{href}"
+                        if "learn.microsoft.com" in href:
+                            current_domain["sourceUrls"].append(href)
     
     # Don't forget last domain
     if current_domain and current_domain.get("topics"):
@@ -347,7 +750,8 @@ def deep_discover(
     max_paths: Optional[int] = None,
     max_modules_per_path: Optional[int] = None,
     max_units_per_module: Optional[int] = None,
-    skip_content: bool = False
+    skip_content: bool = False,
+    catalog: Optional[dict] = None,
 ) -> DeepDiscoveryResult:
     """
     Perform deep discovery using the Microsoft Learn Catalog API.
@@ -358,6 +762,7 @@ def deep_discover(
         max_modules_per_path: Limit modules per path (for testing)
         max_units_per_module: Limit units per module (for testing)
         skip_content: If True, don't fetch unit content (faster for structure only)
+        catalog: Pre-fetched catalog dict (avoids redundant API call)
     
     Returns:
         DeepDiscoveryResult with all discovered content
@@ -365,8 +770,9 @@ def deep_discover(
     print(f"Starting deep discovery for {certification_id}")
     print("=" * 60)
     
-    # Fetch the catalog
-    catalog = fetch_catalog()
+    # Fetch the catalog (or reuse pre-fetched)
+    if catalog is None:
+        catalog = fetch_catalog()
     
     # Build lookup tables
     paths_by_uid = {p["uid"]: p for p in catalog.get("learningPaths", [])}
@@ -374,19 +780,30 @@ def deep_discover(
     units_by_uid = {u["uid"]: u for u in catalog.get("units", [])}
     
     # Get learning path UIDs for this certification
+    # Strategy: dynamic first (role+product filtering), hardcoded fallback, then product search
     cert_lower = certification_id.lower()
-    if cert_lower in CERTIFICATION_PATH_UIDS:
-        path_uids = CERTIFICATION_PATH_UIDS[cert_lower]
-        print(f"Using {len(path_uids)} configured learning paths for {certification_id}")
+    path_uids, resolution_method = resolve_learning_paths_dynamic(cert_lower, catalog)
+
+    if path_uids:
+        print(f"Using {len(path_uids)} dynamically resolved learning paths (role+product filtering)")
+    elif cert_lower in CERTIFICATION_PATH_UIDS:
+        # Fallback to hardcoded UIDs — filter out stale ones
+        raw_uids = CERTIFICATION_PATH_UIDS[cert_lower]
+        path_uids = [uid for uid in raw_uids if uid in paths_by_uid]
+        stale = len(raw_uids) - len(path_uids)
+        if stale > 0:
+            print(f"  Warning: {stale}/{len(raw_uids)} hardcoded UIDs are stale (not in catalog)")
+        print(f"Using {len(path_uids)} hardcoded learning paths for {certification_id}")
+        resolution_method = "hardcoded"
     else:
-        # Try to find paths by searching (less reliable)
+        # Last resort: generic product search
         path_uids = []
         for p in catalog.get("learningPaths", []):
-            # Check if path is associated with this cert
             products = p.get("products", [])
             if any(cert_lower in str(prod).lower() for prod in products):
                 path_uids.append(p["uid"])
-        print(f"Found {len(path_uids)} learning paths by product search")
+        print(f"Found {len(path_uids)} learning paths by product search (last resort)")
+        resolution_method = "product-search"
     
     if max_paths:
         path_uids = path_uids[:max_paths]
@@ -597,7 +1014,12 @@ def discover_test_content() -> DeepDiscoveryResult:
     return result
 
 
-def result_to_dict(result: DeepDiscoveryResult, exam_skills: list[dict] = None) -> dict:
+def result_to_dict(
+    result: DeepDiscoveryResult,
+    exam_skills: list[dict] = None,
+    coverage_result: dict = None,
+    confidence: dict = None,
+) -> dict:
     """
     Convert result to JSON-serializable dict.
     
@@ -615,6 +1037,8 @@ def result_to_dict(result: DeepDiscoveryResult, exam_skills: list[dict] = None) 
     Args:
         result: DeepDiscoveryResult from learning paths discovery
         exam_skills: Optional list of exam skills from study guide (comprehensive mode)
+        coverage_result: Optional coverage sweep results from coverage_sweep()
+        confidence: Optional confidence score from compute_confidence_score()
     """
     # Build skills outline from learning paths (workflow-compatible format)
     # Each UNIQUE module becomes a "skill" and each unit becomes a "topic"
@@ -665,8 +1089,13 @@ def result_to_dict(result: DeepDiscoveryResult, exam_skills: list[dict] = None) 
                 "sourceUrls": skill.get("sourceUrls", []),
                 "isExamSkill": True
             })
-    
-    return {
+
+    # Merge supplemental URLs from coverage sweep into the global source list
+    if coverage_result:
+        for url in coverage_result.get("supplementalUrls", []):
+            source_urls.add(url)
+
+    output = {
         # Workflow-compatible format (required by generate-content.yml)
         "skillsOutline": skills_outline,
         "sourceUrls": list(source_urls),
@@ -710,6 +1139,20 @@ def result_to_dict(result: DeepDiscoveryResult, exam_skills: list[dict] = None) 
         "totalWords": result.total_words,
         "estimatedEpisodes": result.estimated_episodes
     }
+
+    # Attach coverage and confidence (comprehensive mode)
+    if confidence:
+        output["confidence"] = confidence
+    if coverage_result:
+        output["coverageReport"] = {
+            "coveredCount": len(coverage_result.get("covered", [])),
+            "supplementedCount": len(coverage_result.get("supplemented", [])),
+            "gapCount": len(coverage_result.get("gaps", [])),
+            "gaps": coverage_result.get("gaps", []),
+            "supplementalUrls": coverage_result.get("supplementalUrls", []),
+        }
+
+    return output
 
 
 def main():
@@ -761,15 +1204,23 @@ def main():
     
     # Determine mode
     exam_skills = None
+    coverage_result = None
+    confidence = None
+    catalog = None
+
     if args.test or args.certification_id == "test":
         result = discover_test_content()
     elif args.certification_id:
+        # Pre-fetch catalog once so it can be reused by coverage sweep
+        catalog = fetch_catalog()
+
         result = deep_discover(
             certification_id=args.certification_id,
             max_paths=args.max_paths,
             max_modules_per_path=args.max_modules,
             max_units_per_module=args.max_units,
-            skip_content=args.skip_content
+            skip_content=args.skip_content,
+            catalog=catalog,
         )
         
         # Fetch exam skills for comprehensive mode
@@ -777,11 +1228,33 @@ def main():
             print("\n" + "=" * 60)
             print("COMPREHENSIVE MODE: Adding exam skills outline")
             exam_skills = fetch_exam_skills_outline(args.certification_id)
+
+            if exam_skills:
+                # Build flat list of discovered modules for coverage comparison
+                discovered_modules = []
+                for path in result.learning_paths:
+                    for mod in path.modules:
+                        discovered_modules.append({
+                            "title": mod.title,
+                            "topics": [u.title for u in mod.units],
+                            "sourceUrls": [u.url for u in mod.units if u.url],
+                        })
+
+                # Run coverage sweep with fallback chain
+                coverage_result = coverage_sweep(exam_skills, discovered_modules, catalog)
+
+                # Compute confidence score
+                confidence = compute_confidence_score(coverage_result, exam_skills)
     else:
         parser.error("Either --certification-id or --test is required")
     
     # Save results
-    output = result_to_dict(result, exam_skills=exam_skills)
+    output = result_to_dict(
+        result,
+        exam_skills=exam_skills,
+        coverage_result=coverage_result,
+        confidence=confidence,
+    )
     
     # Print summary
     total_skills = len(output.get("skillsOutline", []))
@@ -796,6 +1269,9 @@ def main():
     print(f"  Exam skill objectives: {exam_skill_count}")
     print(f"  Total skill domains: {total_skills}")
     print(f"  Total topics: {total_topics}")
+    if confidence:
+        print(f"  Confidence Score: {confidence['overallScore']}% (Grade: {confidence['grade']})")
+        print(f"  Coverage gaps: {confidence['breakdown'].get('gap', {}).get('count', 0)}")
     
     with open(args.output_file, "w", encoding="utf-8") as f:
         json.dump(output, f, indent=2, ensure_ascii=False)

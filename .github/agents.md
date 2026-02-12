@@ -6,6 +6,9 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 
 - **Study Partner (AI Foundry Agent)**: Optional feature that deploys Azure AI Foundry with a GPT-4o agent for interactive exam prep chat. Enable via `enableStudyPartner=true` in workflow or Bicep params. Adds ~$80/month (primarily AI Search Basic). See [Study Partner section in README](../README.md#study-partner-optional).
 - **Discovery Strategy (Combined)**: Content generation always uses the combined strategy (learning paths **plus** exam skills outline) for full coverage. See [docs/CONTENT_DISCOVERY.md](../docs/CONTENT_DISCOVERY.md) for details.
+- **Dynamic Learning Path Resolution**: Learning paths are resolved dynamically via catalog role + product tag filtering (`CERTIFICATION_ROLE_PRODUCTS` mapping) instead of hardcoded UIDs. Hardcoded UIDs are kept as a fallback but stale entries are auto-detected and skipped. This prevents silent content loss when Microsoft renames or restructures learning paths.
+- **Coverage Sweep**: In comprehensive mode, every exam skill topic is checked against discovered content. Uncovered topics go through a fallback chain: catalog module description matching → Learn search API → explicit gap reporting. Supplemental URLs from the sweep are merged into the indexing pipeline.
+- **Confidence Score**: Discovery outputs a weighted confidence score (0–100%, Grade A–F) showing content coverage completeness. Weights: learning-path=1.0, catalog-supplement=0.8, search-supplement=0.5, gap=0.0. Surfaced in generation output via `--discovery-json` flag.
 - **Hierarchy API for URLs**: Unit URLs are fetched from `/api/hierarchy/modules/{uid}` because the catalog API doesn't provide actual URLs, and URL patterns can be non-sequential (e.g., `3b-optimize` instead of `4-optimize`).
 - **Voice Selection**: Generate Content workflow allows choosing voices for instructional, podcast host, and podcast expert formats from 11 Azure Neural voices.
 - **Dragon HD Voices**: Azure Speech Dragon HD voices (e.g., `en-US-Andrew:DragonHDLatestNeural`) are only available in **eastus**, **westeurope**, and **southeastasia** regions. The Speech service is deployed to eastus to enable HD voice support.
@@ -91,7 +94,7 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 **Key Files**:
 - `src/pipeline/flow.dag.yaml` - PromptFlow orchestration
 - `src/pipeline/tools/discover_exam_content.py` - Exam page scraping (skills mode)
-- `src/pipeline/tools/deep_discover.py` - Deep discovery via Catalog API
+- `src/pipeline/tools/deep_discover.py` - Deep discovery via Catalog API (dynamic path resolution, coverage sweep, confidence scoring)
 - `src/pipeline/tools/check_content_delta.py` - Content change detection
 - `src/pipeline/tools/generate_episodes.py` - Episode generation with retry/skip logic
 - `src/pipeline/tools/synthesize_audio.py` - Azure AI Speech synthesis

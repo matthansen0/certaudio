@@ -96,10 +96,36 @@ Some exam skills don't have dedicated learning path content:
 
 ### `comprehensive` Mode (Recommended)
 - Combines BOTH learning paths AND exam skills outline
+- **Dynamic learning path resolution**: Uses catalog role + product filtering instead of hardcoded UIDs
+- Hardcoded UIDs kept as fallback (stale UIDs auto-detected and skipped)
 - Learning path content provides foundations
 - Exam skills ensure all testable items are covered
+- **Coverage sweep**: Each exam topic is checked against discovered content with a 3-level fallback chain:
+  1. Title match against discovered module/unit titles
+  2. Catalog module description search
+  3. Microsoft Learn docs search API
+  4. Explicit gap reporting for truly uncovered topics
+- **Confidence score**: Weighted percentage showing content completeness (Grade A–F)
 - ~10-12 hours for DP-700
 - **Full official content coverage**
+
+### Confidence Score
+
+In comprehensive mode, the output includes a confidence score grading content coverage:
+
+| Grade | Score | Meaning |
+|-------|-------|---------|
+| A | ≥ 90% | Excellent — nearly all exam topics have dedicated content |
+| B | ≥ 75% | Good — most topics covered, some supplemented from search |
+| C | ≥ 60% | Adequate — significant supplementation needed |
+| D | ≥ 40% | Poor — many topics rely on best-effort search results |
+| F | < 40% | Critical — major content gaps |
+
+The score weights different coverage sources:
+- **Learning path match (1.0)**: Topic directly covered by discovered modules
+- **Catalog supplement (0.8)**: Topic matched to a catalog module by description
+- **Search supplement (0.5)**: Topic found via Learn docs search API
+- **Gap (0.0)**: No content found
 
 ## Expected Duration by Certification
 
