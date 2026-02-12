@@ -2,6 +2,7 @@
 Azure Functions for Certification Audio Platform API.
 """
 
+import base64
 import json
 import logging
 import os
@@ -485,6 +486,198 @@ def update_progress(req: func.HttpRequest) -> func.HttpResponse:
 
     except Exception as e:
         logger.error(f"Error updating progress: {e}")
+        return func.HttpResponse(
+            json.dumps({"error": str(e)}),
+            status_code=500,
+            mimetype="application/json",
+        )
+
+
+# =============================================================================
+# SWA AUTHENTICATION HELPERS
+# =============================================================================
+
+def _get_swa_user(req: func.HttpRequest) -> Optional[dict]:
+    """Extract authenticated user from SWA's x-ms-client-principal header.
+
+    Azure Static Web Apps injects this header automatically for authenticated
+    requests routed through the linked backend.
+    """
+    header = req.headers.get("x-ms-client-principal")
+    if not header:
+        return None
+    try:
+        decoded = base64.b64decode(header)
+        principal = json.loads(decoded)
+        user_id = principal.get("userId")
+        if not user_id:
+            return None
+        return {
+            "userId": user_id,
+            "userDetails": principal.get("userDetails", ""),
+            "identityProvider": principal.get("identityProvider", ""),
+        }
+    except Exception:
+        return None
+
+
+# =============================================================================
+# GET /api/me
+# =============================================================================
+@app.route(route="me", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def get_me(req: func.HttpRequest) -> func.HttpResponse:
+    """Return the authenticated user's identity (from SWA header)."""
+    user = _get_swa_user(req)
+    if not user:
+        return func.HttpResponse(
+            json.dumps({"authenticated": False}),
+            mimetype="application/json",
+        )
+    return func.HttpResponse(
+        json.dumps({"authenticated": True, **user}),
+        mimetype="application/json",
+    )
+
+
+# =============================================================================
+# GET /api/me/progress/{certificationId}
+# =============================================================================
+@app.route(
+    route="me/progress/{certificationId}",
+    methods=["GET"],
+    auth_level=func.AuthLevel.ANONYMOUS,
+)
+def get_my_progress(req: func.HttpRequest) -> func.HttpResponse:
+    """Get progress for the authenticated user."""
+    user = _get_swa_user(req)
+    if not user:
+        return func.HttpResponse(
+            json.dumps({"error": "Not authenticated"}),
+            status_code=401,
+            mimetype="application/json",
+        )
+
+    cert_id = req.route_params.get("certificationId")
+    user_id = user["userId"]
+
+    try:
+        client = get_cosmos_client()
+        database = client.get_database_client(
+            os.environ.get("COSMOS_DB_DATABASE", "certaudio")
+        )
+        container = database.get_container_client("userProgress")
+
+        doc_id = f"{user_id}-{cert_id}"
+        try:
+            progress = container.read_item(item=doc_id, partition_key=user_id)
+        except Exception:
+            progress = {
+                "id": doc_id,
+                "userId": user_id,
+                "certificationId": cert_id,
+                "progress": {},
+            }
+
+        return func.HttpResponse(
+            json.dumps(progress),
+            mimetype="application/json",
+        )
+
+    except Exception as e:
+        logger.error(f"Error getting authenticated progress: {e}")
+        return func.HttpResponse(
+            json.dumps({"error": str(e)}),
+            status_code=500,
+            mimetype="application/json",
+        )
+
+
+# =============================================================================
+# POST /api/me/progress/{certificationId}
+# =============================================================================
+@app.route(
+    route="me/progress/{certificationId}",
+    methods=["POST"],
+    auth_level=func.AuthLevel.ANONYMOUS,
+)
+def update_my_progress(req: func.HttpRequest) -> func.HttpResponse:
+    """Update progress for the authenticated user.
+
+    Accepts either a single episode update:
+        { "episodeId": "001", "completed": true, "position": 612 }
+
+    Or a bulk merge of all progress:
+        { "progress": { "ep-001": { "completed": true, "position": 612 }, ... } }
+    """
+    user = _get_swa_user(req)
+    if not user:
+        return func.HttpResponse(
+            json.dumps({"error": "Not authenticated"}),
+            status_code=401,
+            mimetype="application/json",
+        )
+
+    cert_id = req.route_params.get("certificationId")
+    user_id = user["userId"]
+
+    try:
+        body = req.get_json()
+        client = get_cosmos_client()
+        database = client.get_database_client(
+            os.environ.get("COSMOS_DB_DATABASE", "certaudio")
+        )
+        container = database.get_container_client("userProgress")
+
+        # Get or create progress document
+        doc_id = f"{user_id}-{cert_id}"
+        try:
+            progress_doc = container.read_item(item=doc_id, partition_key=user_id)
+        except Exception:
+            progress_doc = {
+                "id": doc_id,
+                "userId": user_id,
+                "certificationId": cert_id,
+                "progress": {},
+            }
+
+        if "progress" in body:
+            # Bulk merge: merge incoming progress with existing, keeping the
+            # "most complete" state for each episode.
+            incoming = body["progress"]
+            existing = progress_doc.get("progress", {})
+            for ep_id, ep_data in incoming.items():
+                prev = existing.get(ep_id, {})
+                existing[ep_id] = {
+                    "completed": ep_data.get("completed", False)
+                    or prev.get("completed", False),
+                    "position": max(
+                        ep_data.get("position", 0), prev.get("position", 0)
+                    ),
+                }
+            progress_doc["progress"] = existing
+        else:
+            # Single episode update
+            episode_id = body.get("episodeId")
+            if not episode_id:
+                return func.HttpResponse(
+                    json.dumps({"error": "episodeId or progress is required"}),
+                    status_code=400,
+                    mimetype="application/json",
+                )
+            progress_doc["progress"][episode_id] = {
+                "completed": body.get("completed", False),
+                "position": body.get("position", 0),
+            }
+
+        container.upsert_item(progress_doc)
+
+        return func.HttpResponse(
+            json.dumps({"success": True, "progress": progress_doc["progress"]}),
+            mimetype="application/json",
+        )
+
+    except Exception as e:
+        logger.error(f"Error updating authenticated progress: {e}")
         return func.HttpResponse(
             json.dumps({"error": str(e)}),
             status_code=500,

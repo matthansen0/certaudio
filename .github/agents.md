@@ -21,6 +21,9 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 - **Functions performance**: Credentials (`DefaultAzureCredential`), blob clients, and user delegation keys are cached at module level to avoid re-auth on every request. First request after cold start fetches delegation key (~3s), subsequent requests are <1s.
 - **Audio delivery**: Audio files are served via **SAS URL redirect** (302) rather than proxying through the Function. The Function generates a short-lived SAS token using a cached user delegation key, then redirects the browser to download directly from Blob Storage. Requires `Storage Blob Delegator` role on the Function identity.
 - **CSP for audio**: The Static Web App CSP includes `media-src 'self' blob: https://*.blob.core.windows.net` to allow audio playback from Blob Storage SAS URLs.
+- **SWA built-in auth (Microsoft only)**: User sign-in uses SWA's built-in Microsoft (AAD) provider. Zero app registrations, zero cost. The `x-ms-client-principal` header is decoded by `_get_swa_user()` in Functions. GitHub, Twitter, and Google providers are blocked via `staticwebapp.config.json` route rules. Progress is synced to Cosmos DB `userProgress` container keyed by stable SWA `userId`.
+- **Cross-device progress sync**: On sign-in, the frontend fetches server progress, merges with localStorage (keeping `completed=True` and `max(position)`), and pushes the merged result back. Subsequent saves go to both localStorage and the authenticated `/api/me/progress/{certId}` endpoint.
+- **Auth unit tests**: `src/functions/test_auth.py` covers `_get_swa_user` header parsing (valid, missing, malformed), `/api/me` identity endpoint, and progress GET/POST endpoints (401 for unauthenticated, single update, bulk merge, validation).
 - **SWA backend linking re-enables EasyAuth**: The `az staticwebapp backends link` command automatically enables authentication on the linked Functions app. The deploy workflow disables EasyAuth **after** linking the backend, with a restart and smoke test to ensure propagation.
 - **Cosmos SQL RBAC scope**: Cosmos DB SQL role assignment scope must be the fully-qualified DB scope `${cosmosDb.id}/dbs/${cosmosDbDatabaseName}`.
 - **Cosmos RBAC for GitHub OIDC**: The deploy-infra workflow extracts the service principal `oid` from the ARM access token and passes it as `automationPrincipalId` to Bicep, which grants Cosmos SQL Data Contributor at the database scope. The generate-content workflow also idempotently ensures this RBAC exists before running pipeline tools.
@@ -133,20 +136,30 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 - Track listening progress (completion, position)
 - Sync progress to Cosmos DB (authenticated) or localStorage (anonymous)
 - Responsive design for desktop and mobile
-- Handle Azure AD B2C authentication when enabled
+- Handle SWA built-in authentication (Microsoft provider)
+- Merge server + local progress on sign-in for cross-device sync
 - Populate certification dropdown dynamically from the backend
 
 **Key Files**:
 - `src/web/index.html` - Main application shell
-- `src/web/js/app.js` - Application logic (includes player, progress, and auth)
+- `src/web/js/app.js` - Application logic (includes player, progress, auth)
 - `src/web/css/styles.css` - Styling
-- `src/web/staticwebapp.config.json` - Static Web Apps routing
+- `src/web/staticwebapp.config.json` - Static Web Apps routing and auth config
+- `src/functions/test_auth.py` - Unit tests for auth helpers and progress endpoints
 
 **Context**:
 - Deployed to Azure Static Web Apps
 - Calls Azure Functions API for episode data and audio streaming
 - Audio served via Functions proxy (no public Blob access)
-- B2C authentication optional via feature flag
+- Authentication via SWA built-in Microsoft (AAD) provider (zero setup, free)
+- GitHub, Twitter, and Google providers blocked via route config
+
+**Authentication flow**:
+- Sign-in redirects to `/.auth/login/aad` (SWA built-in Microsoft OAuth)
+- SWA injects `x-ms-client-principal` header to linked Functions backend
+- Backend decodes header via `_get_swa_user()` for stable userId
+- Authenticated progress stored in Cosmos `userProgress` container
+- Cross-device sync: on sign-in, merges server + localStorage progress (keeps most-complete state)
 
 **Implementation details**:
 - Certifications are fetched from `GET /api/certifications` (Cosmos DISTINCT over `episodes`).
@@ -183,7 +196,7 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 **Context**:
 - All resources prefer Managed Identity for authentication
 - Storage accounts have public access disabled
-- Parameters: `certificationId`, `audioFormat`, `enableB2C`, `enableStudyPartner`, `location`, `foundryLocation`
+- Parameters: `certificationId`, `audioFormat`, `enableStudyPartner`, `location`, `foundryLocation`
 
 **Keyless storage + RBAC**:
 - Functions runtime storage (`AzureWebJobsStorage`) is configured with `AzureWebJobsStorage__credential=managedidentity` and service URIs, and the Functions identity is granted:

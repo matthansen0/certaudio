@@ -31,6 +31,9 @@ let state = {
     progress: {},
     isPlaying: false,
     collapsedDomains: {},  // Track which domains are collapsed
+    isAuthenticated: false,
+    userDetails: null,
+    identityProvider: null,
 };
 
 // DOM Elements
@@ -72,12 +75,17 @@ const elements = {
 // ============================================
 
 async function init() {
-    // Load user ID from storage or generate anonymous ID
-    state.userId = localStorage.getItem(STORAGE_KEY_USER) || generateUserId();
-    localStorage.setItem(STORAGE_KEY_USER, state.userId);
-    
-    // Load local progress
+    // Load local progress first (available immediately)
     state.progress = JSON.parse(localStorage.getItem(STORAGE_KEY_PROGRESS) || '{}');
+    
+    // Check SWA authentication
+    await checkAuth();
+    
+    // Fall back to anonymous ID if not authenticated
+    if (!state.isAuthenticated) {
+        state.userId = localStorage.getItem(STORAGE_KEY_USER) || generateUserId();
+        localStorage.setItem(STORAGE_KEY_USER, state.userId);
+    }
     
     // Set up event listeners
     setupEventListeners();
@@ -93,11 +101,96 @@ function generateUserId() {
     return 'anon_' + Math.random().toString(36).substring(2, 15);
 }
 
+// ============================================
+// Authentication
+// ============================================
+
+async function checkAuth() {
+    try {
+        const response = await fetch('/.auth/me');
+        if (!response.ok) return;
+        const data = await response.json();
+        const principal = data.clientPrincipal;
+        if (principal && principal.userId) {
+            state.userId = principal.userId;
+            state.userDetails = principal.userDetails || '';
+            state.identityProvider = principal.identityProvider || '';
+            state.isAuthenticated = true;
+            updateAuthUI();
+            // Load and merge server progress with localStorage
+            await loadAndMergeServerProgress();
+        }
+    } catch (e) {
+        console.debug('Auth check skipped (local dev or unavailable)');
+    }
+}
+
+function updateAuthUI() {
+    const userInfo = document.getElementById('userInfo');
+    if (!userInfo) return;
+    if (state.isAuthenticated) {
+        const displayName = state.userDetails || 'User';
+        userInfo.innerHTML = `
+            <div class="user-authenticated">
+                <span class="user-name">${displayName}</span>
+                <button class="btn-signout" onclick="signOut()" title="Sign out">Sign Out</button>
+            </div>
+        `;
+    } else {
+        userInfo.innerHTML = '<button class="btn-signin" onclick="signIn()">Sign In</button>';
+    }
+}
+
+function signIn() {
+    window.location.href = '/.auth/login/aad?post_login_redirect_uri=' + encodeURIComponent(window.location.pathname);
+}
+
+function signOut() {
+    window.location.href = '/.auth/logout?post_logout_redirect_uri=' + encodeURIComponent(window.location.pathname);
+}
+
+async function loadAndMergeServerProgress() {
+    try {
+        const response = await fetch(`${API_BASE}/me/progress/${state.certificationId}`);
+        if (!response.ok) return;
+        const data = await response.json();
+        const serverProgress = data.progress || {};
+        const localProgress = state.progress;
+
+        // Merge: for each episode, keep the "most complete" state
+        const merged = { ...localProgress };
+        for (const [epId, epData] of Object.entries(serverProgress)) {
+            const local = merged[epId] || {};
+            merged[epId] = {
+                completed: epData.completed || local.completed || false,
+                position: Math.max(epData.position || 0, local.position || 0),
+            };
+        }
+
+        state.progress = merged;
+        localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(merged));
+
+        // Push merged result back to server if there's new local data
+        if (Object.keys(localProgress).length > 0) {
+            await fetch(`${API_BASE}/me/progress/${state.certificationId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ progress: merged }),
+            });
+        }
+    } catch (e) {
+        console.warn('Could not load server progress:', e);
+    }
+}
+
 function setupEventListeners() {
     // Certification and format selection
     elements.certSelect.addEventListener('change', async (e) => {
         state.certificationId = e.target.value;
         localStorage.setItem(STORAGE_KEY_LAST_CERT, state.certificationId);
+        if (state.isAuthenticated) {
+            await loadAndMergeServerProgress();
+        }
         await loadEpisodes();
     });
     
@@ -302,21 +395,30 @@ async function loadTranscript(episodeNumber) {
 }
 
 async function syncProgressToServer() {
-    if (!state.userId || !state.currentEpisode) return;
+    if (!state.currentEpisode) return;
     
+    const payload = {
+        episodeId: state.currentEpisode.id,
+        completed: state.progress[state.currentEpisode.id]?.completed || false,
+        position: Math.floor(elements.audioElement.currentTime),
+    };
+
     try {
-        await fetch(
-            `${API_BASE}/progress/${state.userId}/${state.certificationId}`,
-            {
+        if (state.isAuthenticated) {
+            // Use authenticated endpoint (user extracted from SWA header)
+            await fetch(`${API_BASE}/me/progress/${state.certificationId}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    episodeId: state.currentEpisode.id,
-                    completed: state.progress[state.currentEpisode.id]?.completed || false,
-                    position: Math.floor(elements.audioElement.currentTime),
-                }),
-            }
-        );
+                body: JSON.stringify(payload),
+            });
+        } else if (state.userId) {
+            // Fallback: anonymous user endpoint
+            await fetch(`${API_BASE}/progress/${state.userId}/${state.certificationId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+        }
     } catch (error) {
         console.warn('Could not sync progress to server:', error);
     }

@@ -379,13 +379,16 @@ Basic (B1):
 
 **The API Endpoints**:
 ```
-GET /api/healthz                          # Health check
-GET /api/certifications                   # List available certs
-GET /api/episodes/{certId}/{format}       # Get episode list
-GET /api/audio/{certId}/{format}/{num}    # Stream audio (proxied from blob)
-GET /api/script/{certId}/{format}/{num}   # Get transcript
-POST /api/progress/{userId}/{certId}      # Save progress
-GET /api/progress/{userId}/{certId}       # Get progress
+GET  /api/healthz                          # Health check
+GET  /api/certifications                   # List available certs
+GET  /api/episodes/{certId}/{format}       # Get episode list
+GET  /api/audio/{certId}/{format}/{num}    # Stream audio (proxied from blob)
+GET  /api/script/{certId}/{format}/{num}   # Get transcript
+POST /api/progress/{userId}/{certId}       # Save progress (anonymous)
+GET  /api/progress/{userId}/{certId}       # Get progress (anonymous)
+GET  /api/me                               # Get authenticated user identity
+GET  /api/me/progress/{certId}             # Get progress (authenticated)
+POST /api/me/progress/{certId}             # Update progress (authenticated)
 ```
 
 **🎓 Learn More**:
@@ -581,6 +584,80 @@ batch_size: 10  # Episodes per batch
 
 ## Authentication & Security
 
+### User Authentication (SWA Built-in Auth)
+
+User sign-in uses **Azure Static Web Apps built-in authentication** with the Microsoft (AAD) provider. This requires zero app registrations, zero infrastructure, and costs nothing—it's included in the Standard SWA tier.
+
+**How It Works**:
+```
+User clicks "Sign In"
+    │
+    ▼
+/.auth/login/aad  →  Microsoft OAuth  →  /.auth/me (session cookie)
+    │
+    ▼
+SWA injects x-ms-client-principal header on all /api/* requests
+    │
+    ▼
+Functions backend decodes header → stable userId for Cosmos lookups
+```
+
+**Key Design Decisions**:
+
+| Decision | Choice | Why |
+|----------|--------|-----|
+| Auth provider | SWA built-in Microsoft (AAD) | Zero setup, free, any Microsoft account works |
+| ~~B2C~~ | Removed | Unnecessary cost and complexity for this use case |
+| GitHub/Twitter/Google | Blocked via routes | Only Microsoft provider enabled |
+| Progress storage | Cosmos DB `userProgress` container | Already deployed, partitioned by `/userId` |
+| Merge strategy | Keep "most complete" state | Handles offline/cross-device conflicts gracefully |
+
+**The `x-ms-client-principal` Header**:
+SWA automatically injects this base64-encoded JSON header on requests to the linked Functions backend:
+```json
+{
+  "identityProvider": "aad",
+  "userId": "abcdef123456",
+  "userDetails": "user@example.com",
+  "userRoles": ["authenticated", "anonymous"]
+}
+```
+
+The `userId` is stable per-provider—same user always gets the same ID, perfect for keying Cosmos documents.
+
+**Progress Sync Flow**:
+1. **Anonymous users**: progress saved to `localStorage` only (device-local)
+2. **Authenticated users**: progress saved to both `localStorage` (instant) and Cosmos DB (durable)
+3. **Sign in on new device**: server progress merges with local, keeping most-complete state per episode
+4. **Merge logic**: `completed = server OR local`, `position = max(server, local)`
+
+**Authenticated API Endpoints**:
+```
+GET  /api/me                              # User identity (from SWA header)
+GET  /api/me/progress/{certId}            # Get progress (requires authenticated role)
+POST /api/me/progress/{certId}            # Update progress (single or bulk merge)
+```
+
+The `/api/me/*` routes require the `authenticated` role in `staticwebapp.config.json`. SWA enforces this before the request reaches Functions.
+
+**Route Configuration** (`staticwebapp.config.json`):
+```json
+{
+  "routes": [
+    { "route": "/api/me/*", "allowedRoles": ["authenticated"] },
+    { "route": "/.auth/login/github", "statusCode": 404 },
+    { "route": "/.auth/login/twitter", "statusCode": 404 },
+    { "route": "/.auth/login/google", "statusCode": 404 }
+  ]
+}
+```
+
+**🎓 Learn More**:
+- [SWA Built-in Authentication](https://learn.microsoft.com/en-us/azure/static-web-apps/authentication-authorization)
+- [SWA Auth Providers](https://learn.microsoft.com/en-us/azure/static-web-apps/authentication-providers)
+
+---
+
 ### RBAC (Role-Based Access Control)
 
 We use Azure AD and Managed Identity everywhere. No keys, no connection strings.
@@ -588,7 +665,7 @@ We use Azure AD and Managed Identity everywhere. No keys, no connection strings.
 **The Principal Types**:
 1. **Automation Principal** (GitHub Actions) - runs the generation pipeline
 2. **Functions Managed Identity** - reads blobs, queries Cosmos
-3. **Users** (optional) - access the web player
+3. **Users** - authenticate via SWA built-in auth (Microsoft provider)
 
 **Key Role Assignments**:
 
@@ -917,6 +994,6 @@ Once you understand this system, you could:
 2. **Implement spaced repetition** - Quiz episodes that revisit old content
 3. **Add multi-language support** - Azure Speech supports 100+ languages
 4. **Create personalized playlists** - Based on weak areas from practice exams
-5. **Add B2C authentication** - The infrastructure is ready for it
+5. **Add more auth providers** - SWA supports GitHub, Google (requires client ID/secret config)
 
 The foundation is here. Make it yours. 🎧
