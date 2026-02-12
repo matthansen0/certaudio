@@ -784,6 +784,17 @@ jobs:
             --certification-id "$CERTIFICATION_ID" \
             --source-urls "$SOURCE_URLS"
 
+      # Re-authenticate before persistent search indexing.
+      # The OIDC assertion from the initial azure/login expires after ~5 minutes,
+      # and the cached access token lasts ~1 hour. By this point both may be stale
+      # because the prior indexing step can take 30-60 minutes.
+      - name: Azure Login (refresh for persistent search)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
       - name: Index content in persistent search (Study Partner)
         env:
           SOURCE_URLS: ${{ needs.discover-content.outputs.sourceUrls }}
@@ -942,8 +953,9 @@ jobs:
     name: Finalize Content Generation
     runs-on: ubuntu-latest
     needs: [discover-content, generate-episodes]
-    # Run finalize even if some batches failed - we want to keep successfully generated episodes
-    if: always() && needs.discover-content.result == 'success'
+    # Run finalize even if some episode batches failed, but only if indexing succeeded.
+    # Without indexed content, episodes won't exist and generate_index will refuse to publish.
+    if: always() && needs.discover-content.result == 'success' && !contains(needs.generate-episodes.result, 'skipped')
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
