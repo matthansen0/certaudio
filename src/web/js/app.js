@@ -239,6 +239,12 @@ function setupEventListeners() {
     if (elements.sidebarOverlay) {
         elements.sidebarOverlay.addEventListener('click', closeMobileSidebar);
     }
+    
+    // Mobile bottom nav: Episodes button opens sidebar
+    const btnMobileEpisodes = document.getElementById('btnMobileEpisodes');
+    if (btnMobileEpisodes) {
+        btnMobileEpisodes.addEventListener('click', toggleMobileSidebar);
+    }
 }
 
 // ============================================
@@ -255,6 +261,14 @@ function closeMobileSidebar() {
     elements.sidebar.classList.remove('open');
     elements.sidebarOverlay.classList.remove('visible');
     document.body.style.overflow = '';
+    
+    // Scroll to player section on mobile so user sees it immediately
+    if (window.innerWidth <= 900) {
+        const playerSection = document.querySelector('.player-section');
+        if (playerSection) {
+            playerSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }
 }
 
 // ============================================
