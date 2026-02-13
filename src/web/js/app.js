@@ -34,6 +34,10 @@ let state = {
     isAuthenticated: false,
     userDetails: null,
     identityProvider: null,
+    // Read-along state
+    readAlongActive: false,
+    syncData: null,        // Array of word boundary objects
+    currentWordIndex: -1,  // Index into syncData of currently spoken word
 };
 
 // DOM Elements
@@ -63,6 +67,7 @@ const elements = {
     transcriptPanel: document.getElementById('transcriptPanel'),
     transcriptContent: document.getElementById('transcriptContent'),
     btnCloseTranscript: document.getElementById('btnCloseTranscript'),
+    btnReadAlong: document.getElementById('btnReadAlong'),
     signInBtn: document.getElementById('signInBtn'),
     // Mobile menu
     btnMobileMenu: document.getElementById('btnMobileMenu'),
@@ -206,6 +211,7 @@ function setupEventListeners() {
     
     // Audio element events
     elements.audioElement.addEventListener('timeupdate', updateProgress);
+    elements.audioElement.addEventListener('timeupdate', updateReadAlongHighlight);
     elements.audioElement.addEventListener('loadedmetadata', updateDuration);
     elements.audioElement.addEventListener('ended', onEpisodeEnd);
     elements.audioElement.addEventListener('play', () => updatePlayButton(true));
@@ -231,6 +237,11 @@ function setupEventListeners() {
     elements.btnCloseTranscript.addEventListener('click', () => {
         elements.transcriptPanel.classList.remove('visible');
     });
+    
+    // Read Along
+    if (elements.btnReadAlong) {
+        elements.btnReadAlong.addEventListener('click', toggleReadAlong);
+    }
     
     // Mobile menu toggle
     if (elements.btnMobileMenu) {
@@ -392,17 +403,23 @@ async function loadTranscript(episodeNumber) {
         }
         
         const markdown = await response.text();
-        // Simple markdown to HTML conversion
-        const html = markdown
-            .replace(/^### (.*$)/gim, '<h3>$1</h3>')
-            .replace(/^## (.*$)/gim, '<h2>$1</h2>')
-            .replace(/^# (.*$)/gim, '<h1>$1</h1>')
-            .replace(/\*\*(.*)\*\*/gim, '<strong>$1</strong>')
-            .replace(/\*(.*)\*/gim, '<em>$1</em>')
-            .replace(/\n/gim, '</p><p>');
-        
-        elements.transcriptContent.innerHTML = `<p>${html}</p>`;
-        
+
+        // If read-along is active and sync data is loaded, render as word spans
+        if (state.readAlongActive && state.syncData) {
+            renderReadAlongTranscript(markdown);
+        } else {
+            // Simple markdown to HTML conversion
+            const html = markdown
+                .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+                .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+                .replace(/^# (.*$)/gim, '<h1>$1</h1>')
+                .replace(/\*\*(.*)\*\*/gim, '<strong>$1</strong>')
+                .replace(/\*(.*)\*/gim, '<em>$1</em>')
+                .replace(/\n/gim, '</p><p>');
+            
+            elements.transcriptContent.innerHTML = `<p>${html}</p>`;
+            elements.transcriptContent.classList.remove('read-along');
+        }
     } catch (error) {
         elements.transcriptContent.innerHTML = '<p>Transcript not available.</p>';
     }
@@ -646,6 +663,19 @@ function playEpisode(episode) {
     
     // Load transcript
     loadTranscript(episodeNumber);
+    
+    // Load sync data for read-along
+    state.syncData = null;
+    state.currentWordIndex = -1;
+    loadSyncData(episodeNumber).then(data => {
+        if (data) {
+            state.syncData = data;
+            // If read-along is active, re-render transcript with word spans
+            if (state.readAlongActive) {
+                loadTranscript(episodeNumber);
+            }
+        }
+    });
 }
 
 function togglePlay() {
@@ -693,6 +723,184 @@ function onEpisodeEnd() {
 
 function toggleTranscript() {
     elements.transcriptPanel.classList.toggle('visible');
+}
+
+// ============================================
+// Read-Along Functions
+// ============================================
+
+async function loadSyncData(episodeNumber) {
+    try {
+        const response = await fetch(
+            `${API_BASE}/sync/${state.certificationId}/${state.audioFormat}/${episodeNumber}`
+        );
+        if (!response.ok) {
+            return null;
+        }
+        return await response.json();
+    } catch (error) {
+        console.debug('Sync data not available:', error);
+        return null;
+    }
+}
+
+function toggleReadAlong() {
+    state.readAlongActive = !state.readAlongActive;
+    elements.btnReadAlong.classList.toggle('active', state.readAlongActive);
+    
+    if (state.readAlongActive) {
+        // Open transcript panel if not visible
+        if (!elements.transcriptPanel.classList.contains('visible')) {
+            elements.transcriptPanel.classList.add('visible');
+        }
+        
+        // If we have sync data, re-render transcript with word spans
+        if (state.syncData && state.currentEpisode) {
+            const episodeNumber = String(state.currentEpisode.sequenceNumber).padStart(3, '0');
+            loadTranscript(episodeNumber);
+        } else if (state.currentEpisode) {
+            // Try to load sync data
+            const episodeNumber = String(state.currentEpisode.sequenceNumber).padStart(3, '0');
+            loadSyncData(episodeNumber).then(data => {
+                if (data) {
+                    state.syncData = data;
+                    loadTranscript(episodeNumber);
+                } else {
+                    elements.transcriptContent.innerHTML = 
+                        '<p class="sync-unavailable">Read-along data is not yet available for this episode. ' +
+                        'It will be generated when new content is created.</p>';
+                }
+            });
+        }
+    } else {
+        // Revert to static transcript
+        state.currentWordIndex = -1;
+        elements.transcriptContent.classList.remove('read-along');
+        if (state.currentEpisode) {
+            const episodeNumber = String(state.currentEpisode.sequenceNumber).padStart(3, '0');
+            loadTranscript(episodeNumber);
+        }
+    }
+}
+
+function renderReadAlongTranscript(markdown) {
+    if (!state.syncData || state.syncData.length === 0) {
+        elements.transcriptContent.innerHTML = '<p>Read-along data not available.</p>';
+        return;
+    }
+    
+    // Build word spans grouped into paragraphs.
+    // We use the sync data as the source of truth for the spoken words.
+    const words = state.syncData.filter(w => w.type === 'Word' || w.type === 'Punctuation');
+    
+    if (words.length === 0) {
+        elements.transcriptContent.innerHTML = '<p>No word data available.</p>';
+        return;
+    }
+    
+    // Group words into paragraphs using sentence boundaries and pauses.
+    // A long pause (> 800ms gap) or a Sentence boundary starts a new paragraph.
+    const paragraphs = [];
+    let currentParagraph = [];
+    
+    for (let i = 0; i < words.length; i++) {
+        const word = words[i];
+        
+        // Detect paragraph breaks: gap > 1500ms between words
+        if (i > 0 && currentParagraph.length > 0) {
+            const prevEnd = words[i - 1].offset + words[i - 1].duration;
+            const gap = word.offset - prevEnd;
+            if (gap > 1500) {
+                paragraphs.push(currentParagraph);
+                currentParagraph = [];
+            }
+        }
+        
+        currentParagraph.push({ ...word, globalIndex: i });
+    }
+    if (currentParagraph.length > 0) {
+        paragraphs.push(currentParagraph);
+    }
+    
+    // Render HTML
+    const html = paragraphs.map((para, pIdx) => {
+        const wordSpans = para.map(w => {
+            const escaped = w.text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            return `<span class="word" data-index="${w.globalIndex}" data-offset="${w.offset}" data-duration="${w.duration}">${escaped}</span>`;
+        }).join(' ');
+        return `<p class="sync-paragraph" data-para="${pIdx}">${wordSpans}</p>`;
+    }).join('');
+    
+    elements.transcriptContent.innerHTML = html;
+    elements.transcriptContent.classList.add('read-along');
+    
+    // Add click-to-seek handlers on words
+    elements.transcriptContent.querySelectorAll('.word').forEach(span => {
+        span.addEventListener('click', (e) => {
+            const offsetMs = parseFloat(e.target.dataset.offset);
+            if (!isNaN(offsetMs)) {
+                elements.audioElement.currentTime = offsetMs / 1000;
+            }
+        });
+    });
+}
+
+function updateReadAlongHighlight() {
+    if (!state.readAlongActive || !state.syncData || state.syncData.length === 0) return;
+    
+    const currentTimeMs = elements.audioElement.currentTime * 1000;
+    const words = state.syncData.filter(w => w.type === 'Word' || w.type === 'Punctuation');
+    
+    // Binary search for the word being spoken at currentTimeMs
+    let lo = 0, hi = words.length - 1;
+    let bestIndex = -1;
+    
+    while (lo <= hi) {
+        const mid = (lo + hi) >>> 1;
+        if (words[mid].offset <= currentTimeMs) {
+            bestIndex = mid;
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    
+    if (bestIndex === state.currentWordIndex) return; // No change
+    state.currentWordIndex = bestIndex;
+    
+    // Update highlighting
+    const allWordSpans = elements.transcriptContent.querySelectorAll('.word');
+    const allParas = elements.transcriptContent.querySelectorAll('.sync-paragraph');
+    
+    // Remove previous highlight
+    allWordSpans.forEach(span => span.classList.remove('speaking'));
+    allParas.forEach(p => {
+        p.classList.remove('active-paragraph', 'past-paragraph');
+    });
+    
+    if (bestIndex < 0 || bestIndex >= allWordSpans.length) return;
+    
+    // Highlight current word
+    const activeSpan = elements.transcriptContent.querySelector(`.word[data-index="${bestIndex}"]`);
+    if (!activeSpan) return;
+    activeSpan.classList.add('speaking');
+    
+    // Highlight paragraph states
+    const activePara = activeSpan.closest('.sync-paragraph');
+    if (activePara) {
+        const activeParaIdx = parseInt(activePara.dataset.para);
+        allParas.forEach(p => {
+            const pIdx = parseInt(p.dataset.para);
+            if (pIdx === activeParaIdx) {
+                p.classList.add('active-paragraph');
+            } else if (pIdx < activeParaIdx) {
+                p.classList.add('past-paragraph');
+            }
+        });
+    }
+    
+    // Auto-scroll to keep active word visible
+    activeSpan.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 // ============================================

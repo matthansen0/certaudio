@@ -72,7 +72,13 @@ def get_speech_config() -> speechsdk.SpeechConfig:
     return config
 
 
-def synthesize_ssml(ssml_content: str, output_path: str, max_retries: int = 3) -> tuple[bool, float]:
+def synthesize_ssml(
+    ssml_content: str,
+    output_path: str,
+    max_retries: int = 3,
+    word_boundaries: list | None = None,
+    audio_offset_ms: float = 0,
+) -> tuple[bool, float]:
     """
     Synthesize SSML to audio file with retry logic.
 
@@ -80,6 +86,10 @@ def synthesize_ssml(ssml_content: str, output_path: str, max_retries: int = 3) -
         ssml_content: SSML markup
         output_path: Path to save MP3 file
         max_retries: Maximum number of retry attempts
+        word_boundaries: If provided, word boundary events are appended here.
+            Each entry is a dict with keys: text, offset (ms), duration (ms), type.
+        audio_offset_ms: Base offset in ms to add to word boundary timestamps
+            (used when concatenating multiple segments).
 
     Returns:
         Tuple of (success, duration_seconds)
@@ -98,6 +108,17 @@ def synthesize_ssml(ssml_content: str, output_path: str, max_retries: int = 3) -
         synthesizer = speechsdk.SpeechSynthesizer(
             speech_config=config, audio_config=audio_config
         )
+
+        # Hook word boundary events to capture sync data
+        if word_boundaries is not None:
+            def _on_word_boundary(evt):
+                word_boundaries.append({
+                    "text": evt.text,
+                    "offset": evt.audio_offset / 10_000 + audio_offset_ms,  # 100ns ticks → ms
+                    "duration": evt.duration.total_seconds() * 1000,
+                    "type": evt.boundary_type.name,  # Word, Punctuation, Sentence
+                })
+            synthesizer.synthesis_word_boundary.connect(_on_word_boundary)
 
         # Synthesize
         result = synthesizer.speak_ssml_async(ssml_content).get()
@@ -146,10 +167,13 @@ def synthesize_ssml(ssml_content: str, output_path: str, max_retries: int = 3) -
 def synthesize_audio_segments(
     ssml_segments: list[str],
     output_path: str,
+    word_boundaries: list | None = None,
 ) -> tuple[bool, float]:
     """Synthesize multiple SSML segments and concatenate resulting MP3 files.
 
     This avoids the Speech service max media duration limit (~10 minutes) per request.
+    Word boundary offsets are accumulated across segments so timestamps are relative
+    to the final concatenated output.
     """
     if not ssml_segments:
         return False, 0
@@ -157,10 +181,16 @@ def synthesize_audio_segments(
     temp_paths: list[str] = []
     total_duration = 0.0
 
+    accumulated_offset_ms = 0.0
     base = Path(output_path)
     for idx, segment in enumerate(ssml_segments, start=1):
         part_path = str(base.with_name(f"{base.stem}.part{idx:02d}{base.suffix}"))
-        ok, dur = synthesize_ssml(segment, part_path)
+        ok, dur = synthesize_ssml(
+            segment,
+            part_path,
+            word_boundaries=word_boundaries,
+            audio_offset_ms=accumulated_offset_ms,
+        )
         if not ok:
             # Best-effort cleanup
             for p in temp_paths:
@@ -171,6 +201,7 @@ def synthesize_audio_segments(
             return False, 0
         temp_paths.append(part_path)
         total_duration += dur
+        accumulated_offset_ms += dur * 1000  # seconds → ms
 
     def _strip_id3_tags(data: bytes) -> bytes:
         """Remove ID3v2 (start) and ID3v1 (end) tags from MP3 data."""
@@ -231,16 +262,22 @@ def synthesize_audio(
 
     print(f"Synthesizing audio for episode {episode_number}...")
 
+    # Capture word boundary events for read-along sync
+    word_boundaries: list[dict] = []
+
     # Synthesize
-    success, duration = synthesize_ssml(ssml_content, output_path)
+    success, duration = synthesize_ssml(
+        ssml_content, output_path, word_boundaries=word_boundaries
+    )
 
     if not success:
         raise RuntimeError(f"Audio synthesis failed for episode {episode_number}")
 
-    print(f"Audio synthesized: {duration:.1f} seconds")
+    print(f"Audio synthesized: {duration:.1f} seconds, {len(word_boundaries)} word boundaries captured")
 
     return {
         "audio_path": output_path,
         "duration_seconds": duration,
         "filename": filename,
+        "word_boundaries": word_boundaries,
     }

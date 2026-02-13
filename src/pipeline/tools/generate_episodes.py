@@ -743,6 +743,7 @@ def process_skill_domain(
             certification_id=certification_id,
             audio_format=audio_format,
             episode_number=current_episode_number,
+            word_boundaries=audio_result.get("word_boundaries"),
         )
         print(f"  - Audio URL: {upload_result['audio_url']}")
 
@@ -762,6 +763,7 @@ def process_skill_domain(
             source_urls=all_source_urls,
             content_hash=retrieved_content["content_hash"],
             title=domain_title,  # Title with part number for display
+            sync_url=upload_result.get("sync_url"),
         )
         print(f"  - Episode ID: {episode_doc['id']}")
         
@@ -845,14 +847,19 @@ def synthesize_audio_with_chunking(
 
     print(f"Narration is long ({narration_words} words); synthesizing in {len(ssml_segments)} segment(s)...")
 
-    ok, duration = synthesize_audio_segments(ssml_segments, output_path)
+    # Capture word boundary events across all segments
+    word_boundaries: list[dict] = []
+    ok, duration = synthesize_audio_segments(ssml_segments, output_path, word_boundaries=word_boundaries)
     if not ok:
         raise RuntimeError(f"Audio synthesis failed for episode {episode_number}")
+
+    print(f"  - {len(word_boundaries)} word boundaries captured across segments")
 
     return {
         "audio_path": output_path,
         "duration_seconds": duration,
         "filename": filename,
+        "word_boundaries": word_boundaries,
     }
 
 
@@ -982,6 +989,7 @@ def finalize_episode(
         certification_id=certification_id,
         audio_format=audio_format,
         episode_number=prepared["episode_number"],
+        word_boundaries=audio_result.get("word_boundaries"),
     )
     
     # Save to Cosmos DB
@@ -999,6 +1007,7 @@ def finalize_episode(
         source_urls=prepared["source_urls"],
         content_hash=prepared["content_hash"],
         title=prepared["episode_title"],
+        sync_url=upload_result.get("sync_url"),
     )
     
     return episode_doc

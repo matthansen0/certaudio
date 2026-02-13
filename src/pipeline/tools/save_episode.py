@@ -25,6 +25,7 @@ def save_episode(
     source_urls: list[str],
     content_hash: str,
     title: str = None,
+    sync_url: str = None,
 ) -> dict:
     """
     Save episode metadata to Cosmos DB.
@@ -43,6 +44,7 @@ def save_episode(
         source_urls: Source documentation URLs
         content_hash: Hash of source content
         title: Display title (may include part numbers). Defaults to skill_domain.
+        sync_url: URL to word-boundary sync JSON for read-along feature
 
     Returns:
         Saved episode document
@@ -78,6 +80,7 @@ def save_episode(
         "skillTopics": skill_topics,
         "audioUrl": audio_url,
         "scriptUrl": script_url,
+        "syncUrl": sync_url,
         "durationSeconds": duration_seconds,
         "isAmendment": is_amendment,
         "amendmentOf": f"{certification_id}-{audio_format}-{amendment_of:03d}" if is_amendment and amendment_of > 0 else None,

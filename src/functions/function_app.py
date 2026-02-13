@@ -740,6 +740,68 @@ def get_script(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # =============================================================================
+# GET /api/sync/{certificationId}/{format}/{episodeNumber}
+# =============================================================================
+@app.route(
+    route="sync/{certificationId}/{format}/{episodeNumber}",
+    methods=["GET"],
+    auth_level=func.AuthLevel.ANONYMOUS,
+)
+def get_sync(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get word-boundary sync data for read-along feature.
+
+    Returns:
+        JSON array of word boundary objects with offset, duration, text, type.
+    """
+    cert_id = req.route_params.get("certificationId")
+    audio_format = req.route_params.get("format")
+    episode_num = req.route_params.get("episodeNumber")
+
+    if not all([cert_id, audio_format, episode_num]):
+        return func.HttpResponse(
+            json.dumps({"error": "Missing required parameters"}),
+            status_code=400,
+            mimetype="application/json",
+        )
+
+    try:
+        blob_service = get_blob_service()
+        container_name = "scripts"
+        episode_id = _normalize_episode_id(episode_num)
+        blob_name = f"{cert_id}/{audio_format}/sync/{episode_id}.sync.json"
+
+        blob_client = blob_service.get_blob_client(
+            container=container_name, blob=blob_name
+        )
+
+        download = blob_client.download_blob()
+        sync_content = download.readall().decode("utf-8")
+
+        return func.HttpResponse(
+            sync_content,
+            mimetype="application/json",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+
+    except Exception as e:
+        # Sync data may not exist for older episodes - return 404 gracefully
+        error_str = str(e)
+        if "BlobNotFound" in error_str or "404" in error_str:
+            return func.HttpResponse(
+                json.dumps({"error": "Sync data not available for this episode"}),
+                status_code=404,
+                mimetype="application/json",
+            )
+        logger.error(f"Error getting sync data: {e}")
+        return func.HttpResponse(
+            json.dumps({"error": str(e)}),
+            status_code=500,
+            mimetype="application/json",
+        )
+
+
+# =============================================================================
 # POST /api/chat - Study Partner AI Chat
 # =============================================================================
 

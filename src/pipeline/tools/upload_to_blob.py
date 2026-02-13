@@ -1,7 +1,6 @@
-"""
-Upload audio, scripts, and SSML to Azure Blob Storage.
-"""
+"""Upload audio, scripts, and SSML to Azure Blob Storage."""
 
+import json
 import os
 from pathlib import Path
 
@@ -42,9 +41,10 @@ def upload_to_blob(
     certification_id: str,
     audio_format: str,
     episode_number: int,
+    word_boundaries: list[dict] | None = None,
 ) -> dict:
     """
-    Upload audio, script, and SSML to blob storage.
+    Upload audio, script, SSML, and optional word-boundary sync data to blob storage.
 
     Args:
         audio_file_path: Local path to MP3 file
@@ -53,9 +53,10 @@ def upload_to_blob(
         certification_id: Certification ID
         audio_format: 'instructional' or 'podcast'
         episode_number: Episode sequence number
+        word_boundaries: Optional list of word boundary dicts for read-along sync
 
     Returns:
-        Dict with audio_url, script_url, ssml_url
+        Dict with audio_url, script_url, ssml_url, sync_url
     """
     blob_service = get_blob_service_client()
 
@@ -79,6 +80,7 @@ def upload_to_blob(
     audio_blob_path = f"{certification_id}/{audio_format}/episodes/{episode_id}.mp3"
     script_blob_path = f"{certification_id}/{audio_format}/scripts/{episode_id}.md"
     ssml_blob_path = f"{certification_id}/{audio_format}/ssml/{episode_id}.ssml"
+    sync_blob_path = f"{certification_id}/{audio_format}/sync/{episode_id}.sync.json"
 
     def _upload_all() -> None:
         # Upload audio file
@@ -108,6 +110,17 @@ def upload_to_blob(
             overwrite=True,
             content_settings=ContentSettings(content_type="application/ssml+xml"),
         )
+
+        # Upload word-boundary sync data (if available)
+        if word_boundaries:
+            print(f"Uploading sync data: {sync_blob_path} ({len(word_boundaries)} boundaries)")
+            sync_json = json.dumps(word_boundaries, separators=(",", ":"))
+            scripts_container.upload_blob(
+                name=sync_blob_path,
+                data=sync_json,
+                overwrite=True,
+                content_settings=ContentSettings(content_type="application/json"),
+            )
 
     try:
         _upload_all()
@@ -143,4 +156,5 @@ def upload_to_blob(
         "audio_url": f"{base_url}/audio/{audio_blob_path}",
         "script_url": f"{base_url}/scripts/{script_blob_path}",
         "ssml_url": f"{base_url}/scripts/{ssml_blob_path}",
+        "sync_url": f"{base_url}/scripts/{sync_blob_path}" if word_boundaries else None,
     }
