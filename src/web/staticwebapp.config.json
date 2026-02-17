@@ -1,6 +1,18 @@
 {
   "routes": [
     {
+      "route": "/study.html",
+      "allowedRoles": ["authenticated"]
+    },
+    {
+      "route": "/api/chat",
+      "allowedRoles": ["authenticated"]
+    },
+    {
+      "route": "/api/chat/*",
+      "allowedRoles": ["authenticated"]
+    },
+    {
       "route": "/api/me/*",
       "allowedRoles": ["authenticated"]
     },

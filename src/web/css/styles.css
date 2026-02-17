@@ -765,36 +765,6 @@ body {
     height: 16px;
 }
 
-/* Read Along Button */
-.btn-read-along {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    background: rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    color: var(--color-text-light);
-    padding: 0.5rem 1rem;
-    border-radius: var(--radius-md);
-    font-size: 0.75rem;
-    cursor: pointer;
-    transition: all var(--transition-fast);
-}
-
-.btn-read-along:hover {
-    background: rgba(255, 255, 255, 0.2);
-}
-
-.btn-read-along.active {
-    background: rgba(0, 120, 212, 0.35);
-    border-color: var(--color-primary);
-    color: #fff;
-}
-
-.btn-read-along svg {
-    width: 16px;
-    height: 16px;
-}
-
 /* ============================================
    Complete Section
    ============================================ */
@@ -891,53 +861,6 @@ body {
 
 .transcript-content p {
     margin-bottom: 1rem;
-}
-
-/* ============================================
-   Read-Along Styles
-   ============================================ */
-
-/* Word spans in read-along mode */
-.transcript-content.read-along .word {
-    cursor: pointer;
-    border-radius: 2px;
-    transition: background 0.08s ease;
-    padding: 1px 2px;
-    margin: 0 -2px;
-}
-
-.transcript-content.read-along .word:hover {
-    text-decoration: underline;
-    text-decoration-color: var(--color-primary);
-}
-
-.transcript-content.read-along .word.speaking {
-    background: rgba(0, 120, 212, 0.22);
-    box-shadow: 0 0 0 2px rgba(0, 120, 212, 0.1);
-    border-radius: 3px;
-}
-
-/* Paragraph focus effect */
-.transcript-content.read-along .sync-paragraph {
-    opacity: 0.45;
-    transition: opacity 0.3s ease;
-    margin-bottom: 1rem;
-}
-
-.transcript-content.read-along .sync-paragraph.active-paragraph {
-    opacity: 1;
-}
-
-.transcript-content.read-along .sync-paragraph.past-paragraph {
-    opacity: 0.65;
-}
-
-/* Sync unavailable message */
-.sync-unavailable {
-    color: var(--color-text-muted);
-    font-style: italic;
-    text-align: center;
-    padding: 2rem 1rem;
 }
 
 /* ============================================
