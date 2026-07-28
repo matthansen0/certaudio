@@ -679,7 +679,39 @@ jobs:
                 --environment-name default \
                 --only-show-errors
             else
-              echo "Backend already linked; nothing to do."
+              echo "Backend already linked; verifying EasyAuth is still configured."
+
+              # Linking is what configures EasyAuth on the Function, and EasyAuth is
+              # what stops a caller reaching the Function hostname directly and
+              # forging x-ms-client-principal. A previous revision of this workflow
+              # disabled it for debugging, which also wiped the azureStaticWebApps
+              # provider registration. Re-linking is the only supported way to put it
+              # back, so detect that state and repair it rather than assuming an
+              # existing link implies a protected backend.
+              authUrl="https://management.azure.com${backendResourceId}/config/authsettingsV2/list?api-version=2023-01-01"
+              authEnabled=$(az rest --method get --url "$authUrl" \
+                --query "properties.platform.enabled" -o tsv 2>/dev/null || echo "unknown")
+              swaProvider=$(az rest --method get --url "$authUrl" \
+                --query "properties.identityProviders.azureStaticWebApps.enabled" -o tsv 2>/dev/null || echo "")
+
+              if [[ "$authEnabled" == "true" && "$swaProvider" == "True" ]]; then
+                echo "EasyAuth is enabled and the Static Web Apps provider is registered."
+              else
+                echo "::warning::EasyAuth is not correctly configured (platform=$authEnabled, swaProvider=$swaProvider). Re-linking the backend to restore it."
+                az staticwebapp backends unlink \
+                  --name "$SWA_NAME" \
+                  --resource-group "$AZURE_RESOURCE_GROUP" \
+                  --environment-name default \
+                  --remove-backend-auth \
+                  --only-show-errors
+                az staticwebapp backends link \
+                  --name "$SWA_NAME" \
+                  --resource-group "$AZURE_RESOURCE_GROUP" \
+                  --backend-resource-id "$backendResourceId" \
+                  --backend-region "$LOCATION" \
+                  --environment-name default \
+                  --only-show-errors
+              fi
             fi
 
             echo "Backend status:"
