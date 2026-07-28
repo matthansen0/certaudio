@@ -16,7 +16,7 @@
 4. [Authentication & Security](#authentication--security)
 5. [Cost Optimization](#cost-optimization)
 6. [Job Orchestration](#job-orchestration)
-7. [Workflow Orchestration](#workflow-orchestration)
+7. [Deployment](#deployment)
 8. [Customization Guide](#customization-guide)
 
 ---
@@ -705,35 +705,31 @@ resource cosmosDbSqlDataContributorRole 'Microsoft.DocumentDB/databaseAccounts/s
 
 ---
 
-### GitHub OIDC (Federated Identity)
+### Deployment Identity
 
-**What It Is**:
-Instead of storing Azure credentials in GitHub Secrets, we use OpenID Connect. GitHub proves its identity to Azure AD, which grants temporary tokens.
+**How It Works**:
+`azd` deploys as *you*. There is no service principal, no federated credential,
+and no stored secret, because there is no CI/CD system that needs to authenticate
+on your behalf.
 
-**Why This Matters**:
-- ✅ No long-lived secrets to rotate
-- ✅ No credentials that can leak
-- ✅ Azure sees exactly which GitHub workflow is calling
-
-**How It's Set Up**:
-```yaml
-# In workflow
-permissions:
-  id-token: write  # Allows requesting OIDC token
-
-# Login step
-- uses: azure/login@v2
-  with:
-    client-id: ${{ secrets.AZURE_CLIENT_ID }}
-    tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-    subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+```bash
+az login
+azd config set auth.useAzCliAuth true   # azd reuses the az credential
+azd up
 ```
 
-The `AZURE_CLIENT_ID` is an app registration with federated credentials pointing to your GitHub repo.
+The deploying user needs permission to create resources and assign roles, since
+provisioning grants the Function's managed identity its data-plane roles.
 
-**🎓 Learn More**:
-- [GitHub OIDC with Azure](https://learn.microsoft.com/en-us/azure/developer/github/connect-from-azure)
-- [Configuring federated credentials](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-azure)
+**Why not GitHub OIDC**:
+An earlier version used a federated credential so GitHub Actions could deploy.
+That works, but it makes the project depend on a fork with configured secrets,
+and content generation could never run there anyway because the data plane is
+private. Removing it means anyone can clone and `azd up` into their own
+subscription with nothing to set up first.
+
+Everything the app does at runtime uses its **managed identity**, so no
+credential exists to leak in either case.
 
 ---
 
@@ -864,23 +860,68 @@ and turning it off made the header forgeable.
 
 ---
 
-## Workflow Orchestration
+## Deployment
 
-### deploy-infra.yml
+### azd up
 
-**Triggers**: Push to `main` affecting `infra/`, `src/web/`, `src/functions/`
+`azure.yaml` defines the whole deployment: a Bicep template, two services, and a
+post-provision hook.
 
-**What It Does**:
-1. Validates Bicep syntax
-2. Deploys/updates all Azure resources
-3. Deploys Static Web App content
-4. Deploys Functions code
-5. Assigns the data-plane roles the Function identity needs
+```yaml
+infra:
+  provider: bicep
+  path: infra
+  module: main
 
-**Key Insight**: This is idempotent. Run it as many times as you want; it only changes what's different.
+services:
+  api:                        # src/functions -> Azure Functions
+  web:                        # src/web -> Static Web Apps
+```
 
-It is also the only workflow. Content generation and refresh are triggered from
-the admin portal.
+**What runs**:
+1. `azd provision` deploys `infra/main.bicep` at **subscription scope**, so it
+   creates the resource group itself
+2. Bicep assigns the Function's managed identity every data-plane role it needs
+3. `azd deploy` pushes the Functions code and the site
+4. The postprovision hook links the two and enforces authentication
+
+It is idempotent. Run `azd up` as often as you like; it changes only what differs.
+
+**Why subscription scope**: a resource-group-scoped template needs the group to
+exist first, which means a manual step before the "one command" deployment. At
+subscription scope, `azd up` genuinely is the whole thing.
+
+---
+
+### Why RBAC lives in Bicep
+
+The Function's role assignments used to be a few hundred lines of `az role
+assignment create` in a workflow. They are now
+[`infra/modules/rbac.bicep`](../infra/modules/rbac.bicep), deployed after the web
+module so it can consume `functionsAppPrincipalId`.
+
+Declarative assignments are idempotent by construction: the assignment name is a
+deterministic `guid(scope, principalId, roleId)`, so redeploying is a no-op
+rather than a "role already exists" error to swallow.
+
+---
+
+### What the postprovision hook does
+
+Two things genuinely cannot be expressed in Bicep, and both are required for the
+app to work:
+
+1. **Linking the Static Web App to the Functions backend.** This is what makes
+   `/api/*` reachable from the site and what injects `x-ms-client-principal`.
+2. **Enforcing EasyAuth on that backend.** Linking registers the Static Web Apps
+   identity provider but leaves `requireAuthentication=false`, so the Functions
+   hostname still answers anonymous callers and the principal header can be
+   forged. Since admin authorization trusts that header, this is a correctness
+   requirement, not hardening.
+
+The hook is idempotent, and it verifies rather than assumes: it polls until the
+Functions hostname returns `401` and the site's API returns `200`, failing the
+deployment if either never happens.
 
 ---
 

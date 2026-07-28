@@ -1,0 +1,33 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": {
+      "value": "${AZURE_ENV_NAME}"
+    },
+    "location": {
+      "value": "${AZURE_LOCATION}"
+    },
+    "principalId": {
+      "value": "${AZURE_PRINCIPAL_ID}"
+    },
+    "resourceGroupName": {
+      "value": "${AZURE_RESOURCE_GROUP}"
+    },
+    "uniqueSuffix": {
+      "value": "${AZURE_UNIQUE_SUFFIX}"
+    },
+    "openAiLocation": {
+      "value": "${AZURE_OPENAI_LOCATION=eastus}"
+    },
+    "speechLocation": {
+      "value": "${AZURE_SPEECH_LOCATION=eastus}"
+    },
+    "foundryLocation": {
+      "value": "${AZURE_FOUNDRY_LOCATION=swedencentral}"
+    },
+    "enableStudyPartner": {
+      "value": "${ENABLE_STUDY_PARTNER=false}"
+    }
+  }
+}

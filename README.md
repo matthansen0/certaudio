@@ -128,109 +128,48 @@ For the full topology and the job lifecycle, see
 
 ## Prerequisites
 
-- Azure subscription with permissions to create resources
-- GitHub repository with Actions enabled
-- Azure CLI installed locally (for initial setup)
+- Azure subscription with permissions to create resources and assign roles
+- [Azure Developer CLI](https://aka.ms/azd) and [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli)
 
 ## Quick Start
 
-### 1. Fork and Clone
+Deployment uses the [Azure Developer CLI](https://aka.ms/azd). There is no CI/CD
+to configure: no fork, no app registration, no GitHub secrets, no OIDC. Once
+deployed the app generates its own content from the admin portal, so it never
+needs the repository again.
+
+### 1. Prerequisites
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/certaudio.git
-cd certaudio
-```
+# Azure Developer CLI
+curl -fsSL https://aka.ms/install-azd.sh | bash
 
-### 2. Create Azure Resources and Configure OIDC
-
-GitHub Actions uses **OpenID Connect (OIDC)** for secure, keyless authentication to Azure. This is more secure than storing credentials as secrets.
-
-```bash
-# Login to Azure
 az login
-
-# Set your subscription
-SUBSCRIPTION_ID=$(az account show --query id -o tsv)
-TENANT_ID=$(az account show --query tenantId -o tsv)
-
-# Create resource group
-az group create --name rg-certaudio-dev --location centralus
-
-# Create an App Registration for GitHub Actions
-APP_NAME="sp-certaudio-github-$(whoami)"
-APP_ID=$(az ad app create --display-name "$APP_NAME" --query appId -o tsv)
-echo "App (Client) ID: $APP_ID"
-
-# Create service principal and assign Contributor role
-SP_ID=$(az ad sp create --id "$APP_ID" --query id -o tsv)
-az role assignment create \
-  --assignee "$APP_ID" \
-  --role "Contributor" \
-  --scope "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/rg-certaudio-dev"
-
-# Add federated credential for GitHub Actions OIDC
-# Replace YOUR_GITHUB_USERNAME with your GitHub username or org
-GITHUB_REPO="YOUR_GITHUB_USERNAME/certaudio"
-az ad app federated-credential create \
-  --id "$APP_ID" \
-  --parameters '{
-    "name": "github-actions-main",
-    "issuer": "https://token.actions.githubusercontent.com",
-    "subject": "repo:'"$GITHUB_REPO"':ref:refs/heads/main",
-    "audiences": ["api://AzureADTokenExchange"]
-  }'
-
-# Also allow workflow_dispatch (manual triggers)
-az ad app federated-credential create \
-  --id "$APP_ID" \
-  --parameters '{
-    "name": "github-actions-workflow-dispatch",
-    "issuer": "https://token.actions.githubusercontent.com", 
-    "subject": "repo:'"$GITHUB_REPO"':environment:production",
-    "audiences": ["api://AzureADTokenExchange"]
-  }'
-
-echo ""
-echo "=== Add these as GitHub Secrets ==="
-echo "AZURE_CLIENT_ID: $APP_ID"
-echo "AZURE_TENANT_ID: $TENANT_ID"
-echo "AZURE_SUBSCRIPTION_ID: $SUBSCRIPTION_ID"
-echo "AZURE_RESOURCE_GROUP: rg-certaudio-dev"
-echo "AZURE_UNIQUE_SUFFIX: (optional) e.g., 001 - pins deployments to stable resource names"
+azd config set auth.useAzCliAuth true   # reuse the az login, no second sign-in
 ```
 
-### 3. Configure GitHub Secrets
-
-Go to your repository **Settings > Secrets and variables > Actions** and add:
-
-| Secret | Description | Example |
-|--------|-------------|---------|
-| `AZURE_CLIENT_ID` | App registration client ID | `12345678-1234-...` |
-| `AZURE_TENANT_ID` | Azure AD tenant ID | `87654321-4321-...` |
-| `AZURE_SUBSCRIPTION_ID` | Azure subscription ID | `abcdef12-...` |
-| `AZURE_RESOURCE_GROUP` | Resource group name | `rg-certaudio-dev` |
-| `AZURE_UNIQUE_SUFFIX` | (Optional) Pin resource names | `001` |
-
-> **Note:** `AZURE_UNIQUE_SUFFIX` is recommended to prevent creating new resources on every workflow run. Without it, each run creates a full new set of resources.
-
-### 4. Deploy Infrastructure
-
-Run the **Deploy Infrastructure** workflow from GitHub Actions, or:
+### 2. Deploy
 
 ```bash
-az deployment group create \
-  --resource-group rg-certaudio-dev \
-  --template-file infra/main.bicep \
-  --parameters uniqueSuffix=001 enableStudyPartner=false
+git clone https://github.com/matthansen0/certaudio.git
+cd certaudio
+
+azd up
 ```
 
-### 5. Claim Admin Access
+`azd` prompts for an environment name, subscription, and region, then provisions
+everything and deploys both the API and the site. Expect roughly 15 minutes on a
+first run, most of it Azure OpenAI and AI Search.
 
-Deployment writes a one-time `ADMIN_BOOTSTRAP_TOKEN` app setting. Read it:
+### 3. Claim Admin Access
+
+Provisioning writes a one-time `ADMIN_BOOTSTRAP_TOKEN` app setting. Read it:
 
 ```bash
+azd env get-values | grep FUNCTIONS_APP_NAME
+
 az functionapp config appsettings list \
-  -g rg-certaudio-dev -n <function-app-name> \
+  -g rg-certaudio-<env> -n <function-app-name> \
   --query "[?name=='ADMIN_BOOTSTRAP_TOKEN'].value | [0]" -o tsv
 ```
 
@@ -238,6 +177,20 @@ Sign in to `https://<your-swa>.azurestaticapps.net/admin.html` and paste the
 token. That registers you as the first admin; the token cannot be claimed twice
 and rotates on every deployment. From then on you add other admins from the
 portal itself.
+
+### Optional configuration
+
+Set these before `azd up` to override the defaults:
+
+```bash
+azd env set ENABLE_STUDY_PARTNER true      # AI Foundry chat agent, ~$5-10/mo
+azd env set AZURE_OPENAI_LOCATION eastus   # GPT-4o has limited regional availability
+azd env set AZURE_UNIQUE_SUFFIX 001        # pin resource names to adopt an existing deployment
+```
+
+`AZURE_UNIQUE_SUFFIX` is only needed to adopt resources that already exist. Left
+unset, names are derived deterministically from your subscription and environment
+name, so repeated `azd up` runs are stable.
 
 ### 6. Generate Content
 
@@ -267,13 +220,15 @@ you not to redeploy mid-run.
 ## Project Structure
 
 ```
+├── azure.yaml                 # azd project: services, infra, hooks
 ├── .github/
-│   ├── agents.md              # Copilot agent definitions
-│   └── workflows/
-│       └── deploy-infra.yml   # Infrastructure deployment
+│   └── agents.md              # Copilot agent definitions
 ├── infra/
-│   ├── main.bicep             # Main orchestrator
-│   └── modules/               # Bicep modules
+│   ├── main.bicep             # Subscription-scoped entry point
+│   ├── main.parameters.json   # azd parameter bindings
+│   └── modules/               # Bicep modules (incl. rbac.bicep)
+├── scripts/
+│   └── postprovision.sh       # SWA backend link + EasyAuth enforcement
 ├── src/
 │   ├── functions/             # Azure Functions API
 │   │   ├── function_app.py    # Player and progress API
@@ -363,19 +318,11 @@ generation grounds on the same `certification-content` index the agent queries.
 
 ### Enabling Study Partner
 
-1. **Via GitHub Actions** (recommended):
-   - Go to Actions → Deploy Infrastructure
-   - Click "Run workflow"
-   - Check "Enable Study Partner" checkbox
-   - Click "Run workflow"
+```bash
+azd env set ENABLE_STUDY_PARTNER true
+azd provision
+```
 
-2. **Via Azure CLI**:
-   ```bash
-   az deployment group create \
-     --resource-group rg-certaudio-dev \
-     --template-file infra/main.bicep \
-     --parameters enableStudyPartner=true
-   ```
 
 ### Study Partner Architecture
 
