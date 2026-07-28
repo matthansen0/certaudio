@@ -498,44 +498,6 @@ jobs:
               --build-remote true \
               --timeout 600
 
-      - name: Disable App Service authentication (EasyAuth)
-        uses: azure/cli@v2
-        with:
-          inlineScript: |
-            set -euo pipefail
-
-            FUNCTIONS_APP_NAME="certaudio-dev-func-$UNIQUE_SUFFIX"
-            echo "Disabling App Service auth (v2) for: $FUNCTIONS_APP_NAME"
-
-            siteId=$(az functionapp show \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --name "$FUNCTIONS_APP_NAME" \
-              --query id -o tsv)
-
-            uri="https://management.azure.com${siteId}/config/authsettingsV2?api-version=2022-03-01"
-
-            # Bicep deploys authsettingsV2 with enabled=false, but SWA backend linking
-            # or other processes can re-enable it. Force-disable here.
-            az rest \
-              --method put \
-              --uri "$uri" \
-              --body '{
-                "properties": {
-                  "platform": { "enabled": false },
-                  "globalValidation": {
-                    "requireAuthentication": false,
-                    "unauthenticatedClientAction": "AllowAnonymous"
-                  }
-                }
-              }'
-
-            echo "Restarting Function App to apply auth changes..."
-            az functionapp restart \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --name "$FUNCTIONS_APP_NAME" \
-              --only-show-errors
-            sleep 20
-
       - name: Smoke test linked Functions backend
         uses: azure/cli@v2
         with:
@@ -703,36 +665,11 @@ jobs:
               --environment-name default \
               -o jsonc || true
 
-            # NOTE: SWA backend linking re-enables EasyAuth on the Functions app.
-            # We must disable it AFTER the link, not before.
-            echo "Disabling EasyAuth on Functions app (SWA backend link re-enables it)..."
-            siteId=$(az functionapp show \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --name "$FUNCTIONS_APP_NAME" \
-              --query id -o tsv)
+            # NOTE: SWA backend linking configures EasyAuth on the Functions app.
+            # That is deliberate - it blocks direct calls to the Function hostname so
+            # the x-ms-client-principal header can be trusted. Do not disable it.
 
-            authUri="https://management.azure.com${siteId}/config/authsettingsV2?api-version=2022-03-01"
-
-            az rest \
-              --method put \
-              --uri "$authUri" \
-              --body '{
-                "properties": {
-                  "platform": { "enabled": false },
-                  "globalValidation": {
-                    "requireAuthentication": false,
-                    "unauthenticatedClientAction": "AllowAnonymous"
-                  }
-                }
-              }'
-
-            echo "Restarting Functions app to apply auth changes..."
-            az functionapp restart \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --name "$FUNCTIONS_APP_NAME" \
-              --only-show-errors
-
-            # Wait for restart to propagate
+            # Wait for the backend link to propagate
             sleep 30
 
             # Smoke test with retry - backend link can take time to propagate

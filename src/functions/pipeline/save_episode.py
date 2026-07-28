@@ -7,10 +7,8 @@ from datetime import datetime, timezone
 
 from azure.cosmos import CosmosClient
 from azure.identity import DefaultAzureCredential
-from promptflow.core import tool
 
 
-@tool
 def save_episode(
     certification_id: str,
     audio_format: str,

@@ -1136,7 +1136,7 @@ def main() -> None:
     cosmos_client = create_cosmos_client_with_retry(cosmos_endpoint, token_credential)
 
     # Set up Jinja2 environment for prompts
-    prompts_dir = Path(__file__).parent.parent / "prompts"
+    prompts_dir = Path(__file__).parent / "prompts"
     jinja_env = Environment(loader=FileSystemLoader(prompts_dir))
 
     # Deterministic episode numbering to support parallel batch generation.

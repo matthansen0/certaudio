@@ -6,7 +6,6 @@ from pathlib import Path
 
 from azure.identity import DefaultAzureCredential
 from azure.storage.blob import BlobServiceClient, ContentSettings
-from promptflow.core import tool
 
 
 def get_blob_service_client() -> BlobServiceClient:
@@ -33,7 +32,6 @@ def get_blob_service_client() -> BlobServiceClient:
     return BlobServiceClient(account_url=account_url, credential=credential)
 
 
-@tool
 def upload_to_blob(
     audio_file_path: str,
     script_content: str,

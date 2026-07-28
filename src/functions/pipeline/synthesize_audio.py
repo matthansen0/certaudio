@@ -9,7 +9,6 @@ from pathlib import Path
 
 import azure.cognitiveservices.speech as speechsdk
 from azure.identity import DefaultAzureCredential
-from promptflow.core import tool
 
 
 def get_speech_config() -> speechsdk.SpeechConfig:
@@ -236,7 +235,6 @@ def synthesize_audio_segments(
     return True, total_duration
 
 
-@tool
 def synthesize_audio(
     ssml_content: str,
     episode_number: int,

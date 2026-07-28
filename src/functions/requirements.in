@@ -15,3 +15,13 @@ openai>=1.109.0,<2
 
 pydantic>=2.11.0,<3
 requests>=2.32.0,<3
+
+# Content generation pipeline (runs in-process via the admin portal queue trigger).
+# Deliberately no PromptFlow: it was only supplying a decorative @tool decorator
+# and dragged in flask, fastapi, sqlalchemy, pandas, numpy and pillow.
+azure-cognitiveservices-speech>=1.50.0,<2
+azure-storage-queue>=12.12.0,<13
+beautifulsoup4>=4.13.0,<5
+lxml>=5.4.0,<7
+markdownify>=1.1.0,<2
+jinja2>=3.1.0,<4

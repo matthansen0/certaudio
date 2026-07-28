@@ -211,20 +211,12 @@ resource functionsApp 'Microsoft.Web/sites@2023-12-01' = {
   }
 }
 
-// Ensure App Service Authentication/Authorization (EasyAuth) is disabled for this API.
-resource functionsAuth 'Microsoft.Web/sites/config@2022-03-01' = {
-  parent: functionsApp
-  name: 'authsettingsV2'
-  properties: {
-    platform: {
-      enabled: false
-    }
-    globalValidation: {
-      requireAuthentication: false
-      unauthenticatedClientAction: 'AllowAnonymous'
-    }
-  }
-}
+// NOTE: App Service Authentication (EasyAuth) is intentionally NOT disabled here.
+// Static Web Apps configures it when the Function App is linked as a backend, and
+// that is what makes the x-ms-client-principal header trustworthy: direct calls to
+// the Function hostname are rejected, so only SWA-proxied requests reach the API.
+// Admin endpoints depend on this. Do not add an authsettingsV2 resource that
+// disables it.
 
 // NOTE: Role assignments for the Functions managed identity are created via Azure CLI
 // in the deploy-infra workflow AFTER the Function App is deployed. This avoids
