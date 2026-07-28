@@ -679,25 +679,21 @@ jobs:
                 --environment-name default \
                 --only-show-errors
             else
-              echo "Backend already linked; verifying EasyAuth is still configured."
+              echo "Backend already linked; verifying the Static Web Apps auth provider is registered."
 
-              # Linking is what configures EasyAuth on the Function, and EasyAuth is
-              # what stops a caller reaching the Function hostname directly and
-              # forging x-ms-client-principal. A previous revision of this workflow
-              # disabled it for debugging, which also wiped the azureStaticWebApps
-              # provider registration. Re-linking is the only supported way to put it
-              # back, so detect that state and repair it rather than assuming an
-              # existing link implies a protected backend.
+              # Linking is what registers the azureStaticWebApps identity provider on
+              # the Function. A previous revision of this workflow disabled EasyAuth
+              # for debugging, which also wiped that registration, and re-linking is
+              # the only supported way to put it back. An existing link is therefore
+              # not proof that the backend is protected.
               authUrl="https://management.azure.com${backendResourceId}/config/authsettingsV2/list?api-version=2023-01-01"
-              authEnabled=$(az rest --method get --url "$authUrl" \
-                --query "properties.platform.enabled" -o tsv 2>/dev/null || echo "unknown")
               swaProvider=$(az rest --method get --url "$authUrl" \
                 --query "properties.identityProviders.azureStaticWebApps.enabled" -o tsv 2>/dev/null || echo "")
 
-              if [[ "$authEnabled" == "true" && "$swaProvider" == "True" ]]; then
-                echo "EasyAuth is enabled and the Static Web Apps provider is registered."
+              if [[ "$swaProvider" == "True" ]]; then
+                echo "Static Web Apps auth provider is registered."
               else
-                echo "::warning::EasyAuth is not correctly configured (platform=$authEnabled, swaProvider=$swaProvider). Re-linking the backend to restore it."
+                echo "::warning::Static Web Apps auth provider is missing. Re-linking the backend to restore it."
                 az staticwebapp backends unlink \
                   --name "$SWA_NAME" \
                   --resource-group "$AZURE_RESOURCE_GROUP" \
@@ -721,9 +717,36 @@ jobs:
               --environment-name default \
               -o jsonc || true
 
-            # NOTE: SWA backend linking configures EasyAuth on the Functions app.
-            # That is deliberate - it blocks direct calls to the Function hostname so
-            # the x-ms-client-principal header can be trusted. Do not disable it.
+            # Linking registers the azureStaticWebApps provider but leaves
+            # requireAuthentication=false, which means EasyAuth is present but not
+            # enforcing and the Function hostname still answers anonymous callers.
+            # Enforcement has to be set explicitly, and it is what makes the
+            # x-ms-client-principal header trustworthy. Do not turn this off.
+            echo "Enforcing authentication on the Functions app..."
+            authUrl="https://management.azure.com${backendResourceId}/config/authsettingsV2"
+            az rest --method get --url "${authUrl}/list?api-version=2023-01-01" -o json > /tmp/authsettings.json
+
+            providerEnabled=$(jq -r '.properties.identityProviders.azureStaticWebApps.enabled // false' /tmp/authsettings.json)
+            if [[ "$providerEnabled" != "true" ]]; then
+              echo "::error::azureStaticWebApps provider is not registered; refusing to enforce auth (it would lock out the Static Web App)."
+              exit 1
+            fi
+
+            jq '{properties: (.properties
+                  | .globalValidation.requireAuthentication = true
+                  | .globalValidation.unauthenticatedClientAction = "Return401")}' \
+              /tmp/authsettings.json > /tmp/authsettings-enforced.json
+
+            az rest --method put \
+              --url "${authUrl}?api-version=2023-01-01" \
+              --body @/tmp/authsettings-enforced.json \
+              --query "properties.globalValidation" -o jsonc
+
+            # The auth module only picks the change up on restart.
+            az functionapp restart \
+              --name "$FUNCTIONS_APP_NAME" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --only-show-errors
 
             # Wait for the backend link to propagate
             sleep 30
@@ -780,4 +803,25 @@ jobs:
               echo "Backend link not yet propagated, waiting 15s..."
               sleep 15
               ((attempt++))
+            done
+
+            # The smoke test above proves the SWA route works; it does not prove the
+            # Function is protected. Verify the direct hostname rejects anonymous
+            # callers, because that is what lets the app trust x-ms-client-principal.
+            echo "Verifying the Functions hostname rejects direct anonymous calls..."
+            directUrl="https://${FUNCTIONS_APP_NAME}.azurewebsites.net/api/healthz"
+            directAttempt=1
+            while [[ $directAttempt -le 10 ]]; do
+              directCode=$(curl -sS -o /dev/null -w "%{http_code}" "$directUrl" || true)
+              if [[ "$directCode" == "401" || "$directCode" == "403" ]]; then
+                echo "✅ Direct call blocked (HTTP $directCode)"
+                break
+              fi
+              if [[ $directAttempt -eq 10 ]]; then
+                echo "::error::${FUNCTIONS_APP_NAME}.azurewebsites.net returned HTTP $directCode to an anonymous request. EasyAuth is not enforcing, so x-ms-client-principal can be forged and /api/admin/* is exposed."
+                exit 1
+              fi
+              echo "Attempt $directAttempt: HTTP $directCode, waiting 15s for auth to propagate..."
+              sleep 15
+              ((directAttempt++))
             done
