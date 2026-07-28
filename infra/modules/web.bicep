@@ -11,12 +11,18 @@ param uniqueSuffix string
 param storageAccountName string
 param cosmosDbAccountName string
 param cosmosDbDatabaseName string
+param functionsSubnetId string
 @description('Optional AAD object ID of an automation principal (e.g., GitHub OIDC service principal) that should have Cosmos SQL Data Contributor permissions at the database scope.')
 param automationPrincipalId string = ''
 param openAiEndpoint string
 param speechEndpoint string
-@description('AI Search endpoint - optional since Search is deployed ephemerally during content generation')
+@description('Azure region of the Speech account, required by the Speech SDK during synthesis')
+param speechRegion string
+@description('AI Search endpoint used for grounding retrieval and Study Partner RAG')
 param searchEndpoint string = ''
+@description('One-time token that lets the first authenticated user claim admin. Rotate or clear after claiming.')
+@secure()
+param adminBootstrapToken string = newGuid()
 @description('AI Foundry endpoint - optional, enables agent mode when set')
 param foundryEndpoint string = ''
 @description('AI Foundry search connection name for agent')
@@ -71,6 +77,11 @@ resource funcStorageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
     allowSharedKeyAccess: false
     minimumTlsVersion: 'TLS1_2'
     supportsHttpsTrafficOnly: true
+    publicNetworkAccess: 'Disabled'
+    networkAcls: {
+      defaultAction: 'Deny'
+      bypass: 'AzureServices'
+    }
   }
 }
 
@@ -99,7 +110,9 @@ resource cosmosDb 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' existing = 
 resource functionsApp 'Microsoft.Web/sites@2023-12-01' = {
   name: functionsAppName
   location: location
-  tags: tags
+  tags: union(tags, {
+    'hidden-link: /app-insights-resource-id': appInsights.id
+  })
   kind: 'functionapp,linux'
   identity: {
     type: 'SystemAssigned'
@@ -107,14 +120,12 @@ resource functionsApp 'Microsoft.Web/sites@2023-12-01' = {
   properties: {
     serverFarmId: appServicePlan.id
     httpsOnly: true
+    publicNetworkAccess: 'Enabled'
+    virtualNetworkSubnetId: functionsSubnetId
     siteConfig: {
       linuxFxVersion: 'Python|3.11'
       pythonVersion: '3.11'
-      alwaysOn: true // Prevents cold starts - supported on Basic tier and above
-      cors: {
-        allowedOrigins: ['*']
-        supportCredentials: false
-      }
+      alwaysOn: true
       appSettings: [
         // Managed-identity based AzureWebJobsStorage (no storage keys)
         {
@@ -174,6 +185,29 @@ resource functionsApp 'Microsoft.Web/sites@2023-12-01' = {
           value: speechEndpoint
         }
         {
+          name: 'SPEECH_REGION'
+          value: speechRegion
+        }
+        // Admin portal: one-time bootstrap claim token.
+        {
+          name: 'ADMIN_BOOTSTRAP_TOKEN'
+          value: adminBootstrapToken
+        }
+        // Content generation tuning. MIN_WORDS_PER_PART drives narration length;
+        // the TTS values keep a single synthesis request under ~10 minutes.
+        {
+          name: 'MIN_WORDS_PER_PART'
+          value: '1200'
+        }
+        {
+          name: 'TTS_SINGLE_REQUEST_MAX_WORDS'
+          value: '1600'
+        }
+        {
+          name: 'TTS_MAX_WORDS_PER_SEGMENT'
+          value: '1400'
+        }
+        {
           name: 'SEARCH_ENDPOINT'
           value: searchEndpoint
         }
@@ -205,20 +239,12 @@ resource functionsApp 'Microsoft.Web/sites@2023-12-01' = {
   }
 }
 
-// Ensure App Service Authentication/Authorization (EasyAuth) is disabled for this API.
-resource functionsAuth 'Microsoft.Web/sites/config@2022-03-01' = {
-  parent: functionsApp
-  name: 'authsettingsV2'
-  properties: {
-    platform: {
-      enabled: false
-    }
-    globalValidation: {
-      requireAuthentication: false
-      unauthenticatedClientAction: 'AllowAnonymous'
-    }
-  }
-}
+// NOTE: App Service Authentication (EasyAuth) is intentionally NOT disabled here.
+// Static Web Apps configures it when the Function App is linked as a backend, and
+// that is what makes the x-ms-client-principal header trustworthy: direct calls to
+// the Function hostname are rejected, so only SWA-proxied requests reach the API.
+// Admin endpoints depend on this. Do not add an authsettingsV2 resource that
+// disables it.
 
 // NOTE: Role assignments for the Functions managed identity are created via Azure CLI
 // in the deploy-infra workflow AFTER the Function App is deployed. This avoids
@@ -293,6 +319,8 @@ output functionsAppUrl string = 'https://${functionsApp.properties.defaultHostNa
 output functionsAppId string = functionsApp.id
 output functionsAppPrincipalId string = functionsApp.identity.principalId
 output funcStorageAccountName string = funcStorageAccount.name
+output funcStorageAccountId string = funcStorageAccount.id
+output appServicePlanId string = appServicePlan.id
 
 output appInsightsName string = appInsights.name
 output appInsightsConnectionString string = appInsights.properties.ConnectionString

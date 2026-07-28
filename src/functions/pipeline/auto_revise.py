@@ -7,7 +7,6 @@ import os
 
 from azure.identity import DefaultAzureCredential
 from openai import AzureOpenAI
-from promptflow.core import tool
 
 
 REVISION_SYSTEM_PROMPT = """You are an expert educational content editor. Your task is to revise narration scripts based on quality feedback.
@@ -28,7 +27,6 @@ REVISION_SYSTEM_PROMPT = """You are an expert educational content editor. Your t
 Output ONLY the revised narration - no explanation or meta-commentary."""
 
 
-@tool
 def auto_revise(
     narration: str,
     quality_check_result: str,

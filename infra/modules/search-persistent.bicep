@@ -1,6 +1,6 @@
 // Persistent AI Search Module for Study Partner
-// Deployed only when enableStudyPartner=true in main.bicep
-// This is SEPARATE from the ephemeral search used during content generation
+// Always deployed. Holds the shared `certification-content` index used for both
+// generation grounding and Study Partner RAG.
 
 // ============================================================================
 // PARAMETERS

@@ -22,7 +22,7 @@ param automationPrincipalId string = ''
 var openAiName = '${resourcePrefix}-openai-${uniqueSuffix}'
 var speechName = '${resourcePrefix}-speech-${uniqueSuffix}'
 var docIntelName = '${resourcePrefix}-docintel-${uniqueSuffix}'
-// Note: searchName removed - AI Search is now deployed separately as ephemeral resource
+// Note: searchName removed - AI Search is deployed by search-persistent.bicep
 
 // ============================================================================
 // RESOURCES
@@ -40,6 +40,7 @@ resource openAi 'Microsoft.CognitiveServices/accounts@2024-04-01-preview' = {
   }
   properties: {
     customSubDomainName: openAiName
+    disableLocalAuth: true
     publicNetworkAccess: 'Enabled'
     networkAcls: {
       defaultAction: 'Allow'
@@ -63,6 +64,7 @@ resource gpt4oDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-
       version: '2024-08-06'
     }
     raiPolicyName: 'Microsoft.Default'
+    versionUpgradeOption: 'OnceNewDefaultVersionAvailable'
   }
 }
 
@@ -81,6 +83,8 @@ resource embeddingDeployment 'Microsoft.CognitiveServices/accounts/deployments@2
       name: 'text-embedding-3-large'
       version: '1'
     }
+    raiPolicyName: 'Microsoft.DefaultV2'
+    versionUpgradeOption: 'NoAutoUpgrade'
   }
   dependsOn: [gpt4oDeployment]
 }
@@ -97,6 +101,7 @@ resource speech 'Microsoft.CognitiveServices/accounts@2024-04-01-preview' = {
   }
   properties: {
     customSubDomainName: speechName
+    disableLocalAuth: true
     publicNetworkAccess: 'Enabled'
     networkAcls: {
       defaultAction: 'Allow'
@@ -115,6 +120,7 @@ resource documentIntelligence 'Microsoft.CognitiveServices/accounts@2024-04-01-p
   }
   properties: {
     customSubDomainName: docIntelName
+    disableLocalAuth: true
     publicNetworkAccess: 'Enabled'
     networkAcls: {
       defaultAction: 'Allow'
@@ -122,8 +128,9 @@ resource documentIntelligence 'Microsoft.CognitiveServices/accounts@2024-04-01-p
   }
 }
 
-// NOTE: Azure AI Search is deployed separately as an ephemeral resource
-// during content generation to save ~$250/month. See search-ephemeral.bicep.
+// NOTE: Azure AI Search is deployed by search-persistent.bicep. A single Basic
+// service holds the shared `certification-content` index used both for grounding
+// during generation and for Study Partner RAG at runtime.
 
 // Data-plane RBAC: allow automation principal to call OpenAI embeddings and completions.
 resource openAiUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (automationPrincipalId != '') {
@@ -169,5 +176,5 @@ output documentIntelligenceName string = documentIntelligence.name
 output documentIntelligenceEndpoint string = documentIntelligence.properties.endpoint
 output documentIntelligenceId string = documentIntelligence.id
 
-// Search endpoint placeholder - actual value comes from ephemeral deployment
+// Search endpoint placeholder - actual value comes from search-persistent.bicep
 output searchEndpoint string = ''

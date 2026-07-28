@@ -247,6 +247,9 @@ The system **NEVER truncates content**. Every topic in the discovery output is c
 
 ## Implementation Files
 
-- `src/pipeline/tools/deep_discover.py` - Learning path discovery via Catalog API
-- `src/pipeline/tools/discover_exam_content.py` - Exam skills outline scraping
-- `src/pipeline/tools/generate_episodes.py` - Episode generation from discovered content
+These run in-process inside the Function App, invoked by
+`src/functions/pipeline/orchestrator.py` when an admin submits a job.
+
+- `src/functions/pipeline/deep_discover.py` - Learning path discovery via Catalog API
+- `src/functions/pipeline/discover_exam_content.py` - Exam skills outline scraping
+- `src/functions/pipeline/generate_episodes.py` - Episode generation from discovered content

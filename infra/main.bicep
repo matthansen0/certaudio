@@ -31,6 +31,10 @@ param automationPrincipalId string = ''
 @description('Enable Study Partner feature with AI Foundry Agent (~$75+/month for AI Search + agent infrastructure). When false, the Study Partner page shows "not deployed".')
 param enableStudyPartner bool = false
 
+@description('One-time token allowing the first authenticated user to claim admin access in the portal. Emitted in the deployment output; defaults to a fresh GUID each deployment.')
+@secure()
+param adminBootstrapToken string = newGuid()
+
 // ============================================================================
 // VARIABLES
 // ============================================================================
@@ -46,6 +50,16 @@ var tags = {
 // ============================================================================
 // MODULES
 // ============================================================================
+
+// Network: VNet integration, private endpoints, and private DNS
+module network 'modules/network.bicep' = {
+  name: 'deploy-network'
+  params: {
+    resourcePrefix: resourcePrefix
+    location: location
+    tags: tags
+  }
+}
 
 // AI Services: OpenAI, Speech, Document Intelligence, AI Search
 module aiServices 'modules/ai-services.bicep' = {
@@ -82,7 +96,9 @@ module search 'modules/search-persistent.bicep' = {
     location: location
     uniqueSuffix: uniqueSuffix
     automationPrincipalId: automationPrincipalId
-    enabled: enableStudyPartner
+    // Always deployed: content generation grounds narration in this index, so it
+    // is no longer optional. enableStudyPartner now only gates the Foundry agent.
+    enabled: true
     tags: tags
   }
 }
@@ -114,17 +130,36 @@ module web 'modules/web.bicep' = {
     storageAccountName: data.outputs.storageAccountName
     cosmosDbAccountName: data.outputs.cosmosDbAccountName
     cosmosDbDatabaseName: data.outputs.cosmosDbDatabaseName
+    functionsSubnetId: network.outputs.functionsSubnetId
     automationPrincipalId: automationPrincipalId
     openAiEndpoint: aiServices.outputs.openAiEndpoint
     speechEndpoint: aiServices.outputs.speechEndpoint
+    speechRegion: aiServices.outputs.speechRegion
     searchEndpoint: search.outputs.searchEndpoint
+    adminBootstrapToken: adminBootstrapToken
     foundryEndpoint: aiFoundry.outputs.foundryAccountEndpoint
     foundrySearchConnection: aiFoundry.outputs.searchConnectionName
     tags: tags
   }
 }
 
-
+// Private Link: policy-compliant access from Functions and private batch jobs
+module privateEndpoints 'modules/private-endpoints.bicep' = {
+  name: 'deploy-private-endpoints'
+  params: {
+    resourcePrefix: resourcePrefix
+    location: location
+    privateEndpointsSubnetId: network.outputs.privateEndpointsSubnetId
+    cosmosDbId: data.outputs.cosmosDbId
+    dataStorageAccountId: data.outputs.storageAccountId
+    funcStorageAccountId: web.outputs.funcStorageAccountId
+    blobPrivateDnsZoneId: network.outputs.blobPrivateDnsZoneId
+    queuePrivateDnsZoneId: network.outputs.queuePrivateDnsZoneId
+    tablePrivateDnsZoneId: network.outputs.tablePrivateDnsZoneId
+    cosmosPrivateDnsZoneId: network.outputs.cosmosPrivateDnsZoneId
+    tags: tags
+  }
+}
 
 // ============================================================================
 // OUTPUTS

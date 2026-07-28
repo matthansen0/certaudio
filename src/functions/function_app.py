@@ -6,16 +6,22 @@ import base64
 import json
 import logging
 import os
-from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import azure.functions as func
+from azure.core.exceptions import ResourceNotFoundError
 from azure.cosmos import CosmosClient
 from azure.identity import DefaultAzureCredential
-from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions
+from azure.storage.blob import BlobServiceClient
 
 # Initialize function app
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
+
+# Admin portal API and the content-generation queue worker.
+# Registered after `app` exists because the blueprint imports helpers from here.
+from admin import bp as admin_bp  # noqa: E402
+
+app.register_blueprint(admin_bp)
 
 # Logging
 logger = logging.getLogger(__name__)
@@ -25,8 +31,6 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 _credential = None
 _blob_service = None
-_user_delegation_key = None
-_delegation_key_expiry = None
 
 
 def _get_credential():
@@ -49,25 +53,6 @@ def _get_blob_service():
     return _blob_service
 
 
-def _get_user_delegation_key():
-    """Get cached user delegation key (refreshed every 50 minutes)."""
-    global _user_delegation_key, _delegation_key_expiry
-    now = datetime.now(timezone.utc)
-    
-    # Refresh if key is missing or will expire within 10 minutes
-    if _user_delegation_key is None or _delegation_key_expiry is None or \
-       now + timedelta(minutes=10) >= _delegation_key_expiry:
-        start_time = now
-        _delegation_key_expiry = now + timedelta(hours=1)
-        _user_delegation_key = _get_blob_service().get_user_delegation_key(
-            key_start_time=start_time,
-            key_expiry_time=_delegation_key_expiry,
-        )
-        logger.info("Refreshed user delegation key")
-    
-    return _user_delegation_key, _delegation_key_expiry
-
-
 # =============================================================================
 # GET /api/healthz
 # =============================================================================
@@ -77,6 +62,28 @@ def healthz(req: func.HttpRequest) -> func.HttpResponse:
         json.dumps({"status": "ok"}),
         mimetype="application/json",
     )
+
+
+@app.route(route="readyz", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def readyz(req: func.HttpRequest) -> func.HttpResponse:
+    """Verify that private data dependencies are reachable."""
+    try:
+        database = get_cosmos_client().get_database_client(
+            os.environ.get("COSMOS_DB_DATABASE", "certaudio")
+        )
+        database.read()
+        get_blob_service().get_container_client("audio").get_container_properties()
+        return func.HttpResponse(
+            json.dumps({"status": "ready"}),
+            mimetype="application/json",
+        )
+    except Exception:
+        logger.exception("Dependency readiness check failed")
+        return func.HttpResponse(
+            json.dumps({"status": "not ready"}),
+            status_code=503,
+            mimetype="application/json",
+        )
 
 
 def _normalize_episode_id(episode_num: str) -> str:
@@ -293,18 +300,49 @@ def get_episodes(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # =============================================================================
-# GET /api/audio/{certificationId}/{format}/{episodeNumber}
+# GET|HEAD /api/audio/{certificationId}/{format}/{episodeNumber}
 # =============================================================================
+def _parse_byte_range(range_header: str, blob_size: int) -> tuple[int, int]:
+    """Parse one HTTP byte range and return its inclusive bounds."""
+    if not range_header.lower().startswith("bytes=") or "," in range_header:
+        raise ValueError("Only a single byte range is supported")
+
+    range_spec = range_header[6:].strip()
+    if range_spec.count("-") != 1:
+        raise ValueError("Invalid byte range")
+
+    start_text, end_text = (part.strip() for part in range_spec.split("-", 1))
+    if not start_text:
+        if not end_text.isdigit() or int(end_text) <= 0 or blob_size == 0:
+            raise ValueError("Invalid suffix byte range")
+        suffix_length = min(int(end_text), blob_size)
+        return blob_size - suffix_length, blob_size - 1
+
+    if not start_text.isdigit():
+        raise ValueError("Invalid byte range start")
+
+    start = int(start_text)
+    if start >= blob_size:
+        raise ValueError("Byte range starts beyond the blob")
+
+    if end_text:
+        if not end_text.isdigit():
+            raise ValueError("Invalid byte range end")
+        end = int(end_text)
+        if end < start:
+            raise ValueError("Byte range end precedes its start")
+        return start, min(end, blob_size - 1)
+
+    return start, blob_size - 1
+
+
 @app.route(
     route="audio/{certificationId}/{format}/{episodeNumber}",
-    methods=["GET"],
+    methods=["GET", "HEAD"],
     auth_level=func.AuthLevel.ANONYMOUS,
 )
 def get_audio(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Redirect to a SAS URL for direct blob download.
-    This avoids proxying large audio files through the Function.
-    """
+    """Proxy audio from private Blob Storage with HTTP range support."""
     cert_id = req.route_params.get("certificationId")
     audio_format = req.route_params.get("format")
     episode_num = req.route_params.get("episodeNumber")
@@ -317,37 +355,67 @@ def get_audio(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     try:
-        account_name = os.environ.get("STORAGE_ACCOUNT_NAME")
-        container_name = "audio"
         episode_id = _normalize_episode_id(episode_num)
         blob_name = f"{cert_id}/{audio_format}/episodes/{episode_id}.mp3"
-
-        # Use cached user delegation key for fast SAS generation
-        user_delegation_key, expiry_time = _get_user_delegation_key()
-        
-        # Generate SAS URL
-        sas_token = generate_blob_sas(
-            account_name=account_name,
-            container_name=container_name,
-            blob_name=blob_name,
-            user_delegation_key=user_delegation_key,
-            permission=BlobSasPermissions(read=True),
-            expiry=expiry_time,
+        blob_client = get_blob_service().get_blob_client(
+            container="audio",
+            blob=blob_name,
         )
-        
-        sas_url = f"https://{account_name}.blob.core.windows.net/{container_name}/{blob_name}?{sas_token}"
-        
-        # Redirect client to download directly from blob storage
+        properties = blob_client.get_blob_properties()
+        blob_size = properties.size
+        content_type = (
+            getattr(properties.content_settings, "content_type", None)
+            or "audio/mpeg"
+        )
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "public, max-age=3600",
+            "Content-Type": content_type,
+        }
+
+        if req.method == "HEAD":
+            headers["Content-Length"] = str(blob_size)
+            return func.HttpResponse(status_code=200, headers=headers)
+
+        range_header = req.headers.get("Range")
+        if range_header:
+            try:
+                start, end = _parse_byte_range(range_header, blob_size)
+            except ValueError:
+                return func.HttpResponse(
+                    status_code=416,
+                    headers={
+                        "Accept-Ranges": "bytes",
+                        "Content-Range": f"bytes */{blob_size}",
+                    },
+                )
+            status_code = 206
+            headers["Content-Range"] = f"bytes {start}-{end}/{blob_size}"
+        else:
+            start, end = 0, blob_size - 1
+            status_code = 200
+
+        content_length = end - start + 1 if blob_size else 0
+        headers["Content-Length"] = str(content_length)
+        body = (
+            blob_client.download_blob(offset=start, length=content_length).readall()
+            if content_length
+            else b""
+        )
         return func.HttpResponse(
-            status_code=302,
-            headers={
-                "Location": sas_url,
-                "Cache-Control": "no-cache",
-            },
+            body=body,
+            status_code=status_code,
+            headers=headers,
         )
 
+    except ResourceNotFoundError:
+        return func.HttpResponse(
+            json.dumps({"error": "Audio not found"}),
+            status_code=404,
+            mimetype="application/json",
+        )
     except Exception as e:
-        logger.error(f"Error generating audio URL: {e}")
+        logger.error(f"Error streaming audio: {e}")
         return func.HttpResponse(
             json.dumps({"error": str(e)}),
             status_code=500,

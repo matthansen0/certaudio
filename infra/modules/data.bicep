@@ -38,9 +38,10 @@ resource cosmosDb 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
     // Tenant policy enforces disableLocalAuth=true (modify effect).
     // Set it explicitly to avoid policy-driven drift and surprises.
     disableLocalAuth: true
-    // Required for the Function App to reach Cosmos DB over the public endpoint.
-    // For production, prefer Private Endpoints + VNet integration instead.
-    publicNetworkAccess: 'Enabled'
+    defaultIdentity: 'FirstPartyIdentity'
+    enableAutomaticFailover: true
+    minimalTlsVersion: 'Tls12'
+    publicNetworkAccess: 'Disabled'
     databaseAccountOfferType: 'Standard'
     locations: [
       {
@@ -147,10 +148,61 @@ resource userProgressContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabas
   }
 }
 
+// Admin portal: registered administrators. Also holds the single __bootstrap__
+// marker doc that records the one-time admin claim.
+resource adminsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = {
+  parent: database
+  name: 'admins'
+  properties: {
+    resource: {
+      id: 'admins'
+      partitionKey: {
+        paths: ['/id']
+        kind: 'Hash'
+      }
+      indexingPolicy: {
+        indexingMode: 'consistent'
+        automatic: true
+        includedPaths: [
+          { path: '/*' }
+        ]
+        excludedPaths: [
+          { path: '/"_etag"/?' }
+        ]
+      }
+    }
+  }
+}
+
+// Admin portal: content generation job records, polled by the admin UI for
+// progress. Replaces the GitHub Actions run as the operational audit trail.
+resource jobsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = {
+  parent: database
+  name: 'jobs'
+  properties: {
+    resource: {
+      id: 'jobs'
+      partitionKey: {
+        paths: ['/jobId']
+        kind: 'Hash'
+      }
+      indexingPolicy: {
+        indexingMode: 'consistent'
+        automatic: true
+        includedPaths: [
+          { path: '/*' }
+        ]
+        excludedPaths: [
+          { path: '/"_etag"/?' }
+        ]
+      }
+    }
+  }
+}
+
 // Storage Account
 // NOTE: Tenant policy enforces allowSharedKeyAccess=false and allowBlobPublicAccess=false via modify effects.
 // Set these explicitly to avoid policy-driven drift.
-// publicNetworkAccess must be Enabled for GitHub Actions runners to access the storage account.
 #disable-next-line BCP334
 resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: storageAccountName
@@ -167,10 +219,9 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
     allowSharedKeyAccess: false
     minimumTlsVersion: 'TLS1_2'
     supportsHttpsTrafficOnly: true
-    // Required for GitHub Actions access - runners are public
-    publicNetworkAccess: 'Enabled'
+    publicNetworkAccess: 'Disabled'
     networkAcls: {
-      defaultAction: 'Allow'
+      defaultAction: 'Deny'
       bypass: 'AzureServices'
     }
   }

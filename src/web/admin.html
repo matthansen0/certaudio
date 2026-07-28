@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - CertAudio</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/study.css">
+    <link rel="stylesheet" href="css/admin.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="app" class="study-app">
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <a href="index.html" class="logo-link">
+                        <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 18V5l12-2v13"></path>
+                            <circle cx="6" cy="18" r="3"></circle>
+                            <circle cx="18" cy="16" r="3"></circle>
+                        </svg>
+                        <span class="logo-text">CertAudio</span>
+                    </a>
+                </div>
+                <nav class="nav-links">
+                    <a href="index.html" class="nav-link">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                        </svg>
+                        Audio Player
+                    </a>
+                    <a href="study.html" class="nav-link">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                        </svg>
+                        Study Partner
+                    </a>
+                    <a href="admin.html" class="nav-link active">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                            <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"></path>
+                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                        </svg>
+                        Admin
+                    </a>
+                </nav>
+            </div>
+        </header>
+
+        <main class="admin-main">
+            <!-- Loading -->
+            <section id="admin-loading" class="admin-panel">
+                <p class="admin-muted">Checking your access…</p>
+            </section>
+
+            <!-- Bootstrap claim -->
+            <section id="admin-claim" class="admin-panel" hidden>
+                <h1>Claim admin access</h1>
+                <p class="admin-muted">
+                    No administrator has been registered yet. Enter the bootstrap token
+                    from your deployment output to claim this environment. The token
+                    can only be used once.
+                </p>
+                <div class="admin-row">
+                    <input id="claim-token" type="password" class="admin-input"
+                           placeholder="Bootstrap token" autocomplete="off">
+                    <button id="claim-submit" class="admin-button">Claim</button>
+                </div>
+                <p id="claim-error" class="admin-error" hidden></p>
+            </section>
+
+            <!-- Denied -->
+            <section id="admin-denied" class="admin-panel" hidden>
+                <h1>Not authorised</h1>
+                <p class="admin-muted">
+                    You are signed in as <strong id="denied-user"></strong>, which is not
+                    an administrator of this environment. Ask an existing admin to add you.
+                </p>
+            </section>
+
+            <!-- Console -->
+            <section id="admin-console" hidden>
+                <section class="admin-panel">
+                    <h1>Content generation</h1>
+                    <p class="admin-muted">
+                        Runs inside the Function App so it can reach the private data
+                        plane. One job runs at a time.
+                    </p>
+
+                    <div class="admin-grid">
+                        <label class="admin-field">
+                            <span>Mode</span>
+                            <select id="job-mode" class="admin-input">
+                                <option value="generate">Generate</option>
+                                <option value="refresh">Refresh</option>
+                            </select>
+                        </label>
+                        <label class="admin-field">
+                            <span>Certification</span>
+                            <input id="job-cert" class="admin-input" placeholder="e.g. ai-102" value="test">
+                        </label>
+                        <label class="admin-field">
+                            <span>Format</span>
+                            <select id="job-format" class="admin-input">
+                                <option value="instructional">Instructional</option>
+                                <option value="podcast">Podcast</option>
+                            </select>
+                        </label>
+                        <label class="admin-field admin-field-check">
+                            <input id="job-force" type="checkbox">
+                            <span>Force regenerate existing episodes</span>
+                        </label>
+                    </div>
+
+                    <button id="job-submit" class="admin-button">Start job</button>
+                    <p id="job-error" class="admin-error" hidden></p>
+                </section>
+
+                <section class="admin-panel">
+                    <h2>Active job</h2>
+                    <div id="active-job" class="admin-muted">No job running.</div>
+                    <p id="redeploy-warning" class="admin-warning" hidden>
+                        A job is running. Redeploying the Function App now will interrupt
+                        it. The job resumes on retry, but already-generated episodes are
+                        skipped rather than regenerated.
+                    </p>
+                </section>
+
+                <section class="admin-panel">
+                    <h2>Recent jobs</h2>
+                    <div id="job-history" class="admin-muted">Loading…</div>
+                </section>
+
+                <section class="admin-panel">
+                    <h2>Administrators</h2>
+                    <div id="admin-list" class="admin-muted">Loading…</div>
+                    <div class="admin-row">
+                        <input id="new-admin" class="admin-input"
+                               placeholder="user@example.com" autocomplete="off">
+                        <button id="add-admin" class="admin-button admin-button-secondary">Add</button>
+                    </div>
+                    <p id="admins-error" class="admin-error" hidden></p>
+                </section>
+            </section>
+        </main>
+    </div>
+
+    <script src="js/admin.js"></script>
+</body>
+</html>

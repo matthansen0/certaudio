@@ -11,7 +11,6 @@ from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
 from azure.search.documents.models import VectorizedQuery
 from openai import AzureOpenAI
-from promptflow.core import tool
 
 
 @dataclass
@@ -32,7 +31,6 @@ def get_embedding(text: str, openai_client: AzureOpenAI) -> list[float]:
     return response.data[0].embedding
 
 
-@tool
 def retrieve_content(
     certification_id: str,
     skill_domain: str,
