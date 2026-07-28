@@ -1,0 +1,17 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "AzureWebJobsFeatureFlags": "EnableWorkerIndexing",
+    "STORAGE_ACCOUNT_NAME": "",
+    "COSMOS_DB_ENDPOINT": "",
+    "COSMOS_DB_DATABASE": "certaudio",
+    "OPENAI_ENDPOINT": "",
+    "SPEECH_ENDPOINT": "",
+    "SEARCH_ENDPOINT": "",
+    "FOUNDRY_ENDPOINT": "",
+    "FOUNDRY_SEARCH_CONNECTION": "",
+    "FOUNDRY_MODEL": "gpt-4o"
+  }
+}

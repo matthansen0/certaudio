@@ -1,0 +1,17 @@
+# Azure Functions Python Requirements
+
+# Version 2.x requires Python 3.13 and is a separate migration.
+azure-functions>=1.24.0,<2
+azure-cosmos>=4.16.0,<5
+azure-storage-blob>=12.30.0,<13
+azure-identity>=1.25.0,<2
+
+# Version 12 has generated-model breaking changes.
+azure-search-documents>=11.6.0,<12
+
+# The existing Study Partner uses the 1.x agents/thread API.
+azure-ai-projects==1.0.0
+openai>=1.109.0,<2
+
+pydantic>=2.11.0,<3
+requests>=2.32.0,<3
