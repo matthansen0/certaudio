@@ -11,6 +11,7 @@ param uniqueSuffix string
 param storageAccountName string
 param cosmosDbAccountName string
 param cosmosDbDatabaseName string
+param functionsSubnetId string
 @description('Optional AAD object ID of an automation principal (e.g., GitHub OIDC service principal) that should have Cosmos SQL Data Contributor permissions at the database scope.')
 param automationPrincipalId string = ''
 param openAiEndpoint string
@@ -71,6 +72,11 @@ resource funcStorageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
     allowSharedKeyAccess: false
     minimumTlsVersion: 'TLS1_2'
     supportsHttpsTrafficOnly: true
+    publicNetworkAccess: 'Disabled'
+    networkAcls: {
+      defaultAction: 'Deny'
+      bypass: 'AzureServices'
+    }
   }
 }
 
@@ -99,7 +105,9 @@ resource cosmosDb 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' existing = 
 resource functionsApp 'Microsoft.Web/sites@2023-12-01' = {
   name: functionsAppName
   location: location
-  tags: tags
+  tags: union(tags, {
+    'hidden-link: /app-insights-resource-id': appInsights.id
+  })
   kind: 'functionapp,linux'
   identity: {
     type: 'SystemAssigned'
@@ -107,14 +115,12 @@ resource functionsApp 'Microsoft.Web/sites@2023-12-01' = {
   properties: {
     serverFarmId: appServicePlan.id
     httpsOnly: true
+    publicNetworkAccess: 'Enabled'
+    virtualNetworkSubnetId: functionsSubnetId
     siteConfig: {
       linuxFxVersion: 'Python|3.11'
       pythonVersion: '3.11'
-      alwaysOn: true // Prevents cold starts - supported on Basic tier and above
-      cors: {
-        allowedOrigins: ['*']
-        supportCredentials: false
-      }
+      alwaysOn: true
       appSettings: [
         // Managed-identity based AzureWebJobsStorage (no storage keys)
         {
@@ -293,6 +299,8 @@ output functionsAppUrl string = 'https://${functionsApp.properties.defaultHostNa
 output functionsAppId string = functionsApp.id
 output functionsAppPrincipalId string = functionsApp.identity.principalId
 output funcStorageAccountName string = funcStorageAccount.name
+output funcStorageAccountId string = funcStorageAccount.id
+output appServicePlanId string = appServicePlan.id
 
 output appInsightsName string = appInsights.name
 output appInsightsConnectionString string = appInsights.properties.ConnectionString

@@ -40,6 +40,7 @@ resource openAi 'Microsoft.CognitiveServices/accounts@2024-04-01-preview' = {
   }
   properties: {
     customSubDomainName: openAiName
+    disableLocalAuth: true
     publicNetworkAccess: 'Enabled'
     networkAcls: {
       defaultAction: 'Allow'
@@ -63,6 +64,7 @@ resource gpt4oDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-
       version: '2024-08-06'
     }
     raiPolicyName: 'Microsoft.Default'
+    versionUpgradeOption: 'OnceNewDefaultVersionAvailable'
   }
 }
 
@@ -81,6 +83,8 @@ resource embeddingDeployment 'Microsoft.CognitiveServices/accounts/deployments@2
       name: 'text-embedding-3-large'
       version: '1'
     }
+    raiPolicyName: 'Microsoft.DefaultV2'
+    versionUpgradeOption: 'NoAutoUpgrade'
   }
   dependsOn: [gpt4oDeployment]
 }
@@ -97,6 +101,7 @@ resource speech 'Microsoft.CognitiveServices/accounts@2024-04-01-preview' = {
   }
   properties: {
     customSubDomainName: speechName
+    disableLocalAuth: true
     publicNetworkAccess: 'Enabled'
     networkAcls: {
       defaultAction: 'Allow'
@@ -115,6 +120,7 @@ resource documentIntelligence 'Microsoft.CognitiveServices/accounts@2024-04-01-p
   }
   properties: {
     customSubDomainName: docIntelName
+    disableLocalAuth: true
     publicNetworkAccess: 'Enabled'
     networkAcls: {
       defaultAction: 'Allow'

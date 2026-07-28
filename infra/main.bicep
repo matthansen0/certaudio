@@ -47,6 +47,16 @@ var tags = {
 // MODULES
 // ============================================================================
 
+// Network: VNet integration, private endpoints, and private DNS
+module network 'modules/network.bicep' = {
+  name: 'deploy-network'
+  params: {
+    resourcePrefix: resourcePrefix
+    location: location
+    tags: tags
+  }
+}
+
 // AI Services: OpenAI, Speech, Document Intelligence, AI Search
 module aiServices 'modules/ai-services.bicep' = {
   name: 'deploy-ai-services'
@@ -114,6 +124,7 @@ module web 'modules/web.bicep' = {
     storageAccountName: data.outputs.storageAccountName
     cosmosDbAccountName: data.outputs.cosmosDbAccountName
     cosmosDbDatabaseName: data.outputs.cosmosDbDatabaseName
+    functionsSubnetId: network.outputs.functionsSubnetId
     automationPrincipalId: automationPrincipalId
     openAiEndpoint: aiServices.outputs.openAiEndpoint
     speechEndpoint: aiServices.outputs.speechEndpoint
@@ -124,7 +135,23 @@ module web 'modules/web.bicep' = {
   }
 }
 
-
+// Private Link: policy-compliant access from Functions and private batch jobs
+module privateEndpoints 'modules/private-endpoints.bicep' = {
+  name: 'deploy-private-endpoints'
+  params: {
+    resourcePrefix: resourcePrefix
+    location: location
+    privateEndpointsSubnetId: network.outputs.privateEndpointsSubnetId
+    cosmosDbId: data.outputs.cosmosDbId
+    dataStorageAccountId: data.outputs.storageAccountId
+    funcStorageAccountId: web.outputs.funcStorageAccountId
+    blobPrivateDnsZoneId: network.outputs.blobPrivateDnsZoneId
+    queuePrivateDnsZoneId: network.outputs.queuePrivateDnsZoneId
+    tablePrivateDnsZoneId: network.outputs.tablePrivateDnsZoneId
+    cosmosPrivateDnsZoneId: network.outputs.cosmosPrivateDnsZoneId
+    tags: tags
+  }
+}
 
 // ============================================================================
 // OUTPUTS
