@@ -11,7 +11,7 @@
       ]
     },
     {
-      "route": "/api/admin/*",
+      "route": "/api/portal/*",
       "allowedRoles": [
         "authenticated"
       ]

@@ -813,12 +813,12 @@ workflow dispatch, no OIDC token, no checkout.
 ### The Flow
 
 ```
-admin.html → POST /api/admin/jobs → job doc in Cosmos
+admin.html → POST /api/portal/jobs → job doc in Cosmos
                                   → message on content-jobs queue
                                   → queue trigger run_content_job
                                   → pipeline/orchestrator.py
                                   → progress written back to the job doc
-                                  → admin.html polls GET /api/admin/jobs/{id}
+                                  → admin.html polls GET /api/portal/jobs/{id}
 ```
 
 **Why a queue and not a direct call?** An HTTP request cannot stay open for
@@ -848,7 +848,7 @@ have to be right at deploy time and would be wrong for anyone forking the repo.
 
 ### Where the Trust Comes From
 
-`/api/admin/*` reads the caller's identity from the `x-ms-client-principal`
+`/api/portal/*` reads the caller's identity from the `x-ms-client-principal`
 header. That header is only trustworthy because Static Web Apps injects it and
 the Function is *not* reachable except through the SWA linked backend. Calling
 the Function hostname directly with a hand-crafted header returns `401` before
@@ -939,7 +939,7 @@ python -m pytest -q
 
 The tests cover the SWA principal parsing, the progress endpoints, the ranged
 audio proxy, and the admin authorization boundary — including that every
-`/api/admin/*` route rejects anonymous callers with `401` and non-admins with
+`/api/portal/*` route rejects anonymous callers with `401` and non-admins with
 `403`, and that `certificationId` cannot be used to inject into the search
 filter.
 
