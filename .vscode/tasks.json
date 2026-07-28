@@ -1,0 +1,70 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Python: Install dependencies",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "args": [
+        "-m",
+        "pip",
+        "install",
+        "-r",
+        "${workspaceFolder}/src/functions/requirements.txt",
+        "-r",
+        "${workspaceFolder}/src/pipeline/requirements.txt"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Azurite: Start",
+      "type": "shell",
+      "command": "azurite",
+      "args": [
+        "--silent",
+        "--location",
+        "${workspaceFolder}/.azurite"
+      ],
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "azurite",
+        "pattern": {
+          "regexp": "^(.*)$",
+          "message": 1
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*Azurite.*service is starting.*",
+          "endsPattern": ".*Azurite.*service is successfully listening.*"
+        }
+      }
+    },
+    {
+      "type": "func",
+      "label": "Functions: Start host",
+      "command": "host start",
+      "problemMatcher": "$func-python-watch",
+      "isBackground": true,
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "Python: Install dependencies",
+        "Azurite: Start"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/src/functions"
+      }
+    },
+    {
+      "label": "Python: Test Functions",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "args": [
+        "-m",
+        "pytest",
+        "${workspaceFolder}/src/functions",
+        "-v"
+      ],
+      "problemMatcher": []
+    }
+  ]
+}

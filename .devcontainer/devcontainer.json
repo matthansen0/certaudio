@@ -1,11 +1,13 @@
 {
   "name": "certaudio",
-  "image": "mcr.microsoft.com/devcontainers/python:3.11",
+  "image": "mcr.microsoft.com/devcontainers/python:3.11-bookworm",
   "features": {
-    "ghcr.io/devcontainers/features/node:1": {
-      "version": "20"
+    "ghcr.io/devcontainers/features/node:2": {
+      "version": "22"
     },
-    "ghcr.io/devcontainers/features/azure-cli:1": {},
+    "ghcr.io/devcontainers/features/azure-cli:1": {
+      "installBicep": true
+    },
     "ghcr.io/devcontainers/features/github-cli:1": {}
   },
   "postCreateCommand": "bash .devcontainer/postCreate.sh",
@@ -15,8 +17,11 @@
         "ms-azuretools.vscode-azurefunctions",
         "ms-azuretools.vscode-azureresourcegroups",
         "ms-azuretools.vscode-azurestaticwebapps",
+        "ms-azuretools.vscode-bicep",
         "ms-python.python",
-        "ms-python.vscode-pylance"
+        "ms-python.vscode-pylance",
+        "ms-python.vscode-python-envs",
+        "azurite.azurite"
       ]
     }
   },
@@ -27,6 +32,7 @@
   "forwardPorts": [7071, 4280],
   "remoteEnv": {
     "PYTHONDONTWRITEBYTECODE": "1",
-    "PYTHONUNBUFFERED": "1"
+    "PYTHONUNBUFFERED": "1",
+    "FUNCTIONS_CORE_TOOLS_TELEMETRY_OPTOUT": "1"
   }
 }

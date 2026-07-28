@@ -2,6 +2,7 @@
 .runs/
 *.log
 .logs/
+.azurite/
 
 # Local environment files (may contain secrets)
 .env
@@ -26,7 +27,14 @@ node_modules/
 
 # OS/editor
 .DS_Store
-.vscode/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/settings.json
+!.vscode/tasks.json
+
+# Azure Functions local settings may contain secrets
+src/functions/local.settings.json
 
 # Functions build/deploy artifacts
 functions.zip

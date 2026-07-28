@@ -1,0 +1,5 @@
+-r src/functions/requirements.in
+-r src/pipeline/requirements.in
+
+pip-tools>=7.5.0,<8
+pytest>=8.4.0,<9

@@ -1,19 +1,41 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Install Azure Functions Core Tools v4
-npm install -g azure-functions-core-tools@4 --unsafe-perm true
+readonly PYTHON_VERSION="3.11"
+readonly FUNCTIONS_CORE_TOOLS_VERSION="4.12.1"
+readonly SWA_CLI_VERSION="2.0.10"
+readonly AZURITE_VERSION="3.36.0"
 
-# Install SWA CLI (optional but useful for local SWA + API proxy)
-npm install -g @azure/static-web-apps-cli
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-# Python deps (best-effort; don't fail the whole container if one extra isn't needed)
-python -m pip install --upgrade pip
-
-if [ -f "src/functions/requirements.txt" ]; then
-  python -m pip install -r src/functions/requirements.txt
+if [[ -f .venv/pyvenv.cfg ]] && ! grep -Eq "^version = ${PYTHON_VERSION}([.]|$)" .venv/pyvenv.cfg; then
+  echo "Rebuilding .venv because it does not use Python ${PYTHON_VERSION}."
+  rm -rf .venv
 fi
 
-if [ -f "src/pipeline/requirements.txt" ]; then
-  python -m pip install -r src/pipeline/requirements.txt
+if [[ ! -x .venv/bin/python ]]; then
+  python3 -m venv .venv
 fi
+
+source .venv/bin/activate
+
+if [[ "$(python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" != "$PYTHON_VERSION" ]]; then
+  echo "Expected Python ${PYTHON_VERSION}, found $(python --version)." >&2
+  exit 1
+fi
+
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -r requirements-dev.txt
+python -m pip check
+
+npm install -g \
+  "azure-functions-core-tools@${FUNCTIONS_CORE_TOOLS_VERSION}" \
+  "@azure/static-web-apps-cli@${SWA_CLI_VERSION}" \
+  "azurite@${AZURITE_VERSION}"
+
+python -c "import azure.functions, azure.identity, azure.cosmos, azure.storage.blob, promptflow"
+az version --output none
+func --version
+swa --version
+azurite --version
+az bicep version
