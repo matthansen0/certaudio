@@ -131,7 +131,9 @@ jobs:
                 uniqueSuffix=$UNIQUE_SUFFIX \
                 location=$LOCATION \
                 openAiLocation=$OPENAI_LOCATION \
-                automationPrincipalId=$automationPrincipalId
+                foundryLocation=${FOUNDRY_LOCATION:-swedencentral} \
+                automationPrincipalId=$automationPrincipalId \
+                enableStudyPartner=$ENABLE_STUDY_PARTNER
 
   deploy:
     name: Deploy Infrastructure
@@ -250,7 +252,6 @@ jobs:
             QUEUE_CONTRIBUTOR="974c5e8b-45b9-4653-ba55-5f855dd0fb88"
             TABLE_CONTRIBUTOR="0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3"
             BLOB_READER="2a2b9908-6ea1-4ae2-8e65-a410df84e7d1"
-            BLOB_DELEGATOR="db58b8e5-c6ad-4a2a-8342-4190687cbf4a"
             
             # Helper function: assign role if not already assigned
             assign_role() {
@@ -281,7 +282,6 @@ jobs:
             echo ""
             echo "=== Data Storage: $DATA_STORAGE_NAME ==="
             assign_role "$DATA_STORAGE_SCOPE" "$BLOB_READER" "Storage Blob Data Reader"
-            assign_role "$DATA_STORAGE_SCOPE" "$BLOB_DELEGATOR" "Storage Blob Delegator"
             
             # Azure OpenAI: Cognitive Services OpenAI User (for Study Partner chat)
             OPENAI_USER="5e0bd9bd-7b93-4f28-af87-19fc36ad61bd"
@@ -472,7 +472,14 @@ jobs:
       - name: Zip Functions package (source only, remote build)
         run: |
           cd src/functions
-          zip -r "$GITHUB_WORKSPACE/functions.zip" . -x ".python_packages/*"
+          zip -r "$GITHUB_WORKSPACE/functions.zip" . \
+            -x ".python_packages/*" \
+               "__pycache__/*" \
+               ".pytest_cache/*" \
+               "test_*.py" \
+               "local.settings*.json" \
+               "requirements.in" \
+               ".funcignore"
 
       - name: Deploy to Azure Functions (zip deploy with remote build)
         uses: azure/cli@v2
@@ -529,19 +536,19 @@ jobs:
               --only-show-errors
             sleep 20
 
-      - name: Smoke test Functions directly
+      - name: Smoke test linked Functions backend
         uses: azure/cli@v2
         with:
           inlineScript: |
             set -euo pipefail
 
-            FUNCTIONS_APP_NAME="certaudio-dev-func-$UNIQUE_SUFFIX"
-            hostname=$(az functionapp show \
+            STATIC_WEB_APP_NAME="certaudio-dev-swa-$UNIQUE_SUFFIX"
+            hostname=$(az staticwebapp show \
               --resource-group "$AZURE_RESOURCE_GROUP" \
-              --name "$FUNCTIONS_APP_NAME" \
-              --query defaultHostName -o tsv)
+              --name "$STATIC_WEB_APP_NAME" \
+              --query defaultHostname -o tsv)
 
-            url="https://$hostname/api/healthz"
+            url="https://$hostname/api/readyz"
             echo "Smoke test: $url"
 
             maxAttempts=15
@@ -555,7 +562,7 @@ jobs:
 
               # 200 means healthy - success!
               if [[ "$httpCode" == "200" ]]; then
-                echo "✅ Functions healthz OK (HTTP $httpCode)"
+                echo "✅ Functions dependencies ready (HTTP $httpCode)"
                 exit 0
               fi
 
@@ -566,7 +573,7 @@ jobs:
             done
 
             # Final failure diagnostics
-            echo "::error::Functions /api/healthz did not return HTTP 200 after $maxAttempts attempts (last: HTTP $lastHttpCode)."
+            echo "::error::Functions /api/readyz did not return HTTP 200 after $maxAttempts attempts (last: HTTP $lastHttpCode)."
 
             echo "::group::Functions response headers"
             head -60 /tmp/functions_headers.txt || true
@@ -575,25 +582,6 @@ jobs:
             echo "::group::Functions response body (truncated)"
             head -200 /tmp/functions_body.txt || true
             echo "::endgroup::"
-
-            if [[ "$lastHttpCode" == "401" || "$lastHttpCode" == "403" ]]; then
-              # Disambiguate: function-key auth vs App Service auth.
-              masterKey=$(az functionapp keys list \
-                --resource-group "$AZURE_RESOURCE_GROUP" \
-                --name "$FUNCTIONS_APP_NAME" \
-                --query masterKey -o tsv 2>/dev/null || true)
-
-              if [[ -n "$masterKey" ]]; then
-                echo "::add-mask::$masterKey"
-                echo "Retrying once with x-functions-key header (diagnostic)..."
-                httpCodeKeyed=$(curl -sS -o /tmp/functions_body_keyed.txt -w "%{http_code}" -H "x-functions-key: $masterKey" "$url" || true)
-                echo "HTTP (with key) $httpCodeKeyed"
-
-                if [[ "$httpCodeKeyed" == "200" ]]; then
-                  echo "::error::Functions responded only when a host key was provided. This indicates the HTTP trigger is not anonymous."
-                fi
-              fi
-            fi
 
             exit 1
 
