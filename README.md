@@ -7,8 +7,8 @@ A fully automated Azure-native system that generates podcast-style or instructio
 - 🎧 **Auto-generated audio episodes** from official Microsoft Learn documentation
 - 📚 **All Microsoft certifications** - Azure, AI, Data, Security, M365, Power Platform, Dynamics 365
 - 🎙️ **Two formats**: Instructional (single authoritative voice) or Podcast (two-voice dialogue)
-- 🔄 **Amendment episodes** when Microsoft updates exam content
-- 📊 **Progress tracking** with optional Azure AD B2C authentication
+- 🔄 **Selective episode refresh** when Microsoft updates exam content
+- 📊 **Progress tracking** with optional Static Web Apps Microsoft authentication
 - 🤖 **AI Study Partner** (optional) - Chat with an AI agent that has RAG access to exam content
 - 🚀 **One-click deployment** with Bicep IaC
 
@@ -97,28 +97,17 @@ A fully automated Azure-native system that generates podcast-style or instructio
 
 ## Architecture
 
+```mermaid
+flowchart LR
+  GH[GitHub Actions<br/>OIDC + management plane] --> JOB[Triggered WebJob<br/>existing B1 plan]
+  JOB --> AI[OpenAI, Speech, ephemeral Search]
+  JOB --> PE[Private Endpoints]
+  SWA[Static Web Apps] --> FN[Public Functions API<br/>VNet integrated]
+  FN --> PE
+  PE --> DATA[Private Cosmos DB + Storage]
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           GitHub Actions CI/CD                              │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  deploy-infra.yml → Bicep → Azure Resources                                 │
-│  generate-content.yml → PromptFlow → Episodes                               │
-│  refresh-content.yml → Delta Check → Amendment Episodes                     │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                      │
-        ┌─────────────────────────────┼─────────────────────────────┐
-        ▼                             ▼                             ▼
-┌───────────────┐           ┌─────────────────┐           ┌─────────────────┐
-│  AI Services  │           │      Data       │           │       Web       │
-├───────────────┤           ├─────────────────┤           ├─────────────────┤
-│ • OpenAI      │           │ • Cosmos DB     │           │ • Static Web    │
-│ • AI Search   │◄─────────►│   (episodes,    │◄─────────►│   Apps          │
-│ • Doc Intel   │           │    sources,     │           │ • Functions API │
-│ • Speech      │           │    progress)    │           │ • (B2C optional)│
-└───────────────┘           │ • Blob Storage  │           └─────────────────┘
-                            │   (audio files) │
-                            └─────────────────┘
-```
+
+GitHub-hosted runners package and trigger the WebJob through Azure management endpoints, but they never access the private data plane. The Function remains public for the Static Web Apps linked backend; its Cosmos DB, data Blob, and host Blob/Queue/Table traffic resolves through five Private Endpoints. The job shares the Central US VNet through the App Service integration subnet.
 
 ## Prerequisites
 
@@ -215,12 +204,12 @@ Run the **Deploy Infrastructure** workflow from GitHub Actions, or:
 az deployment group create \
   --resource-group rg-certaudio-dev \
   --template-file infra/main.bicep \
-  --parameters certificationId=ai-102 audioFormat=instructional
+  --parameters uniqueSuffix=001 enableStudyPartner=false
 ```
 
 ### 5. Generate Content
 
-Run the **Generate Content** workflow to create audio episodes.
+Run the **Generate Content** workflow to deploy and trigger the Python WebJob hosted on the existing Central US B1 plan. The workflow deletes ephemeral AI Search when execution finishes.
 
 ## Configuration
 
@@ -230,12 +219,12 @@ Run the **Generate Content** workflow to create audio episodes.
 |-----------|---------|-------------|
 | `certificationId` | `ai-102` | Microsoft certification ID (see supported list above) |
 | `audioFormat` | `instructional` | `instructional` or `podcast` |
-| `instructionalVoice` | `en-US-AndrewNeural` | Voice for instructional format |
-| `podcastHostVoice` | `en-US-BrianNeural` | Host voice for podcast format |
-| `podcastExpertVoice` | `en-US-AvaNeural` | Expert voice for podcast format |
+| `instructionalVoice` | `en-US-Andrew:DragonHDLatestNeural` | Voice for instructional format |
+| `podcastHostVoice` | `en-US-Ava:DragonHDLatestNeural` | Host voice for podcast format |
+| `podcastExpertVoice` | `en-US-Andrew:DragonHDLatestNeural` | Expert voice for podcast format |
 | `forceRegenerate` | `false` | Regenerate episodes that already exist |
-| `enableB2C` | `false` | Enable Azure AD B2C authentication |
-| `location` | `canadacentral` | Azure region |
+| `enableStudyPartner` | `false` | Deploy persistent Search and AI Foundry Study Partner resources |
+| `location` | `centralus` | Core Azure region |
 
 ## Project Structure
 
@@ -251,7 +240,7 @@ Run the **Generate Content** workflow to create audio episodes.
 │   └── modules/               # Bicep modules
 ├── src/
 │   ├── functions/             # Azure Functions API
-│   ├── pipeline/              # PromptFlow content pipeline
+│   ├── pipeline/              # Content generation tools
 │   └── web/                   # Static Web App frontend
 └── README.md
 ```
@@ -292,20 +281,23 @@ The **Refresh Content** workflow runs weekly to:
 
 1. Check Microsoft Learn pages for content changes
 2. Compare content hashes against stored versions
-3. Generate amendment episodes for changed content
-4. Amendment episodes reference prior content: *"In Episode 5, we discussed X. Microsoft has since updated..."*
+3. Rebuild the temporary RAG index when updates exist
+4. Regenerate only the episode batches affected by changed sources
+5. Republish the validated episode index
 
 ## Local Development
 
-### Run Content Generation Locally
+### Development Environment
 
-The easiest way to run content generation is directly from the dev container. All "compute" happens on Azure's side (OpenAI, Speech) - your machine just sends HTTP requests.
+Reopen the repository in its dev container to get Python 3.11, Node 22, Azure Functions Core Tools, SWA CLI, Azurite, Bicep, and the exact development dependency lock. The bootstrap recreates a mismatched virtual environment automatically.
+
+The deployed Cosmos DB and Storage accounts are private. Full generation therefore runs in the **Generate Content** workflow's VNet-integrated job. The local runner requires private network connectivity to that VNet; without it, use local unit tests and emulators instead of changing the Azure firewalls.
 
 ```bash
 # Make sure you're logged in to Azure
 az login
 
-# Run full generation
+# Run only when this machine has private VNet connectivity
 ./scripts/run-local.sh dp-700                           # Defaults: instructional
 ./scripts/run-local.sh az-104 podcast                   # Podcast format
 
@@ -313,7 +305,7 @@ az login
 FORCE_REGENERATE=true ./scripts/run-local.sh dp-700
 ```
 
-The local runner:
+The local runner, when connected to the VNet:
 1. Resolves service endpoints from Azure (OpenAI, Speech, Cosmos, Storage)
 2. Creates an ephemeral AI Search service for indexing
 3. Runs the full pipeline: discover → index → generate
@@ -411,7 +403,7 @@ The **Study Partner** feature adds an AI-powered chat interface for interactive 
 
 ## Cost Estimation
 
-Approximate monthly costs (idle baseline - no content generation):
+Approximate platform costs vary by region and tenant policy. The private topology adds five Private Endpoints (roughly `$36.50/month` at `$0.01/hour` each, plus data processing). The triggered WebJob shares the existing B1 plan and adds no separate compute SKU; the existing Basic ACR remains always on but is no longer required by the pipeline runtime.
 
 | Service | Estimated Cost |
 |---------|---------------|
@@ -419,7 +411,12 @@ Approximate monthly costs (idle baseline - no content generation):
 | Azure Functions (B1 Basic) | $13 |
 | Azure Cosmos DB (Serverless) | $2-5 |
 | Azure Storage | $0.10 |
-| **Monthly Idle Cost** | **~$25-30/month** |
+| Azure Container Registry (Basic) | ~$5 |
+| Five Private Endpoints | ~$36.50 + data |
+| Triggered pipeline WebJob | Included in existing B1 plan |
+| Persistent AI Search (when deployed) | ~$75 |
+
+Microsoft Defender plans are subscription-policy costs and can materially exceed service usage. Review them with the subscription security owner rather than disabling them as an application deployment side effect.
 
 **Per-Generation Cost** (one certification):
 

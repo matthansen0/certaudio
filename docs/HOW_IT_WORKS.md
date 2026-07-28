@@ -34,27 +34,17 @@ Microsoft Learn → Discovery → RAG Index → AI Narration → Text-to-Speech 
 
 ### Architecture at a Glance
 
+```mermaid
+flowchart LR
+  GH[GitHub Actions<br/>management plane only] --> JOB[Triggered WebJob<br/>existing B1 plan]
+  JOB --> AI[OpenAI, Speech, ephemeral Search]
+  JOB --> PL[Private Link + private DNS]
+  SWA[Static Web Apps] --> FN[Public Function<br/>VNet integration]
+  FN --> PL
+  PL --> DATA[Cosmos DB + data Storage + host Storage]
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           GitHub Actions CI/CD                              │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  deploy-infra.yml → Bicep → Azure Resources (one-time setup)               │
-│  generate-content.yml → Python → Episodes (per certification)               │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                      │
-        ┌─────────────────────────────┼─────────────────────────────┐
-        ▼                             ▼                             ▼
-┌───────────────┐           ┌─────────────────┐           ┌─────────────────┐
-│  AI Services  │           │      Data       │           │       Web       │
-├───────────────┤           ├─────────────────┤           ├─────────────────┤
-│ • OpenAI      │           │ • Cosmos DB     │           │ • Static Web    │
-│ • AI Search*  │◄─────────►│   (metadata)    │◄─────────►│   Apps          │
-│ • AI Foundry* │           │ • Blob Storage  │           │ • Functions API │
-│ • Speech      │           │   (audio files) │           └─────────────────┘
-└───────────────┘           └─────────────────┘
-                              * AI Search deployed only during generation
-                              * AI Foundry deployed only with Study Partner
-```
+
+GitHub Actions uses OIDC to deploy the lean Python package, create/delete ephemeral Search, and start a triggered WebJob. The WebJob runs on the existing Central US B1 plan, uses a user-assigned managed identity, and inherits App Service VNet integration to reach Private Endpoints.
 
 ---
 
@@ -240,6 +230,7 @@ Popular voice choices:
 - Serverless Cosmos DB account (pay-per-RU, no provisioned capacity)
 - Three containers: `episodes`, `sources`, `userProgress`
 - Partition key: `/certificationId` (episodes, sources) and `/userId` (progress)
+- Public network access disabled, with a Cosmos SQL Private Endpoint
 
 **Why Serverless**:
 ```bicep
@@ -273,6 +264,7 @@ Episode metadata is accessed infrequently—users load the episode list once, th
 - Standard LRS storage (cheapest tier)
 - Private access only (`allowBlobPublicAccess: false`)
 - No shared key access (`allowSharedKeyAccess: false`)
+- Public network access disabled, with private Blob DNS resolution
 
 **Why Private + No Shared Key**:
 ```bicep
@@ -663,19 +655,20 @@ The `/api/me/*` routes require the `authenticated` role in `staticwebapp.config.
 We use Azure AD and Managed Identity everywhere. No keys, no connection strings.
 
 **The Principal Types**:
-1. **Automation Principal** (GitHub Actions) - runs the generation pipeline
-2. **Functions Managed Identity** - reads blobs, queries Cosmos
-3. **Users** - authenticate via SWA built-in auth (Microsoft provider)
+1. **Automation Principal** (GitHub Actions) - deploys resources, packages the WebJob, and starts jobs
+2. **Pipeline Managed Identity** - calls AI services and reads/writes private data
+3. **Functions Managed Identity** - reads blobs and queries Cosmos through Private Link
+4. **Users** - authenticate via SWA built-in auth (Microsoft provider)
 
 **Key Role Assignments**:
 
 | Principal | Resource | Role | Why |
 |-----------|----------|------|-----|
-| Automation | OpenAI | Cognitive Services OpenAI User | Call GPT-4o API |
-| Automation | Speech | Cognitive Services Speech User | Synthesize audio |
-| Automation | Storage | Storage Blob Data Contributor | Upload episodes |
-| Automation | Cosmos | Cosmos DB SQL Data Contributor | Write metadata |
-| Automation | Search | Search Index Data Contributor | Create index, upload docs |
+| Pipeline MI | OpenAI | Cognitive Services OpenAI User | Call GPT-4o and embeddings |
+| Pipeline MI | Speech | Cognitive Services User | Validate voices and synthesize audio |
+| Pipeline MI | Storage | Storage Blob Data Contributor | Upload episodes |
+| Pipeline MI | Cosmos | Cosmos DB SQL Data Contributor | Write metadata |
+| Pipeline MI | Search | Search contributor roles | Create index and upload documents |
 | Functions MI | Storage | Storage Blob Data Reader | Stream audio to users |
 | Functions MI | Cosmos | Cosmos DB SQL Data Contributor | Read/write episodes & progress |
 
@@ -743,11 +736,11 @@ The `AZURE_CLIENT_ID` is an app registration with federated credentials pointing
 jobs:
   deploy-search:
     # Creates certaudio-search-ephemeral
-    
-  # ... generation jobs ...
-  
+
+  # ... discovery, indexing, and episode generation ...
+
   cleanup-search:
-    if: always()  # Runs even if generation fails
+    if: always()   # Runs even if generation fails
     # Deletes certaudio-search-ephemeral
 ```
 
@@ -757,7 +750,7 @@ jobs:
 
 ---
 
-### Monthly Cost Breakdown (Typical Usage)
+### Monthly Cost Breakdown
 
 | Service | Configuration | Monthly Cost |
 |---------|--------------|--------------|
@@ -765,12 +758,15 @@ jobs:
 | Storage | LRS, ~5GB | ~$0.10 |
 | Static Web Apps | Standard | ~$9 |
 | Functions | B1 Basic | ~$13* |
+| Container Registry | Basic | ~$5 |
+| Private Endpoints | Five endpoints | ~$36.50 + data |
+| Triggered pipeline WebJob | Existing B1 plan | No separate SKU |
 | OpenAI | Pay-per-token | ~$0 (no usage) |
 | Speech | Pay-per-char | ~$0 (no usage) |
 | **AI Search** | **Ephemeral** | **~$0** |
-| **Total** | | **~$25-30/month** |
+| **Persistent AI Search** | Optional Study Partner dependency | ~$75 |
 
-*Functions cost can drop to ~$0 with Consumption plan (see tradeoffs above)
+Subscription-level Microsoft Defender plans are separate from these service estimates.
 
 **Per-Generation Cost**:
 | Service | Cost per DP-700 generation |
@@ -804,28 +800,19 @@ jobs:
 **Triggers**: Manual dispatch only (you pick the certification)
 
 **What It Does**:
-1. Deploy ephemeral AI Search
-2. Discover content (Learn API + exam skills)
-3. Index content for RAG
-4. Generate episodes in parallel batches
-5. Delete ephemeral AI Search
+1. Builds a lean Python WebJob ZIP from exact locked dependencies
+2. Deploys ephemeral AI Search and grants the pipeline identity access
+3. Deploys and starts the Central US triggered WebJob
+4. The WebJob discovers, indexes, generates sequential batches, and publishes the index
+5. Deletes ephemeral AI Search even when execution fails
 
-**The Matrix Strategy**:
-```yaml
-generate-episodes:
-  strategy:
-    matrix:
-      batchIndex: ${{ fromJson(needs.discover-content.outputs.batchIndices) }}
-    max-parallel: 1  # Sequential batches (TTS parallelized within each)
-```
-
-Each batch processes ~10 episodes with parallel TTS synthesis (10 concurrent by default).
+One execution owns its discovery file and processes deterministic batches sequentially; TTS remains parallel inside each batch. This avoids GitHub output-size limits and eliminates expiring OIDC data-plane tokens.
 
 ---
 
-### Alternative: Run Locally from Dev Container
+### Local Development
 
-If you're hitting **GitHub Actions limits** (6-hour timeout, free tier minutes), you can run generation directly from your dev container:
+Unit tests, Functions, the web app, and Azurite run in the dev container. Full generation needs connectivity to the private endpoints; without VNet access, use the GitHub workflow rather than opening Cosmos or Storage firewalls.
 
 ```bash
 # Run full generation locally (combined discovery strategy)
@@ -837,8 +824,9 @@ If you're hitting **GitHub Actions limits** (6-hour timeout, free tier minutes),
 |--------|---------------|-------|
 | **Timeout** | 6 hours max | None |
 | **Minutes** | 2000/month free | Unlimited |
-| **Auth** | OIDC (5-min tokens) | Azure CLI (persistent) |
-| **Complexity** | Batched workflow | Single script |
+| **Data-plane auth** | WebJob managed identity | Azure CLI credential |
+| **Private access** | VNet integrated | Requires VNet connectivity |
+| **Complexity** | Reusable workflow + one job execution | Single script |
 
 All the "compute" happens on Azure's side (OpenAI, Speech). Your machine just sends HTTP requests and waits.
 
@@ -861,7 +849,7 @@ FORCE_REGENERATE=true ./scripts/run-local.sh dp-700
 3. Runs the full pipeline: discover → index → generate
 4. Cleans up the Search service when done (or on error)
 
-The local runner uses `az login` credentials via `DefaultAzureCredential`, which persists for hours/days instead of the 5-minute OIDC tokens used in workflows.
+The local runner uses `az login` credentials via `DefaultAzureCredential`. The hosted workflow uses OIDC only for Azure Resource Manager operations; the WebJob uses managed identity for long-running data-plane calls.
 
 **Index Content Only (No Audio)**:
 
