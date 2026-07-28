@@ -1,6 +1,18 @@
 {
   "routes": [
     {
+      "route": "/admin.html",
+      "allowedRoles": [
+        "authenticated"
+      ]
+    },
+    {
+      "route": "/api/admin/*",
+      "allowedRoles": [
+        "authenticated"
+      ]
+    },
+    {
       "route": "/study.html",
       "allowedRoles": [
         "authenticated"

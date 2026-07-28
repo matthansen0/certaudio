@@ -17,6 +17,12 @@ from azure.storage.blob import BlobServiceClient
 # Initialize function app
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
+# Admin portal API and the content-generation queue worker.
+# Registered after `app` exists because the blueprint imports helpers from here.
+from admin import bp as admin_bp  # noqa: E402
+
+app.register_blueprint(admin_bp)
+
 # Logging
 logger = logging.getLogger(__name__)
 

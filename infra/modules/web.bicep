@@ -16,8 +16,13 @@ param functionsSubnetId string
 param automationPrincipalId string = ''
 param openAiEndpoint string
 param speechEndpoint string
-@description('AI Search endpoint - optional since Search is deployed ephemerally during content generation')
+@description('Azure region of the Speech account, required by the Speech SDK during synthesis')
+param speechRegion string
+@description('AI Search endpoint used for grounding retrieval and Study Partner RAG')
 param searchEndpoint string = ''
+@description('One-time token that lets the first authenticated user claim admin. Rotate or clear after claiming.')
+@secure()
+param adminBootstrapToken string = newGuid()
 @description('AI Foundry endpoint - optional, enables agent mode when set')
 param foundryEndpoint string = ''
 @description('AI Foundry search connection name for agent')
@@ -178,6 +183,29 @@ resource functionsApp 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'SPEECH_ENDPOINT'
           value: speechEndpoint
+        }
+        {
+          name: 'SPEECH_REGION'
+          value: speechRegion
+        }
+        // Admin portal: one-time bootstrap claim token.
+        {
+          name: 'ADMIN_BOOTSTRAP_TOKEN'
+          value: adminBootstrapToken
+        }
+        // Content generation tuning. MIN_WORDS_PER_PART drives narration length;
+        // the TTS values keep a single synthesis request under ~10 minutes.
+        {
+          name: 'MIN_WORDS_PER_PART'
+          value: '1200'
+        }
+        {
+          name: 'TTS_SINGLE_REQUEST_MAX_WORDS'
+          value: '1600'
+        }
+        {
+          name: 'TTS_MAX_WORDS_PER_SEGMENT'
+          value: '1400'
         }
         {
           name: 'SEARCH_ENDPOINT'

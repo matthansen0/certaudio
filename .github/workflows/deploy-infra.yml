@@ -251,7 +251,6 @@ jobs:
             BLOB_CONTRIBUTOR="ba92f5b4-2d11-453d-a403-e96b0029c9fe"
             QUEUE_CONTRIBUTOR="974c5e8b-45b9-4653-ba55-5f855dd0fb88"
             TABLE_CONTRIBUTOR="0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3"
-            BLOB_READER="2a2b9908-6ea1-4ae2-8e65-a410df84e7d1"
             
             # Helper function: assign role if not already assigned
             assign_role() {
@@ -277,11 +276,23 @@ jobs:
             assign_role "$FUNC_STORAGE_SCOPE" "$QUEUE_CONTRIBUTOR" "Storage Queue Data Contributor"
             assign_role "$FUNC_STORAGE_SCOPE" "$TABLE_CONTRIBUTOR" "Storage Table Data Contributor"
             
-            # Data storage account: Blob Reader
+            # Data storage account: Blob Data Contributor.
+            # Generation runs in the Function App now, so it writes episode audio,
+            # scripts and the published index rather than only reading them.
             DATA_STORAGE_SCOPE="/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.Storage/storageAccounts/$DATA_STORAGE_NAME"
             echo ""
             echo "=== Data Storage: $DATA_STORAGE_NAME ==="
-            assign_role "$DATA_STORAGE_SCOPE" "$BLOB_READER" "Storage Blob Data Reader"
+            assign_role "$DATA_STORAGE_SCOPE" "$BLOB_CONTRIBUTOR" "Storage Blob Data Contributor"
+            
+            # Azure Speech: Cognitive Services User (TTS synthesis during generation)
+            SPEECH_USER="a97b65f3-24c7-4388-baec-2e87135dc908"
+            SPEECH_NAME=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.speechEndpoint.value" -o tsv 2>/dev/null | sed -E 's#^https?://([^./]+)\..*$#\1#')
+            if [[ -n "$SPEECH_NAME" ]]; then
+              SPEECH_SCOPE="/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.CognitiveServices/accounts/$SPEECH_NAME"
+              echo ""
+              echo "=== Azure Speech: $SPEECH_NAME ==="
+              assign_role "$SPEECH_SCOPE" "$SPEECH_USER" "Cognitive Services User"
+            fi
             
             # Azure OpenAI: Cognitive Services OpenAI User (for Study Partner chat)
             OPENAI_USER="5e0bd9bd-7b93-4f28-af87-19fc36ad61bd"
@@ -291,17 +302,19 @@ jobs:
             echo "=== Azure OpenAI: $OPENAI_NAME ==="
             assign_role "$OPENAI_SCOPE" "$OPENAI_USER" "Cognitive Services OpenAI User"
             
-            # AI Search: Search Index Data Reader (for Study Partner RAG - only when enabled)
+            # AI Search: Index Data Contributor. The Function both writes the
+            # grounding index during generation and reads it for Study Partner RAG.
             SEARCH_NAME=$(az deployment group show --name "$DEPLOYMENT_NAME" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.outputs.searchName.value" -o tsv 2>/dev/null || echo "")
             if [[ -n "$SEARCH_NAME" ]]; then
-              SEARCH_INDEX_READER="1407120a-92aa-4202-b7e9-c0e197c71c8f"
+              SEARCH_INDEX_CONTRIB="8ebe5a00-799e-43f5-93ac-243d3dce84a7"
               SEARCH_SCOPE="/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.Search/searchServices/$SEARCH_NAME"
               echo ""
               echo "=== AI Search: $SEARCH_NAME ==="
-              assign_role "$SEARCH_SCOPE" "$SEARCH_INDEX_READER" "Search Index Data Reader"
+              assign_role "$SEARCH_SCOPE" "$SEARCH_INDEX_CONTRIB" "Search Index Data Contributor"
             else
               echo ""
-              echo "=== AI Search: Not deployed (Study Partner disabled) ==="
+              echo "::error::AI Search was not deployed. Content generation requires it."
+              exit 1
             fi
             
             # Cosmos DB: SQL Data Contributor
@@ -444,7 +457,18 @@ jobs:
           echo "| Functions App | $functionsAppName |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Storage Account | $storageAccountName |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Cosmos DB | $cosmosDbAccountName |" >> "$GITHUB_STEP_SUMMARY"
-
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### First-time admin setup" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Sign in to \`/admin.html\` and claim admin access with the bootstrap token." >> "$GITHUB_STEP_SUMMARY"
+          echo "The token is not printed here on purpose. Read it with:" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "az functionapp config appsettings list -g \$AZURE_RESOURCE_GROUP -n $functionsAppName \\" >> "$GITHUB_STEP_SUMMARY"
+          echo "  --query \"[?name=='ADMIN_BOOTSTRAP_TOKEN'].value | [0]\" -o tsv" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "The token rotates on every deployment and can only be claimed once." >> "$GITHUB_STEP_SUMMARY"
   deploy-functions:
     name: Deploy Functions App
     runs-on: ubuntu-latest

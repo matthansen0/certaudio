@@ -22,7 +22,7 @@ param automationPrincipalId string = ''
 var openAiName = '${resourcePrefix}-openai-${uniqueSuffix}'
 var speechName = '${resourcePrefix}-speech-${uniqueSuffix}'
 var docIntelName = '${resourcePrefix}-docintel-${uniqueSuffix}'
-// Note: searchName removed - AI Search is now deployed separately as ephemeral resource
+// Note: searchName removed - AI Search is deployed by search-persistent.bicep
 
 // ============================================================================
 // RESOURCES
@@ -128,8 +128,9 @@ resource documentIntelligence 'Microsoft.CognitiveServices/accounts@2024-04-01-p
   }
 }
 
-// NOTE: Azure AI Search is deployed separately as an ephemeral resource
-// during content generation to save ~$250/month. See search-ephemeral.bicep.
+// NOTE: Azure AI Search is deployed by search-persistent.bicep. A single Basic
+// service holds the shared `certification-content` index used both for grounding
+// during generation and for Study Partner RAG at runtime.
 
 // Data-plane RBAC: allow automation principal to call OpenAI embeddings and completions.
 resource openAiUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (automationPrincipalId != '') {
@@ -175,5 +176,5 @@ output documentIntelligenceName string = documentIntelligence.name
 output documentIntelligenceEndpoint string = documentIntelligence.properties.endpoint
 output documentIntelligenceId string = documentIntelligence.id
 
-// Search endpoint placeholder - actual value comes from ephemeral deployment
+// Search endpoint placeholder - actual value comes from search-persistent.bicep
 output searchEndpoint string = ''

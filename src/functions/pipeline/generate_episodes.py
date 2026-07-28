@@ -20,6 +20,7 @@ import re
 import time
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from types import SimpleNamespace
 from xml.sax.saxutils import escape
 from pathlib import Path
 import requests
@@ -215,6 +216,10 @@ def retrieve_content(
     # Build search query from domain and topics
     query_text = f"{skill_domain}\n" + "\n".join(skill_topics[:10])  # Limit topics in query
 
+    # Defence in depth: certificationId is already validated at the admin API,
+    # but OData string literals escape a quote by doubling it.
+    cert_filter = "certificationId eq '{}'".format(certification_id.replace("'", "''"))
+
     # Generate embedding for hybrid search
     try:
         query_embedding = get_embedding(query_text, openai_client)
@@ -230,6 +235,7 @@ def retrieve_content(
             search_text=query_text,
             vector_queries=[vector_query],
             select=["content", "sourceUrl", "title", "chunkId"],
+            filter=cert_filter,
             top=15,
         )
     except Exception as e:
@@ -237,6 +243,7 @@ def retrieve_content(
         results = search_client.search(
             search_text=query_text,
             select=["content", "sourceUrl", "title", "chunkId"],
+            filter=cert_filter,
             top=15,
         )
 
@@ -1013,16 +1020,59 @@ def finalize_episode(
     return episode_doc
 
 
+DEFAULT_INSTRUCTIONAL_VOICE = "en-US-Andrew:DragonHDLatestNeural"
+DEFAULT_PODCAST_HOST_VOICE = "en-US-Ava:DragonHDLatestNeural"
+DEFAULT_PODCAST_EXPERT_VOICE = "en-US-Andrew:DragonHDLatestNeural"
+SHARED_SEARCH_INDEX = "certification-content"
+
+
+def run_generation(
+    certification_id: str,
+    skills: list[dict],
+    audio_format: str = "instructional",
+    instructional_voice: str = DEFAULT_INSTRUCTIONAL_VOICE,
+    podcast_host_voice: str = DEFAULT_PODCAST_HOST_VOICE,
+    podcast_expert_voice: str = DEFAULT_PODCAST_EXPERT_VOICE,
+    batch_index: int = 0,
+    batch_size: int = 10,
+    topics_per_episode: int = 5,
+    force_regenerate: bool = False,
+    search_index_name: str = SHARED_SEARCH_INDEX,
+    progress: object = None,
+) -> dict:
+    """Generate one batch of episodes in-process.
+
+    This is the entry point used by the admin portal queue trigger. ``progress``
+    is an optional callable invoked as ``progress(current, total, message)``.
+    """
+    args = SimpleNamespace(
+        certification_id=certification_id,
+        audio_format=audio_format,
+        instructional_voice=instructional_voice,
+        podcast_host_voice=podcast_host_voice,
+        podcast_expert_voice=podcast_expert_voice,
+        skills=skills,
+        batch_index=batch_index,
+        batch_size=batch_size,
+        topics_per_episode=topics_per_episode,
+        force_regenerate=force_regenerate,
+        discovery_json=None,
+        search_index_name=search_index_name,
+        progress=progress,
+    )
+    return _generate(args)
+
+
 def main() -> None:
-    """Main entry point for episode generation."""
+    """CLI entry point for episode generation."""
     parser = argparse.ArgumentParser(description="Generate audio episodes for certification")
     parser.add_argument("--certification-id", required=True, help="Certification ID (e.g., dp-700)")
     parser.add_argument("--audio-format", default="instructional", choices=["instructional", "podcast"])
-    parser.add_argument("--instructional-voice", default="en-US-Andrew:DragonHDLatestNeural", 
+    parser.add_argument("--instructional-voice", default=DEFAULT_INSTRUCTIONAL_VOICE,
                         help="Voice for instructional format (see .env.example for options)")
-    parser.add_argument("--podcast-host-voice", default="en-US-Ava:DragonHDLatestNeural",
+    parser.add_argument("--podcast-host-voice", default=DEFAULT_PODCAST_HOST_VOICE,
                         help="Host voice for podcast format (see .env.example for options)")
-    parser.add_argument("--podcast-expert-voice", default="en-US-Andrew:DragonHDLatestNeural",
+    parser.add_argument("--podcast-expert-voice", default=DEFAULT_PODCAST_EXPERT_VOICE,
                         help="Expert voice for podcast format (see .env.example for options)")
     parser.add_argument("--skills-outline", required=True, help="JSON skills outline from discover step")
     parser.add_argument("--batch-index", type=int, default=0, help="Batch index for parallel processing")
@@ -1032,21 +1082,30 @@ def main() -> None:
                         help="Regenerate episodes even if they already exist (e.g., to change voice)")
     parser.add_argument("--discovery-json", default=None,
                         help="Path to deep_discovery_results.json (used to surface confidence score)")
+    parser.add_argument("--search-index-name", default=SHARED_SEARCH_INDEX,
+                        help="AI Search index to retrieve grounding content from")
 
     args = parser.parse_args()
 
+    try:
+        args.skills = json.loads(args.skills_outline)
+    except json.JSONDecodeError as e:
+        print(f"Error parsing skills outline: {e}", file=sys.stderr)
+        sys.exit(1)
+    args.progress = None
+
+    _generate(args)
+
+
+def _generate(args) -> dict:
+    """Shared implementation for both the CLI and the in-process entry point."""
     # Preflight voice availability to fail fast on unsupported voices/regions.
     voices_to_check = [args.instructional_voice]
     if args.audio_format == "podcast":
         voices_to_check = [args.podcast_host_voice, args.podcast_expert_voice]
     preflight_validate_voices(voices_to_check)
 
-    # Parse skills outline
-    try:
-        skills = json.loads(args.skills_outline)
-    except json.JSONDecodeError as e:
-        print(f"Error parsing skills outline: {e}", file=sys.stderr)
-        sys.exit(1)
+    skills = args.skills
 
     # Filter to only skills with topics (main skill domains)
     main_skills = [s for s in skills if s.get("topics") and len(s["topics"]) > 0]
@@ -1080,7 +1139,13 @@ def main() -> None:
     if not batch_units:
         print(f"No episode units in batch {args.batch_index} (indices {start_idx}-{end_idx})")
         print(f"Total episode units: {len(episode_units)}")
-        return
+        return {
+            "generated": [],
+            "skipped": [],
+            "errors": [],
+            "totalUnits": len(episode_units),
+            "batchIndex": args.batch_index,
+        }
 
     print(f"\n{'#'*60}")
     print(f"# Episode Generation: {args.certification_id.upper()}")
@@ -1102,8 +1167,7 @@ def main() -> None:
         missing.append("COSMOS_DB_ENDPOINT")
 
     if missing:
-        print(f"Error: Missing required environment variables: {', '.join(missing)}", file=sys.stderr)
-        sys.exit(1)
+        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
 
     # Initialize clients
     token_credential = DefaultAzureCredential()
@@ -1112,7 +1176,7 @@ def main() -> None:
 
     search_client = SearchClient(
         endpoint=search_endpoint,
-        index_name=f"{args.certification_id}-content",
+        index_name=getattr(args, "search_index_name", SHARED_SEARCH_INDEX),
         credential=search_credential,
     )
 
@@ -1285,14 +1349,25 @@ def main() -> None:
 
     print(f"{'='*60}")
 
+    result = {
+        "generated": [
+            {"id": ep["id"], "title": ep["title"], "durationSeconds": ep.get("durationSeconds", 0)}
+            for ep in generated_episodes
+        ],
+        "skipped": skipped_episodes,
+        "errors": errors,
+        "totalUnits": len(episode_units),
+        "batchIndex": args.batch_index,
+    }
+
     if errors:
-        print(f"\nBatch failed with {len(errors)} error(s).", file=sys.stderr)
-        sys.exit(1)
+        raise RuntimeError(f"Batch {args.batch_index} failed with {len(errors)} error(s): {errors[0]}")
 
     # Success if we generated OR skipped episodes (skipped = already done)
     if len(generated_episodes) == 0 and len(skipped_episodes) == 0:
-        print("\nBatch produced 0 episodes (unexpected).", file=sys.stderr)
-        sys.exit(1)
+        raise RuntimeError(f"Batch {args.batch_index} produced 0 episodes (unexpected).")
+
+    return result
 
 
 if __name__ == "__main__":

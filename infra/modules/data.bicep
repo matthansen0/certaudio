@@ -148,6 +148,58 @@ resource userProgressContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabas
   }
 }
 
+// Admin portal: registered administrators. Also holds the single __bootstrap__
+// marker doc that records the one-time admin claim.
+resource adminsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = {
+  parent: database
+  name: 'admins'
+  properties: {
+    resource: {
+      id: 'admins'
+      partitionKey: {
+        paths: ['/id']
+        kind: 'Hash'
+      }
+      indexingPolicy: {
+        indexingMode: 'consistent'
+        automatic: true
+        includedPaths: [
+          { path: '/*' }
+        ]
+        excludedPaths: [
+          { path: '/"_etag"/?' }
+        ]
+      }
+    }
+  }
+}
+
+// Admin portal: content generation job records, polled by the admin UI for
+// progress. Replaces the GitHub Actions run as the operational audit trail.
+resource jobsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = {
+  parent: database
+  name: 'jobs'
+  properties: {
+    resource: {
+      id: 'jobs'
+      partitionKey: {
+        paths: ['/jobId']
+        kind: 'Hash'
+      }
+      indexingPolicy: {
+        indexingMode: 'consistent'
+        automatic: true
+        includedPaths: [
+          { path: '/*' }
+        ]
+        excludedPaths: [
+          { path: '/"_etag"/?' }
+        ]
+      }
+    }
+  }
+}
+
 // Storage Account
 // NOTE: Tenant policy enforces allowSharedKeyAccess=false and allowBlobPublicAccess=false via modify effects.
 // Set these explicitly to avoid policy-driven drift.

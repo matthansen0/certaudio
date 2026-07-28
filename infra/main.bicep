@@ -31,6 +31,10 @@ param automationPrincipalId string = ''
 @description('Enable Study Partner feature with AI Foundry Agent (~$75+/month for AI Search + agent infrastructure). When false, the Study Partner page shows "not deployed".')
 param enableStudyPartner bool = false
 
+@description('One-time token allowing the first authenticated user to claim admin access in the portal. Emitted in the deployment output; defaults to a fresh GUID each deployment.')
+@secure()
+param adminBootstrapToken string = newGuid()
+
 // ============================================================================
 // VARIABLES
 // ============================================================================
@@ -92,7 +96,9 @@ module search 'modules/search-persistent.bicep' = {
     location: location
     uniqueSuffix: uniqueSuffix
     automationPrincipalId: automationPrincipalId
-    enabled: enableStudyPartner
+    // Always deployed: content generation grounds narration in this index, so it
+    // is no longer optional. enableStudyPartner now only gates the Foundry agent.
+    enabled: true
     tags: tags
   }
 }
@@ -128,7 +134,9 @@ module web 'modules/web.bicep' = {
     automationPrincipalId: automationPrincipalId
     openAiEndpoint: aiServices.outputs.openAiEndpoint
     speechEndpoint: aiServices.outputs.speechEndpoint
+    speechRegion: aiServices.outputs.speechRegion
     searchEndpoint: search.outputs.searchEndpoint
+    adminBootstrapToken: adminBootstrapToken
     foundryEndpoint: aiFoundry.outputs.foundryAccountEndpoint
     foundrySearchConnection: aiFoundry.outputs.searchConnectionName
     tags: tags
