@@ -148,8 +148,28 @@ while [ "$i" -le 12 ]; do
     i=$((i + 1))
 done
 
+# ------------------------------------------------------- 4. admin bootstrap
+# Printed here because this runs on the deploying machine, which already has
+# rights over the app. It is a one-time token: claiming it registers the first
+# admin, after which it is inert and rotates on the next provision.
+CLAIMED=$(curl -s "https://${SWA_HOST}/api/portal/status" 2>/dev/null | grep -o '"bootstrapClaimed":[^,}]*' || true)
+
 say ""
-say "Done. Claim admin access at https://${SWA_HOST}/admin.html"
-say "Read the one-time token with:"
-say "  az functionapp config appsettings list -g $RG -n $FUNC \\"
-say "    --query \"[?name=='ADMIN_BOOTSTRAP_TOKEN'].value | [0]\" -o tsv"
+say "Claim admin access at https://${SWA_HOST}/admin.html"
+case "$CLAIMED" in
+    *true*)
+        say "An administrator is already registered; the bootstrap token is spent."
+        ;;
+    *)
+        TOKEN=$(az functionapp config appsettings list -g "$RG" -n "$FUNC" \
+            --query "[?name=='ADMIN_BOOTSTRAP_TOKEN'].value | [0]" -o tsv 2>/dev/null || true)
+        if [ -n "$TOKEN" ]; then
+            say ""
+            say "  Bootstrap token: $TOKEN"
+            say ""
+            say "  Sign in, then paste it into the claim box. It can be used once."
+        else
+            say "Could not read ADMIN_BOOTSTRAP_TOKEN; check the app settings."
+        fi
+        ;;
+esac

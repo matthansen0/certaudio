@@ -59,9 +59,15 @@
             <section id="admin-claim" class="admin-panel" hidden>
                 <h1>Claim admin access</h1>
                 <p class="admin-muted">
-                    No administrator has been registered yet. Enter the bootstrap token
-                    from your deployment output to claim this environment. The token
-                    can only be used once.
+                    No administrator has been registered yet. The bootstrap token is
+                    printed at the end of <code>azd up</code>. If you no longer have it,
+                    read it from the Function App settings:
+                </p>
+                <pre class="admin-code">az functionapp config appsettings list -g &lt;resource-group&gt; -n &lt;function-app&gt; \
+  --query "[?name=='ADMIN_BOOTSTRAP_TOKEN'].value | [0]" -o tsv</pre>
+                <p class="admin-muted">
+                    The token can only be claimed once, and it changes every time you
+                    provision.
                 </p>
                 <div class="admin-row">
                     <input id="claim-token" type="password" class="admin-input"
