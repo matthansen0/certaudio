@@ -15,6 +15,10 @@ param openAiLocation string = 'eastus2'
 param speechLocation string = 'eastus'
 @description('Optional AAD object ID of an automation principal (e.g., GitHub OIDC service principal) that runs content-generation workflows. If provided, it is granted Azure AI Search Index Data Contributor on the Search service.')
 param automationPrincipalId string = ''
+
+@description('Type of the deploying principal. azd sets AZURE_PRINCIPAL_TYPE; a human running azd is a User, a service principal in automation is not.')
+param automationPrincipalType string = 'User'
+
 // ============================================================================
 // VARIABLES
 // ============================================================================
@@ -140,7 +144,7 @@ resource openAiUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = i
     // Built-in role: Cognitive Services OpenAI User
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd')
     principalId: automationPrincipalId
-    principalType: 'ServicePrincipal'
+    principalType: automationPrincipalType
   }
 }
 
@@ -155,7 +159,7 @@ resource speechUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = i
     // Built-in role: Cognitive Services Speech User
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'f2dc8367-1007-4938-bd23-fe263f013447')
     principalId: automationPrincipalId
-    principalType: 'ServicePrincipal'
+    principalType: automationPrincipalType
   }
 }
 

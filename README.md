@@ -178,6 +178,22 @@ token. That registers you as the first admin; the token cannot be claimed twice
 and rotates on every deployment. From then on you add other admins from the
 portal itself.
 
+### Adopting resources that already exist
+
+`azd up` into a fresh subscription needs nothing extra. Pointing it at resources
+created some other way can fail with `RoleAssignmentExists`.
+
+Bicep names role assignments deterministically, as `guid(scope, principal, role)`.
+If the same principal already holds the same role at the same scope under a
+different assignment name, Azure rejects the new one rather than adopting it.
+Delete the older assignment and re-run; Bicep recreates it and owns it from then
+on:
+
+```bash
+az role assignment delete \
+  --assignee <principal-id> --role "<role name>" --scope <resource-id>
+```
+
 ### Optional configuration
 
 Set these before `azd up` to override the defaults:
