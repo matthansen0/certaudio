@@ -15,8 +15,9 @@
    - [Episode Generation](#episode-generation)
 4. [Authentication & Security](#authentication--security)
 5. [Cost Optimization](#cost-optimization)
-6. [Workflow Orchestration](#workflow-orchestration)
-7. [Customization Guide](#customization-guide)
+6. [Job Orchestration](#job-orchestration)
+7. [Workflow Orchestration](#workflow-orchestration)
+8. [Customization Guide](#customization-guide)
 
 ---
 
@@ -36,15 +37,26 @@ Microsoft Learn → Discovery → RAG Index → AI Narration → Text-to-Speech 
 
 ```mermaid
 flowchart LR
-  GH[GitHub Actions<br/>management plane only] --> JOB[Triggered WebJob<br/>existing B1 plan]
-  JOB --> AI[OpenAI, Speech, ephemeral Search]
-  JOB --> PL[Private Link + private DNS]
-  SWA[Static Web Apps] --> FN[Public Function<br/>VNet integration]
-  FN --> PL
+  USER[Browser] --> SWA[Static Web Apps<br/>Entra sign-in]
+  SWA -->|linked backend| FN[Function App<br/>VNet integration]
+  ADMIN[admin.html] --> SWA
+  FN -->|enqueue job| Q[content-jobs queue]
+  Q -->|queue trigger| FN
+  FN --> AI[OpenAI, Speech, AI Search]
+  FN --> PL[Private Link + private DNS]
   PL --> DATA[Cosmos DB + data Storage + host Storage]
 ```
 
-GitHub Actions uses OIDC to deploy the lean Python package, create/delete ephemeral Search, and start a triggered WebJob. The WebJob runs on the existing Central US B1 plan, uses a user-assigned managed identity, and inherits App Service VNet integration to reach Private Endpoints.
+One Function App does everything. It serves the player API, and it runs content
+generation in-process off a Storage queue. Because it is VNet integrated, it
+reaches Cosmos DB and Storage through Private Endpoints without any additional
+compute and without any credential leaving Azure.
+
+GitHub Actions is used for infrastructure and code deployment only. It has no
+role in content generation — that is triggered by an admin from the web portal.
+
+See [architecture.svg](diagrams/architecture.svg) for the full topology and
+[generation-flow.svg](diagrams/generation-flow.svg) for the job lifecycle.
 
 ---
 
@@ -194,12 +206,12 @@ We use neural voices because they sound *dramatically* better than standard voic
 
 **Key Settings You Should Know**:
 
-The voice selection happens at generation time, not deployment time:
+The voice selection happens at generation time, not deployment time. Pick it in
+the admin portal when submitting a job; the defaults come from app settings:
 
-```yaml
-# In .github/workflows/generate-content.yml
-instructionalVoice:
-  default: 'en-US-AndrewNeural'  # Male, warm and professional
+```
+INSTRUCTIONAL_VOICE = en-US-Andrew:DragonHDLatestNeural
+PODCAST_HOST_VOICE  = en-US-Ava:DragonHDLatestNeural
 ```
 
 Popular voice choices:
@@ -395,7 +407,7 @@ This is where the magic happens. The pipeline transforms Microsoft Learn content
 
 ### Discovery
 
-**File**: [`src/pipeline/tools/deep_discover.py`](../src/pipeline/tools/deep_discover.py)
+**File**: [`src/functions/pipeline/deep_discover.py`](../src/functions/pipeline/deep_discover.py)
 
 **What Happens**:
 1. Fetch Microsoft Learn Catalog API
@@ -460,7 +472,7 @@ The output includes a confidence score (0–100%) with a letter grade:
 
 ### RAG Indexing
 
-**File**: [`src/pipeline/tools/index_content.py`](../src/pipeline/tools/index_content.py)
+**File**: [`src/functions/pipeline/index_content.py`](../src/functions/pipeline/index_content.py)
 
 **What Happens**:
 1. Take discovered content (unit text)
@@ -517,7 +529,7 @@ Hybrid search gives you the best of both worlds: exact keyword matches AND seman
 
 ### Episode Generation
 
-**File**: [`src/pipeline/tools/generate_episodes.py`](../src/pipeline/tools/generate_episodes.py)
+**File**: [`src/functions/pipeline/generate_episodes.py`](../src/functions/pipeline/generate_episodes.py)
 
 **What Happens (per episode)**:
 1. **Retrieve**: Query AI Search for relevant content
@@ -529,7 +541,7 @@ Hybrid search gives you the best of both worlds: exact keyword matches AND seman
 
 **The Narration Prompt** (simplified):
 ```jinja2
-{# From src/pipeline/prompts/narration.jinja2 #}
+{# From src/functions/pipeline/prompts/narration.jinja2 #}
 You are creating an educational audio episode about {{ skill_domain }}.
 
 Topics to cover:
@@ -655,22 +667,25 @@ The `/api/me/*` routes require the `authenticated` role in `staticwebapp.config.
 We use Azure AD and Managed Identity everywhere. No keys, no connection strings.
 
 **The Principal Types**:
-1. **Automation Principal** (GitHub Actions) - deploys resources, packages the WebJob, and starts jobs
-2. **Pipeline Managed Identity** - calls AI services and reads/writes private data
-3. **Functions Managed Identity** - reads blobs and queries Cosmos through Private Link
-4. **Users** - authenticate via SWA built-in auth (Microsoft provider)
+1. **Automation Principal** (GitHub Actions) - deploys infrastructure and code; never touches the private data plane
+2. **Functions Managed Identity** - calls AI services and reads/writes private data, both for the player API and for content generation
+3. **Users** - authenticate via SWA built-in auth (Microsoft provider)
 
 **Key Role Assignments**:
 
 | Principal | Resource | Role | Why |
 |-----------|----------|------|-----|
-| Pipeline MI | OpenAI | Cognitive Services OpenAI User | Call GPT-4o and embeddings |
-| Pipeline MI | Speech | Cognitive Services User | Validate voices and synthesize audio |
-| Pipeline MI | Storage | Storage Blob Data Contributor | Upload episodes |
-| Pipeline MI | Cosmos | Cosmos DB SQL Data Contributor | Write metadata |
-| Pipeline MI | Search | Search contributor roles | Create index and upload documents |
-| Functions MI | Storage | Storage Blob Data Reader | Stream audio to users |
-| Functions MI | Cosmos | Cosmos DB SQL Data Contributor | Read/write episodes & progress |
+| Functions MI | OpenAI | Cognitive Services OpenAI User | Call GPT-4o and embeddings |
+| Functions MI | Speech | Cognitive Services User | Validate voices and synthesize audio |
+| Functions MI | Storage | Storage Blob Data Contributor | Upload episodes, stream audio to users |
+| Functions MI | Cosmos | Cosmos DB SQL Data Contributor | Episode metadata, user progress, admins, jobs |
+| Functions MI | Search | Search Index Data Contributor | Write the grounding index, query it for RAG |
+| Functions MI | Host storage | Blob/Queue/Table Data Contributor | Functions runtime and the content-jobs queue |
+
+There used to be a separate pipeline identity for generation. Now that
+generation runs in the Function App there is one identity, and its Storage and
+Search roles were raised from Reader to Contributor because it writes what it
+used to only read.
 
 **Cosmos DB RBAC Gotcha**:
 Cosmos has its OWN RBAC system (not the standard Azure RBAC):
@@ -724,29 +739,35 @@ The `AZURE_CLIENT_ID` is an app registration with federated credentials pointing
 
 ## Cost Optimization
 
-### The Big Win: Ephemeral AI Search
+### One Search Index, Shared by Everything
 
-**The Problem**: Azure AI Search Basic tier costs ~$75/month. We only need it during content generation (a few hours per certification).
+Azure AI Search Basic costs ~$75/month, and an earlier version of this project
+tried to dodge that by creating the service at the start of a generation run and
+deleting it at the end.
 
-**The Solution**: Deploy Search at the start of generation, delete it at the end.
+That turned out to be a bad trade. It meant re-indexing every certification from
+scratch on every run, a per-certification index that could never be queried
+between runs, and orchestration whose only job was managing a resource lifecycle.
 
-```yaml
-# In generate-content.yml
+Now a single Basic service holds one index, `certification-content`, with a
+filterable `certificationId` field. Generation writes to it, Study Partner reads
+from it, and refresh runs update only the documents whose source content changed.
+Basic allows 15 indexes and far more documents than this workload needs, so one
+service covers every certification.
 
-jobs:
-  deploy-search:
-    # Creates certaudio-search-ephemeral
+**File**: [`infra/modules/search-persistent.bicep`](../infra/modules/search-persistent.bicep)
 
-  # ... discovery, indexing, and episode generation ...
+---
 
-  cleanup-search:
-    if: always()   # Runs even if generation fails
-    # Deletes certaudio-search-ephemeral
-```
+### Generation Costs No Compute
 
-**Savings**: ~$75/month → ~$0.50/generation (assuming ~2-4 hours runtime)
+The Function App runs on a B1 plan with `alwaysOn`, billed at a flat ~$13/month
+whether it is idle or generating. Because generation runs in-process on that same
+plan, a run adds no compute line item at all — only the OpenAI and Speech tokens
+it consumes.
 
-**File**: [`infra/modules/search-ephemeral.bicep`](../infra/modules/search-ephemeral.bicep)
+This is why `functionTimeout` is set to `-1` in `host.json`. On a dedicated plan
+there is no execution cap, so a multi-hour run is fine.
 
 ---
 
@@ -757,25 +778,89 @@ jobs:
 | Cosmos DB | Serverless | ~$2-5 |
 | Storage | LRS, ~5GB | ~$0.10 |
 | Static Web Apps | Standard | ~$9 |
-| Functions | B1 Basic | ~$13* |
-| Container Registry | Basic | ~$5 |
+| Functions | B1 Basic, also runs generation | ~$13 |
+| AI Search | Basic, shared index | ~$75 |
 | Private Endpoints | Five endpoints | ~$36.50 + data |
-| Triggered pipeline WebJob | Existing B1 plan | No separate SKU |
 | OpenAI | Pay-per-token | ~$0 (no usage) |
 | Speech | Pay-per-char | ~$0 (no usage) |
-| **AI Search** | **Ephemeral** | **~$0** |
-| **Persistent AI Search** | Optional Study Partner dependency | ~$75 |
+| AI Foundry | Optional Study Partner agent | ~$5-10 |
 
 Subscription-level Microsoft Defender plans are separate from these service estimates.
 
 **Per-Generation Cost**:
 | Service | Cost per DP-700 generation |
 |---------|---------------------------|
-| AI Search (2-4 hours) | ~$0.50 |
 | OpenAI GPT-4o | ~$15-25 |
 | OpenAI Embeddings | ~$0.25 |
 | Speech TTS | ~$15-18 |
-| **Total** | **~$30-45** |
+| **Total** | **~$30-43** |
+
+---
+
+## Job Orchestration
+
+### Why Not CI/CD?
+
+Content generation used to run in GitHub Actions. That worked while the data
+plane was public, but tenant policy forces `publicNetworkAccess=Disabled` and
+`allowSharedKeyAccess=false` on Storage and Cosmos DB, so a GitHub-hosted runner
+simply cannot reach them. Every workaround — self-hosted runners, Container Apps
+jobs, ACI, App Service WebJobs — was a new piece of compute that existed only to
+be inside the VNet.
+
+The Function App was already inside the VNet, already had a managed identity with
+the right roles, and was already paid for. So generation moved there.
+
+A useful side effect: once deployed, the app no longer needs the repository. No
+workflow dispatch, no OIDC token, no checkout.
+
+### The Flow
+
+```
+admin.html → POST /api/admin/jobs → job doc in Cosmos
+                                  → message on content-jobs queue
+                                  → queue trigger run_content_job
+                                  → pipeline/orchestrator.py
+                                  → progress written back to the job doc
+                                  → admin.html polls GET /api/admin/jobs/{id}
+```
+
+**Why a queue and not a direct call?** An HTTP request cannot stay open for
+hours. The queue makes the request return immediately with `202` while the work
+continues, and it survives an app restart: if the host recycles mid-run, the
+message becomes visible again and the job resumes.
+
+`host.json` sets `batchSize: 1` and `newBatchThreshold: 0` so only one job runs
+at a time. Generation competes with audio streaming for the same B1 instance, and
+the API enforces the same rule up front by returning `409` if a job is already
+active.
+
+`maxDequeueCount` is 2. A failed run gets exactly one retry before the message is
+dead-lettered, because these runs are expensive and a genuine failure is unlikely
+to fix itself.
+
+### Admin Access
+
+The first admin claims access with a one-time bootstrap token, written by Bicep
+as the `ADMIN_BOOTSTRAP_TOKEN` app setting and compared with
+`hmac.compare_digest`. The claim writes a marker document before writing the
+admin record, so a partial failure spends the token rather than leaving it
+reusable. After that, admins are managed from the portal and the token is inert.
+
+This avoids hardcoding an email address in the template, which would otherwise
+have to be right at deploy time and would be wrong for anyone forking the repo.
+
+### Where the Trust Comes From
+
+`/api/admin/*` reads the caller's identity from the `x-ms-client-principal`
+header. That header is only trustworthy because Static Web Apps injects it and
+the Function is *not* reachable except through the SWA linked backend. Calling
+the Function hostname directly with a hand-crafted header returns `401` before
+any application code runs.
+
+This is why the deployment no longer disables EasyAuth on the Function App. An
+earlier version did, to make debugging easier — that was the security control,
+and turning it off made the header forgeable.
 
 ---
 
@@ -790,79 +875,32 @@ Subscription-level Microsoft Defender plans are separate from these service esti
 2. Deploys/updates all Azure resources
 3. Deploys Static Web App content
 4. Deploys Functions code
+5. Assigns the data-plane roles the Function identity needs
 
 **Key Insight**: This is idempotent. Run it as many times as you want; it only changes what's different.
 
----
-
-### generate-content.yml
-
-**Triggers**: Manual dispatch only (you pick the certification)
-
-**What It Does**:
-1. Builds a lean Python WebJob ZIP from exact locked dependencies
-2. Deploys ephemeral AI Search and grants the pipeline identity access
-3. Deploys and starts the Central US triggered WebJob
-4. The WebJob discovers, indexes, generates sequential batches, and publishes the index
-5. Deletes ephemeral AI Search even when execution fails
-
-One execution owns its discovery file and processes deterministic batches sequentially; TTS remains parallel inside each batch. This avoids GitHub output-size limits and eliminates expiring OIDC data-plane tokens.
+It is also the only workflow. Content generation and refresh are triggered from
+the admin portal.
 
 ---
 
 ### Local Development
 
-Unit tests, Functions, the web app, and Azurite run in the dev container. Full generation needs connectivity to the private endpoints; without VNet access, use the GitHub workflow rather than opening Cosmos or Storage firewalls.
+Unit tests, the Functions host, the web app, and Azurite all run in the dev
+container. Content generation does not: Cosmos DB, Storage, and AI Search are
+reachable only from inside the VNet, and opening their firewalls is both against
+tenant policy and silently reverted by it.
 
 ```bash
-# Run full generation locally (combined discovery strategy)
-./scripts/run-local.sh dp-700 instructional
+cd src/functions
+python -m pytest -q
 ```
 
-**Why Local?**
-| Aspect | GitHub Actions | Local |
-|--------|---------------|-------|
-| **Timeout** | 6 hours max | None |
-| **Minutes** | 2000/month free | Unlimited |
-| **Data-plane auth** | WebJob managed identity | Azure CLI credential |
-| **Private access** | VNet integrated | Requires VNet connectivity |
-| **Complexity** | Reusable workflow + one job execution | Single script |
-
-All the "compute" happens on Azure's side (OpenAI, Speech). Your machine just sends HTTP requests and waits.
-
-**Usage**:
-```bash
-# Make sure you're logged in to Azure
-az login
-
-# Run generation
-./scripts/run-local.sh dp-700                           # Defaults: instructional
-./scripts/run-local.sh az-104 podcast                   # Podcast format
-
-# Force regenerate existing episodes
-FORCE_REGENERATE=true ./scripts/run-local.sh dp-700
-```
-
-**What the script does**:
-1. Resolves all service endpoints from Azure (OpenAI, Speech, Cosmos, Storage)
-2. Creates an ephemeral AI Search service for indexing
-3. Runs the full pipeline: discover → index → generate
-4. Cleans up the Search service when done (or on error)
-
-The local runner uses `az login` credentials via `DefaultAzureCredential`. The hosted workflow uses OIDC only for Azure Resource Manager operations; the WebJob uses managed identity for long-running data-plane calls.
-
-**Index Content Only (No Audio)**:
-
-If you just want to populate the Study Partner's search index without generating audio (saves TTS tokens):
-
-```bash
-# Index into the shared Study Partner index
-./scripts/index-content.sh dp-700 certification-content
-./scripts/index-content.sh ai-102 certification-content
-
-# Index into per-cert index (for later audio generation)
-./scripts/index-content.sh dp-700
-```
+The tests cover the SWA principal parsing, the progress endpoints, the ranged
+audio proxy, and the admin authorization boundary — including that every
+`/api/admin/*` route rejects anonymous callers with `401` and non-admins with
+`403`, and that `certificationId` cannot be used to inject into the search
+filter.
 
 ---
 
@@ -870,13 +908,9 @@ If you just want to populate the Study Partner's search index without generating
 
 ### "I want to use a different voice"
 
-In the workflow dispatch, pick your voice. Or change the default:
-
-```yaml
-# .github/workflows/generate-content.yml
-instructionalVoice:
-  default: 'en-US-AndrewNeural'  # Change this
-```
+Pick it in the admin portal when you submit a job. To change the default for
+every job, update the `INSTRUCTIONAL_VOICE` app setting in
+[infra/modules/web.bicep](../infra/modules/web.bicep).
 
 [Listen to voice samples](https://speech.microsoft.com/portal/voicegallery)
 
@@ -891,14 +925,14 @@ env:
   TOPICS_PER_EPISODE: 5  # Fewer = shorter episodes
 ```
 
-Or edit the narration prompt in [`src/pipeline/prompts/narration.jinja2`](../src/pipeline/prompts/narration.jinja2).
+Or edit the narration prompt in [`src/functions/pipeline/prompts/narration.jinja2`](../src/functions/pipeline/prompts/narration.jinja2).
 
 ---
 
 ### "I want to add a new certification"
 
 1. Find the learning path UIDs from [Microsoft Learn Catalog](https://learn.microsoft.com/api/catalog/)
-2. Add them to [`src/pipeline/tools/deep_discover.py`](../src/pipeline/tools/deep_discover.py):
+2. Add them to [`src/functions/pipeline/deep_discover.py`](../src/functions/pipeline/deep_discover.py):
 
 ```python
 CERTIFICATION_PATH_UIDS = {

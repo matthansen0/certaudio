@@ -4,13 +4,13 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 
 ## Recent Implementation Notes (Post v1 Plan)
 
-- **Study Partner (AI Foundry Agent)**: Optional feature that deploys Azure AI Foundry with a GPT-4o agent for interactive exam prep chat. Enable via `enableStudyPartner=true` in workflow or Bicep params. Adds ~$80/month (primarily AI Search Basic). See [Study Partner section in README](../README.md#study-partner-optional).
+- **Study Partner (AI Foundry Agent)**: Optional feature that deploys Azure AI Foundry with a GPT-4o agent for interactive exam prep chat. Enable via `enableStudyPartner=true` in workflow or Bicep params. Adds ~$5-10/month; AI Search is *not* part of this toggle because generation needs it too. See [Study Partner section in README](../README.md#study-partner-optional).
 - **Discovery Strategy (Combined)**: Content generation always uses the combined strategy (learning paths **plus** exam skills outline) for full coverage. See [docs/CONTENT_DISCOVERY.md](../docs/CONTENT_DISCOVERY.md) for details.
 - **Dynamic Learning Path Resolution**: Learning paths are resolved dynamically via catalog role + product tag filtering (`CERTIFICATION_ROLE_PRODUCTS` mapping) instead of hardcoded UIDs. Hardcoded UIDs are kept as a fallback but stale entries are auto-detected and skipped. This prevents silent content loss when Microsoft renames or restructures learning paths.
 - **Coverage Sweep**: In comprehensive mode, every exam skill topic is checked against discovered content. Uncovered topics go through a fallback chain: catalog module description matching → Learn search API → explicit gap reporting. Supplemental URLs from the sweep are merged into the indexing pipeline.
 - **Confidence Score**: Discovery outputs a weighted confidence score (0–100%, Grade A–F) showing content coverage completeness. Weights: learning-path=1.0, catalog-supplement=0.8, search-supplement=0.5, gap=0.0. Surfaced in generation output via `--discovery-json` flag.
 - **Hierarchy API for URLs**: Unit URLs are fetched from `/api/hierarchy/modules/{uid}` because the catalog API doesn't provide actual URLs, and URL patterns can be non-sequential (e.g., `3b-optimize` instead of `4-optimize`).
-- **Voice Selection**: Generate Content workflow allows choosing voices for instructional, podcast host, and podcast expert formats from 11 Azure Neural voices.
+- **Voice Selection**: Voices for instructional, podcast host, and podcast expert formats are chosen when submitting a job in the admin portal, validated against `VOICE_NAME_RE` in `src/functions/admin.py`, and defaulted from app settings.
 - **Dragon HD Voices**: Azure Speech Dragon HD voices (e.g., `en-US-Andrew:DragonHDLatestNeural`) are only available in **eastus**, **westeurope**, and **southeastasia** regions. The Speech service is deployed to eastus to enable HD voice support.
 - **Dragon HD SSML Compatibility**: Dragon HD voices produce **audio clicking/popping artifacts** when SSML contains `<prosody rate>` wrappers with `<break>` tags inside. The `generate_episodes.py` tool detects Dragon HD voices (by `:DragonHDLatestNeural` suffix) and generates simplified SSML without rate adjustments or break elements. Standard Neural voices work fine with the full SSML features.
 - **Episode Resumption**: Episodes that already exist in Cosmos DB are skipped by default. Use `forceRegenerate=true` to regenerate all episodes (e.g., after changing voices).
@@ -19,24 +19,28 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 - **Keyless Storage (policy-friendly)**: The platform runs with `allowSharedKeyAccess=false` on storage accounts and uses **Managed Identity / Entra ID** + **data-plane RBAC** instead of account keys.
 - **Functions hosting**: Azure Functions is deployed on **Basic (B1)** plan (~$13/mo) with **Always On enabled** to prevent cold starts. Required for Managed Identity authentication when shared key access is disabled.
 - **Functions performance**: Credentials (`DefaultAzureCredential`), blob clients, and user delegation keys are cached at module level to avoid re-auth on every request. First request after cold start fetches delegation key (~3s), subsequent requests are <1s.
-- **Audio delivery**: Audio files are served via **SAS URL redirect** (302) rather than proxying through the Function. The Function generates a short-lived SAS token using a cached user delegation key, then redirects the browser to download directly from Blob Storage. Requires `Storage Blob Delegator` role on the Function identity.
-- **CSP for audio**: The Static Web App CSP includes `media-src 'self' blob: https://*.blob.core.windows.net` to allow audio playback from Blob Storage SAS URLs.
+- **Audio delivery**: Blob Storage is private (no public access, no shared keys), so SAS URLs are not usable. `get_audio` in `function_app.py` **proxies** the bytes through the Function using Managed Identity, honouring `Range` requests with `206`/`416` so seeking works. There is no `Storage Blob Delegator` role and no redirect.
+- **CSP for audio**: `media-src 'self' blob:` — audio is same-origin because it is proxied. Do not re-add `*.blob.core.windows.net`.
 - **SWA built-in auth (Microsoft only)**: User sign-in uses SWA's built-in Microsoft (AAD) provider. Zero app registrations, zero cost. The `x-ms-client-principal` header is decoded by `_get_swa_user()` in Functions. GitHub, Twitter, and Google providers are blocked via `staticwebapp.config.json` route rules. Progress is synced to Cosmos DB `userProgress` container keyed by stable SWA `userId`.
 - **Cross-device progress sync**: On sign-in, the frontend fetches server progress, merges with localStorage (keeping `completed=True` and `max(position)`), and pushes the merged result back. Subsequent saves go to both localStorage and the authenticated `/api/me/progress/{certId}` endpoint.
 - **Auth unit tests**: `src/functions/test_auth.py` covers `_get_swa_user` header parsing (valid, missing, malformed), `/api/me` identity endpoint, and progress GET/POST endpoints (401 for unauthenticated, single update, bulk merge, validation).
-- **SWA backend linking re-enables EasyAuth**: The `az staticwebapp backends link` command automatically enables authentication on the linked Functions app. The deploy workflow disables EasyAuth **after** linking the backend, with a restart and smoke test to ensure propagation.
+- **EasyAuth is the security control — do not disable it**: `az staticwebapp backends link` enables authentication on the linked Functions app. An earlier version of the deploy workflow disabled it afterwards to ease debugging. That was wrong: SWA-managed EasyAuth is what stops a caller reaching the Function hostname directly and forging `x-ms-client-principal`. A direct call returning `401` is correct behaviour, not a bug. Test through the SWA hostname.
 - **Cosmos SQL RBAC scope**: Cosmos DB SQL role assignment scope must be the fully-qualified DB scope `${cosmosDb.id}/dbs/${cosmosDbDatabaseName}`.
-- **Cosmos RBAC for GitHub OIDC**: The deploy-infra workflow extracts the service principal `oid` from the ARM access token and passes it as `automationPrincipalId` to Bicep, which grants Cosmos SQL Data Contributor at the database scope. The generate-content workflow also idempotently ensures this RBAC exists before running pipeline tools.
-- **Search RBAC for GitHub OIDC**: Azure AI Search data-plane operations (create/update indexes, upload documents) require RBAC. Infra grants the automation principal **Search Index Data Contributor** on the Search service, and the generate-content workflow also idempotently ensures this role assignment to prevent `Forbidden` failures during indexing.
-- **OIDC Token Refresh**: Long-running generate-content jobs use a background process to periodically re-authenticate via OIDC (every 4 minutes) to prevent token expiry during multi-hour content generation.
+- **Cosmos RBAC for GitHub OIDC**: The deploy-infra workflow extracts the service principal `oid` from the ARM access token and passes it as `automationPrincipalId` to Bicep, which grants Cosmos SQL Data Contributor at the database scope.
+- **Search RBAC**: Azure AI Search data-plane operations (create/update indexes, upload documents) require RBAC. The Function identity holds **Search Index Data Contributor** because it both writes the grounding index during generation and reads it for Study Partner RAG.
+- **Shared search index**: One Basic Search service holds a single `certification-content` index for every certification, discriminated by a filterable `certificationId` field. There is no per-certification index and no ephemeral Search service — both were removed.
 - **SWA deploy token**: Static Web Apps deploy token is retrieved at runtime in CI (no long-lived repo secret).
 - **Deployment sprawl control**: CI supports an optional pinned suffix secret `AZURE_UNIQUE_SUFFIX` to avoid creating a full new resource set every run.
 - **RG cleanup helper**: [scripts/cleanup-rg.sh](../scripts/cleanup-rg.sh) can delete old tagged deployment sets while keeping the active suffix.
 - **Dynamic certification list**: Frontend dropdown is populated from the API (`GET /api/certifications`) with a safe fallback that includes `dp-700`.
-- **Auto-resolved endpoints**: Generate Content workflow no longer requires endpoint secrets; it resolves them at runtime via [scripts/get-endpoints.sh](../scripts/get-endpoints.sh), which picks the newest (or pinned) deployment suffix.
-- **Workflow triggers**: Deploy Infrastructure triggers on `infra/**`, `src/web/**`, `src/functions/**`, or workflow file changes. Content generation is manual via `workflow_dispatch`.
-- **Local Development**: Use `./scripts/run-local.sh` to run content generation from the dev container. Uses `az login` credentials and handles ephemeral Search service lifecycle.
-- **Study Partner Indexing**: Use `./scripts/index-content.sh <cert-id> certification-content` to index exam content for Study Partner without generating audio (saves TTS tokens).
+- **Content generation runs in the Function App, not CI**: Tenant policy forces `publicNetworkAccess=Disabled` on Storage and Cosmos, so a GitHub-hosted runner cannot reach the data plane. Generation runs in-process in the already VNet-integrated Function App. An admin submits a job at `/admin.html` → `POST /api/admin/jobs` → message on the `content-jobs` queue → `run_content_job` queue trigger → `src/functions/pipeline/orchestrator.py`. Progress is written back to the job document and polled by the UI.
+- **Only one workflow**: `deploy-infra.yml`. The `generate-content.yml` and `refresh-content.yml` workflows and the `scripts/run-local.sh`, `index-content.sh`, and `get-endpoints.sh` helpers were deleted. Do not reintroduce them; once deployed, the app does not need the repository.
+- **Admin bootstrap**: Bicep writes a rotating `ADMIN_BOOTSTRAP_TOKEN` app setting. The first admin claims it once at `/admin.html`; afterwards admins are managed in the portal. Compared with `hmac.compare_digest`, and the claim marker is written before the admin record so a partial failure spends the token rather than leaving it reusable.
+- **One job at a time**: `host.json` sets `functionTimeout: -1` (allowed on a dedicated plan) and queue `batchSize: 1`, `newBatchThreshold: 0`, `maxDequeueCount: 2`. `POST /api/admin/jobs` also returns `409` if a job is already queued or running.
+- **Input validation**: `certificationId` is interpolated into an AI Search OData filter, so it is constrained to `^[a-z0-9][a-z0-9-]{0,63}$` at the API boundary and quotes are additionally escaped at the filter. Voice names are constrained to the Azure short-name shape.
+- **Workflow triggers**: Deploy Infrastructure triggers on `infra/**`, `src/web/**`, `src/functions/**`, or workflow file changes.
+- **Local Development**: Content generation cannot run locally — the data plane is private and tenant policy silently reverts firewall changes. Run `python -m pytest -q` in `src/functions` for unit tests, and generate from the admin portal.
+- **Private networking is mandatory**: The `MCAPSGov Deploy and Modify Policies` assignment at the Tenant Root Group uses `Modify` effects to force `publicNetworkAccess=Disabled`, `allowSharedKeyAccess=false`, and `disableLocalAuth=true`. ARM returns HTTP 200 while silently rewriting the payload, so a template asking for public access appears to succeed and does not take effect. Do not try to "fix" connectivity by enabling public access.
 
 ## Agents
 
@@ -81,34 +85,34 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 
 ### content-pipeline
 
-**Scope**: `src/pipeline/**`
+**Scope**: `src/functions/pipeline/**`, `src/functions/admin.py`
 
-**Description**: Handles exam content discovery, RAG-based script generation, and audio synthesis.
+**Description**: Handles exam content discovery, RAG-based script generation, and audio synthesis. Runs in-process inside the Function App, not as a separate job.
 
 **Responsibilities**:
 - Discover and scrape Microsoft Learn content from exam skills outline pages
-- Index content into Azure AI Search for RAG retrieval
-- Generate episode scripts using PromptFlow with GPT-4o
+- Index content into the shared Azure AI Search index for RAG retrieval
+- Generate episode scripts with GPT-4o
 - Convert scripts to SSML with proper prosody for learning retention
 - Synthesize audio using Azure AI Speech neural voices
 - Track content hashes for delta detection during refresh cycles
 - Generate amendment episodes that reference prior content
+- Report progress back to the job document so the admin UI can poll it
 
 **Key Files**:
-- `src/pipeline/flow.dag.yaml` - PromptFlow orchestration
-- `src/pipeline/tools/discover_exam_content.py` - Exam page scraping (skills mode)
-- `src/pipeline/tools/deep_discover.py` - Deep discovery via Catalog API (dynamic path resolution, coverage sweep, confidence scoring)
-- `src/pipeline/tools/check_content_delta.py` - Content change detection
-- `src/pipeline/tools/generate_episodes.py` - Episode generation with retry/skip logic
-- `src/pipeline/tools/synthesize_audio.py` - Azure AI Speech synthesis
-- `src/pipeline/tools/upload_to_blob.py` - Blob storage upload
-- `src/pipeline/prompts/*` - LLM prompt templates
+- `src/functions/pipeline/orchestrator.py` - `run_generate` / `run_refresh`, the in-process entry points
+- `src/functions/admin.py` - admin API and the `run_content_job` queue trigger
+- `src/functions/pipeline/discover_exam_content.py` - Exam page scraping (skills mode)
+- `src/functions/pipeline/deep_discover.py` - Deep discovery via Catalog API (dynamic path resolution, coverage sweep, confidence scoring)
+- `src/functions/pipeline/check_content_delta.py` - Content change detection
+- `src/functions/pipeline/generate_episodes.py` - Episode generation with retry/skip logic
+- `src/functions/pipeline/synthesize_audio.py` - Azure AI Speech synthesis
+- `src/functions/pipeline/upload_to_blob.py` - Blob storage upload
+- `src/functions/pipeline/prompts/*` - LLM prompt templates
 
 **Context**:
-- Uses Azure AI Document Intelligence for content extraction
-- Uses Azure AI Search for RAG indexing and retrieval
-- Uses Azure OpenAI GPT-4o for script generation
-- Uses Azure AI Speech with configurable neural voices (default: `en-US-AndrewNeural`)
+- PromptFlow was removed. `flow.dag.yaml` never actually executed; the tools are plain Python called by `orchestrator.py`.
+- Every module here is packaged into the Function App, so keep `requirements.in` lean and recompile the lock after changes.
 - Target episode length: ~20-25 minutes (~2,500-3,500 words)
 - SSML for standard Neural voices: 500ms breaks after key concepts, -5% rate for comprehension
 - SSML for Dragon HD voices: simplified (no prosody rate, no breaks) to avoid audio artifacts
@@ -186,24 +190,24 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 - `infra/main.bicepparam` - Parameter file
 - `infra/modules/ai-services.bicep` - OpenAI, Speech, Doc Intel, AI Search
 - `infra/modules/ai-foundry.bicep` - AI Foundry account, project, connections (conditional)
-- `infra/modules/data.bicep` - Cosmos DB, Storage Account
+- `infra/modules/data.bicep` - Cosmos DB, Storage Account (incl. the `admins` and `jobs` containers)
 - `infra/modules/web.bicep` - Static Web Apps, Functions
+- `infra/modules/search-persistent.bicep` - AI Search (always deployed)
 - `infra/modules/identity.bicep` - B2C (conditional)
-- `.github/workflows/deploy-infra.yml` - Infrastructure deployment
-- `.github/workflows/generate-content.yml` - Content generation
-- `.github/workflows/refresh-content.yml` - Scheduled refresh
+- `.github/workflows/deploy-infra.yml` - Infrastructure and code deployment (the only workflow)
 
 **Context**:
 - All resources prefer Managed Identity for authentication
-- Storage accounts have public access disabled
-- Parameters: `certificationId`, `audioFormat`, `enableStudyPartner`, `location`, `foundryLocation`
+- Storage and Cosmos have public network access disabled; this is enforced by tenant policy and cannot be turned off
+- Parameters: `enableStudyPartner`, `location`, `foundryLocation`, `adminBootstrapToken`
+- Cosmos containers must be declared in Bicep. The Cosmos SQL Data Contributor role covers item operations but *not* container management, so the app cannot create them at runtime.
 
 **Keyless storage + RBAC**:
 - Functions runtime storage (`AzureWebJobsStorage`) is configured with `AzureWebJobsStorage__credential=managedidentity` and service URIs, and the Functions identity is granted:
 	- Storage Blob Data Contributor
 	- Storage Queue Data Contributor
 	- Storage Table Data Contributor
-- Functions read episode media/scripts from the *content* storage account via Storage Blob Data Reader.
+- On the *content* storage account the Functions identity holds Storage Blob Data **Contributor** (it writes generated episodes as well as streaming them).
 
 **CI/CD notes**:
 - Deploy workflow supports `AZURE_UNIQUE_SUFFIX` (optional secret) to keep one stable environment.
@@ -214,7 +218,7 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 
 ### refresh
 
-**Scope**: `src/pipeline/tools/check_content_delta.py`, `.github/workflows/refresh-content.yml`
+**Scope**: `src/functions/pipeline/check_content_delta.py`, `src/functions/pipeline/orchestrator.py`
 
 **Description**: Content update detection and amendment episode generation.
 
@@ -226,11 +230,11 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 - Update Cosmos DB with new content hashes and episode references
 
 **Key Files**:
-- `src/pipeline/tools/check_content_delta.py` - Delta detection logic
-- `.github/workflows/refresh-content.yml` - Scheduled refresh workflow
+- `src/functions/pipeline/check_content_delta.py` - Delta detection logic
+- `src/functions/pipeline/orchestrator.py` - `run_refresh`, which re-indexes changed sources and regenerates only the affected batches
 
 **Context**:
-- Runs on schedule (weekly) or manual trigger
+- Triggered on demand by an admin submitting a `refresh` job; there is no schedule
 - Amendment episodes get new sequential numbers
 - Amendment metadata includes `amendmentOf` field linking to original
 - Scripts reference "what we discussed in Episode X" when content changes

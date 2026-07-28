@@ -99,15 +99,32 @@ A fully automated Azure-native system that generates podcast-style or instructio
 
 ```mermaid
 flowchart LR
-  GH[GitHub Actions<br/>OIDC + management plane] --> JOB[Triggered WebJob<br/>existing B1 plan]
-  JOB --> AI[OpenAI, Speech, ephemeral Search]
-  JOB --> PE[Private Endpoints]
-  SWA[Static Web Apps] --> FN[Public Functions API<br/>VNet integrated]
-  FN --> PE
+  USER[Browser] --> SWA[Static Web Apps<br/>Entra sign-in]
+  SWA --> FN[Functions API<br/>VNet integrated]
+  FN -- enqueue --> Q[content-jobs queue]
+  Q --> FN
+  FN --> AI[OpenAI, Speech, AI Search]
+  FN --> PE[Private Endpoints]
   PE --> DATA[Private Cosmos DB + Storage]
 ```
 
-GitHub-hosted runners package and trigger the WebJob through Azure management endpoints, but they never access the private data plane. The Function remains public for the Static Web Apps linked backend; its Cosmos DB, data Blob, and host Blob/Queue/Table traffic resolves through five Private Endpoints. The job shares the Central US VNet through the App Service integration subnet.
+Everything runs behind one Function App. Static Web Apps handles sign-in and is the
+only public entry point; it forwards authenticated requests to the Function as a
+linked backend, so calling the Function hostname directly returns `401`.
+
+Content generation is triggered from the admin portal at `/admin.html`, which
+enqueues a job on the `content-jobs` queue. A queue trigger in the same Function
+App runs the generation in-process. Because the Function is already VNet
+integrated, the job reaches Cosmos DB and Storage over Private Endpoints without
+any separate compute, and no credential ever leaves Azure.
+
+Private networking is not optional here — tenant Azure Policy forces
+`publicNetworkAccess=Disabled` and disables shared-key access on Storage and
+Cosmos DB. Anything that needs the data plane must run inside the VNet.
+
+For the full topology and the job lifecycle, see
+[architecture.svg](docs/diagrams/architecture.svg) and
+[generation-flow.svg](docs/diagrams/generation-flow.svg).
 
 ## Prerequisites
 
@@ -207,9 +224,30 @@ az deployment group create \
   --parameters uniqueSuffix=001 enableStudyPartner=false
 ```
 
-### 5. Generate Content
+### 5. Claim Admin Access
 
-Run the **Generate Content** workflow to deploy and trigger the Python WebJob hosted on the existing Central US B1 plan. The workflow deletes ephemeral AI Search when execution finishes.
+Deployment writes a one-time `ADMIN_BOOTSTRAP_TOKEN` app setting. Read it:
+
+```bash
+az functionapp config appsettings list \
+  -g rg-certaudio-dev -n <function-app-name> \
+  --query "[?name=='ADMIN_BOOTSTRAP_TOKEN'].value | [0]" -o tsv
+```
+
+Sign in to `https://<your-swa>.azurestaticapps.net/admin.html` and paste the
+token. That registers you as the first admin; the token cannot be claimed twice
+and rotates on every deployment. From then on you add other admins from the
+portal itself.
+
+### 6. Generate Content
+
+Submit a job from the admin portal: pick a certification and format, then press
+**Start**. The portal shows live progress and keeps a history of past runs.
+
+Jobs run inside the Function App on the existing B1 plan, so a run adds no
+compute cost. Only one job runs at a time — a second submission returns `409`
+while one is active. A full certification takes a few hours; the portal warns
+you not to redeploy mid-run.
 
 ## Configuration
 
@@ -223,7 +261,7 @@ Run the **Generate Content** workflow to deploy and trigger the Python WebJob ho
 | `podcastHostVoice` | `en-US-Ava:DragonHDLatestNeural` | Host voice for podcast format |
 | `podcastExpertVoice` | `en-US-Andrew:DragonHDLatestNeural` | Expert voice for podcast format |
 | `forceRegenerate` | `false` | Regenerate episodes that already exist |
-| `enableStudyPartner` | `false` | Deploy persistent Search and AI Foundry Study Partner resources |
+| `enableStudyPartner` | `false` | Deploy the AI Foundry Study Partner agent |
 | `location` | `centralus` | Core Azure region |
 
 ## Project Structure
@@ -232,16 +270,17 @@ Run the **Generate Content** workflow to deploy and trigger the Python WebJob ho
 ├── .github/
 │   ├── agents.md              # Copilot agent definitions
 │   └── workflows/
-│       ├── deploy-infra.yml   # Infrastructure deployment
-│       ├── generate-content.yml # Content generation
-│       └── refresh-content.yml  # Content refresh
+│       └── deploy-infra.yml   # Infrastructure deployment
 ├── infra/
 │   ├── main.bicep             # Main orchestrator
 │   └── modules/               # Bicep modules
 ├── src/
 │   ├── functions/             # Azure Functions API
-│   ├── pipeline/              # Content generation tools
-│   └── web/                   # Static Web App frontend
+│   │   ├── function_app.py    # Player and progress API
+│   │   ├── admin.py           # Admin API + content-jobs queue worker
+│   │   ├── admin_store.py     # Cosmos access for admins and jobs
+│   │   └── pipeline/          # Content generation, run in-process
+│   └── web/                   # Static Web App frontend (incl. admin.html)
 └── README.md
 ```
 
@@ -277,13 +316,13 @@ Available voices: `en-US-AndrewNeural`, `en-US-BrianNeural`, `en-US-GuyNeural`, 
 
 ## Content Updates
 
-The **Refresh Content** workflow runs weekly to:
+Submit a **refresh** job from the admin portal to pick up upstream changes. It:
 
-1. Check Microsoft Learn pages for content changes
-2. Compare content hashes against stored versions
-3. Rebuild the temporary RAG index when updates exist
-4. Regenerate only the episode batches affected by changed sources
-5. Republish the validated episode index
+1. Checks Microsoft Learn pages for content changes
+2. Compares content hashes against stored versions
+3. Re-indexes changed sources into the shared search index
+4. Regenerates only the episode batches affected by changed sources
+5. Republishes the validated episode index
 
 ## Local Development
 
@@ -291,41 +330,15 @@ The **Refresh Content** workflow runs weekly to:
 
 Reopen the repository in its dev container to get Python 3.11, Node 22, Azure Functions Core Tools, SWA CLI, Azurite, Bicep, and the exact development dependency lock. The bootstrap recreates a mismatched virtual environment automatically.
 
-The deployed Cosmos DB and Storage accounts are private. Full generation therefore runs in the **Generate Content** workflow's VNet-integrated job. The local runner requires private network connectivity to that VNet; without it, use local unit tests and emulators instead of changing the Azure firewalls.
+Cosmos DB, Storage, and AI Search are private and reachable only from inside the
+VNet, so content generation cannot run from a laptop. Run it from the admin
+portal instead. Locally you get unit tests and emulators:
 
 ```bash
-# Make sure you're logged in to Azure
-az login
-
-# Run only when this machine has private VNet connectivity
-./scripts/run-local.sh dp-700                           # Defaults: instructional
-./scripts/run-local.sh az-104 podcast                   # Podcast format
-
-# Force regenerate existing episodes
-FORCE_REGENERATE=true ./scripts/run-local.sh dp-700
+# Unit tests for the Functions API, auth, and admin authorization
+cd src/functions
+python -m pytest -q
 ```
-
-The local runner, when connected to the VNet:
-1. Resolves service endpoints from Azure (OpenAI, Speech, Cosmos, Storage)
-2. Creates an ephemeral AI Search service for indexing
-3. Runs the full pipeline: discover → index → generate
-4. Cleans up the Search service when done
-
-### Index Content for Study Partner (No Audio)
-
-To populate the Study Partner's search index without generating audio (saves TTS tokens):
-
-```bash
-# Index a single certification into the shared Study Partner index
-./scripts/index-content.sh dp-700 certification-content
-./scripts/index-content.sh ai-102 certification-content
-./scripts/index-content.sh ab-731 certification-content
-
-# Index into a per-cert index (for later audio generation)
-./scripts/index-content.sh dp-700
-```
-
-This script runs discovery and indexing only - no TTS or audio generation.
 
 ### Run the Web App
 
@@ -335,21 +348,18 @@ python -m http.server 8080
 # Open http://localhost:8080
 ```
 
-### Run Individual Pipeline Tools
-
-```bash
-cd src/pipeline
-pip install -r requirements.txt
-python -m tools.discover_exam_content --certification-id ai-102
-```
+Note that `/admin.html` needs the Static Web Apps auth headers, so it only works
+against a deployed environment or the SWA CLI emulator.
 
 ## Study Partner (Optional)
 
 The **Study Partner** feature adds an AI-powered chat interface for interactive exam preparation. When enabled, it deploys:
 
 - **Azure AI Foundry** - Account with project for agent orchestration
-- **Azure AI Search** (Basic tier) - Persistent vector store for RAG
-- **GPT-4o Agent** - Conversational AI with access to indexed exam content
+- **GPT-4o Agent** - Conversational AI with a search tool over indexed exam content
+
+AI Search is *not* part of this toggle. It is always deployed because content
+generation grounds on the same `certification-content` index the agent queries.
 
 ### Enabling Study Partner
 
@@ -393,28 +403,30 @@ The **Study Partner** feature adds an AI-powered chat interface for interactive 
 
 | Service | Estimated Cost |
 |---------|---------------|
-| Azure AI Search (Basic) | ~$75/month |
 | Azure AI Foundry | ~$5-10/month (usage-based) |
-| **Study Partner Add-on** | **~$80-85/month** |
+| **Study Partner Add-on** | **~$5-10/month** |
 
-> **Note**: Study Partner is disabled by default due to the additional monthly cost.
+> **Note**: The agent is disabled by default. The AI Search cost is already in
+> the base platform table above, because generation needs it regardless.
 
 ---
 
 ## Cost Estimation
 
-Approximate platform costs vary by region and tenant policy. The private topology adds five Private Endpoints (roughly `$36.50/month` at `$0.01/hour` each, plus data processing). The triggered WebJob shares the existing B1 plan and adds no separate compute SKU; the existing Basic ACR remains always on but is no longer required by the pipeline runtime.
+Approximate platform costs vary by region and tenant policy. The private topology adds five Private Endpoints (roughly `$36.50/month` at `$0.01/hour` each, plus data processing). Content generation runs inside the Function App, so it adds no separate compute SKU.
 
 | Service | Estimated Cost |
 |---------|---------------|
 | Azure Static Web Apps (Standard) | $9 |
-| Azure Functions (B1 Basic) | $13 |
+| Azure Functions (B1 Basic, also runs generation) | $13 |
+| Azure AI Search (Basic) | ~$75 |
 | Azure Cosmos DB (Serverless) | $2-5 |
 | Azure Storage | $0.10 |
-| Azure Container Registry (Basic) | ~$5 |
 | Five Private Endpoints | ~$36.50 + data |
-| Triggered pipeline WebJob | Included in existing B1 plan |
-| Persistent AI Search (when deployed) | ~$75 |
+
+AI Search is always deployed. It holds the single `certification-content` index
+that serves both generation grounding and Study Partner retrieval, so the cost
+is shared rather than duplicated per certification.
 
 Microsoft Defender plans are subscription-policy costs and can materially exceed service usage. Review them with the subscription security owner rather than disabling them as an application deployment side effect.
 
@@ -422,11 +434,10 @@ Microsoft Defender plans are subscription-policy costs and can materially exceed
 
 | Service | Cost |
 |---------|------|
-| Azure AI Search (ephemeral, 2-4 hours) | ~$0.50 |
 | Azure OpenAI (GPT-4o) | ~$15-25 |
 | Azure OpenAI (Embeddings) | ~$0.25 |
 | Azure AI Speech (TTS) | ~$15-20 |
-| **Per-Generation Total** | **~$30-50** |
+| **Per-Generation Total** | **~$30-45** |
 
 ## Contributing
 

@@ -2,7 +2,17 @@
 
 > **Plan Version**: 1.0  
 > **Created**: January 16, 2026  
-> **Status**: Approved, ready for implementation
+> **Status**: Historical. Superseded by the implementation.
+
+> **This is the original design document, kept for context on why things are the
+> way they are. It is not a description of the running system.** Several
+> decisions below were later reversed: PromptFlow was removed without ever
+> executing, content generation moved out of GitHub Actions and into the Function
+> App behind an admin portal, and all data resources became private because
+> tenant policy requires it.
+>
+> For the current architecture see [README.md](README.md) and
+> [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md).
 
 ## Overview
 
