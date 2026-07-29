@@ -44,17 +44,17 @@
 <rect x="940" y="430" width="340" height="88" rx="12" ry="12" fill="#ffec99" stroke="#343a40" stroke-width="2"/>
 <text x="1110.0" y="469.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Admin UI polls</text>
 <text x="1110.0" y="490.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">GET /api/portal/jobs/{id}</text>
-<rect x="349.2" y="95.0" width="51.7" height="18" fill="#ffffff"/>
+<rect x="349.2" y="95.0" width="51.7" height="19" fill="#ffffff"/>
 <text x="375.0" y="107.0" font-size="13" fill="#5c5f66" text-anchor="middle">submit</text>
-<rect x="751.0" y="107.0" width="88.1" height="18" fill="#ffffff"/>
+<rect x="751.0" y="107.0" width="88.1" height="19" fill="#ffffff"/>
 <text x="795.0" y="119.0" font-size="13" fill="#5c5f66" text-anchor="middle">immediately</text>
-<rect x="360.5" y="184.0" width="59.0" height="18" fill="#ffffff"/>
+<rect x="360.5" y="184.0" width="59.0" height="19" fill="#ffffff"/>
 <text x="390.0" y="196.0" font-size="13" fill="#5c5f66" text-anchor="middle">enqueue</text>
-<rect x="325.5" y="273.0" width="59.0" height="18" fill="#ffffff"/>
+<rect x="325.5" y="273.0" width="59.0" height="19" fill="#ffffff"/>
 <text x="355.0" y="285.0" font-size="13" fill="#5c5f66" text-anchor="middle">trigger</text>
-<rect x="816.4" y="364.0" width="117.2" height="18" fill="#ffffff"/>
+<rect x="816.4" y="364.0" width="117.2" height="19" fill="#ffffff"/>
 <text x="875.0" y="376.0" font-size="13" fill="#5c5f66" text-anchor="middle">writes progress</text>
-<rect x="874.2" y="453.0" width="51.7" height="18" fill="#ffffff"/>
+<rect x="874.2" y="453.0" width="51.7" height="19" fill="#ffffff"/>
 <text x="900.0" y="465.0" font-size="13" fill="#5c5f66" text-anchor="middle">status</text>
 <rect x="60" y="546" width="16" height="16" rx="4" ry="4" fill="#ffec99" stroke="#343a40" stroke-width="1.5"/>
 <text x="84" y="559" font-size="14" fill="#5c5f66">Browser</text>

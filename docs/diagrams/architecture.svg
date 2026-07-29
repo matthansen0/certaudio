@@ -44,17 +44,17 @@
 <rect x="740" y="660" width="240" height="76" rx="12" ry="12" fill="#d8f5a2" stroke="#343a40" stroke-width="2"/>
 <text x="860.0" y="693.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Storage account</text>
 <text x="860.0" y="714.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">blob + queue + table</text>
-<rect x="336.0" y="310.0" width="109.9" height="18" fill="#ffffff"/>
+<rect x="336.0" y="310.0" width="109.9" height="19" fill="#ffffff"/>
 <text x="340.0" y="322.0" font-size="13" fill="#5c5f66" text-anchor="start">linked backend</text>
-<rect x="476.0" y="373.0" width="88.1" height="18" fill="#ffffff"/>
+<rect x="476.0" y="373.0" width="88.1" height="19" fill="#ffffff"/>
 <text x="520.0" y="385.0" font-size="13" fill="#5c5f66" text-anchor="middle">enqueue job</text>
-<rect x="808.7" y="373.0" width="102.6" height="18" fill="#ffffff"/>
+<rect x="808.7" y="373.0" width="102.6" height="19" fill="#ffffff"/>
 <text x="860.0" y="385.0" font-size="13" fill="#5c5f66" text-anchor="middle">queue trigger</text>
-<rect x="1046.0" y="305.0" width="95.4" height="18" fill="#ffffff"/>
+<rect x="1046.0" y="305.0" width="95.4" height="19" fill="#ffffff"/>
 <text x="1050.0" y="317.0" font-size="13" fill="#5c5f66" text-anchor="start">prompt + TTS</text>
-<rect x="336.0" y="472.0" width="95.4" height="18" fill="#ffffff"/>
+<rect x="336.0" y="472.0" width="95.4" height="19" fill="#ffffff"/>
 <text x="340.0" y="484.0" font-size="13" fill="#5c5f66" text-anchor="start">private link</text>
-<rect x="1046.0" y="472.0" width="95.4" height="18" fill="#ffffff"/>
+<rect x="1046.0" y="472.0" width="95.4" height="19" fill="#ffffff"/>
 <text x="1050.0" y="484.0" font-size="13" fill="#5c5f66" text-anchor="start">private link</text>
 <rect x="60" y="756" width="16" height="16" rx="4" ry="4" fill="#ffec99" stroke="#343a40" stroke-width="1.5"/>
 <text x="84" y="769" font-size="14" fill="#5c5f66">Browser</text>

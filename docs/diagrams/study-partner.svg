@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1190" height="520" viewBox="0 0 1190 520" role="img" aria-label="certaudio - Study Partner agent" font-family="Segoe UI, Helvetica Neue, Arial, DejaVu Sans, sans-serif">
+<title>certaudio - Study Partner agent</title>
+<defs>
+<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#343a40"/></marker>
+</defs>
+<rect width="1190" height="520" fill="#ffffff"/>
+<text x="60" y="44" font-size="24" font-weight="600" fill="#1e1e1e">certaudio - Study Partner agent</text>
+<rect x="710" y="120" width="420" height="266" rx="16" ry="16" fill="none" stroke="#5c5f66" stroke-width="2" stroke-dasharray="8 6"/>
+<text x="726" y="147" font-size="14" font-weight="600" fill="#5c5f66">AI Foundry project (managed identity)</text>
+<path d="M 290 203 L 350 203" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
+<path d="M 650 203 L 745 203" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
+<path d="M 920 241 L 920 285" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
+<path d="M 920 361 L 920.0 418.0 Q 920 430 908.0 430.0 L 187.0 430.0 Q 175 430 175.0 418.0 L 175 241" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="7 5" marker-end="url(#ah)"/>
+<rect x="60" y="165" width="230" height="76" rx="12" ry="12" fill="#ffec99" stroke="#343a40" stroke-width="2"/>
+<text x="175.0" y="198.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Listener question</text>
+<text x="175.0" y="219.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">study.html</text>
+<rect x="350" y="165" width="300" height="76" rx="12" ry="12" fill="#a5d8ff" stroke="#343a40" stroke-width="2"/>
+<text x="500.0" y="198.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Functions API</text>
+<text x="500.0" y="219.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">POST /api/chat</text>
+<rect x="745" y="165" width="350" height="76" rx="12" ry="12" fill="#d0bfff" stroke="#343a40" stroke-width="2"/>
+<text x="920.0" y="198.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">GPT-4o agent</text>
+<text x="920.0" y="219.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">exam-prep instructions</text>
+<rect x="745" y="285" width="350" height="76" rx="12" ry="12" fill="#d0bfff" stroke="#343a40" stroke-width="2"/>
+<text x="920.0" y="318.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Azure AI Search tool</text>
+<text x="920.0" y="339.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">certification-content</text>
+<rect x="660.7" y="182.0" width="73.5" height="19" fill="#ffffff"/>
+<text x="697.5" y="194.0" font-size="13" fill="#5c5f66" text-anchor="middle">run agent</text>
+<rect x="926.0" y="256.0" width="109.9" height="19" fill="#ffffff"/>
+<text x="930.0" y="268.0" font-size="13" fill="#5c5f66" text-anchor="start">AI Search tool</text>
+<rect x="488.9" y="409.0" width="117.2" height="19" fill="#ffffff"/>
+<text x="547.5" y="421.0" font-size="13" fill="#5c5f66" text-anchor="middle">grounded answer</text>
+<rect x="60" y="476" width="16" height="16" rx="4" ry="4" fill="#ffec99" stroke="#343a40" stroke-width="1.5"/>
+<text x="84" y="489" font-size="14" fill="#5c5f66">Browser</text>
+<rect x="164.88" y="476" width="16" height="16" rx="4" ry="4" fill="#a5d8ff" stroke="#343a40" stroke-width="1.5"/>
+<text x="188.88" y="489" font-size="14" fill="#5c5f66">Functions compute</text>
+<rect x="348.15999999999997" y="476" width="16" height="16" rx="4" ry="4" fill="#d0bfff" stroke="#343a40" stroke-width="1.5"/>
+<text x="372.15999999999997" y="489" font-size="14" fill="#5c5f66">Azure AI services</text>
+</svg>

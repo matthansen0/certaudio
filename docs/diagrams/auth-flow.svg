@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="640" viewBox="0 0 1040 640" role="img" aria-label="certaudio - user sign-in and identity" font-family="Segoe UI, Helvetica Neue, Arial, DejaVu Sans, sans-serif">
+<title>certaudio - user sign-in and identity</title>
+<defs>
+<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#343a40"/></marker>
+</defs>
+<rect width="1040" height="640" fill="#ffffff"/>
+<text x="60" y="44" font-size="24" font-weight="600" fill="#1e1e1e">certaudio - user sign-in and identity</text>
+<path d="M 300 152 L 360 152" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
+<path d="M 620 152 L 680 152" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
+<path d="M 810 194 L 810.0 228.0 Q 810 240 798.0 240.0 L 192.0 240.0 Q 180 240 180.0 252.0 L 180 290" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
+<path d="M 300 332 L 360 332" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
+<path d="M 660 332 L 720 332" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
+<path d="M 850 374 L 850.0 408.0 Q 850 420 838.0 420.0 L 522.0 420.0 Q 510 420 510.0 432.0 L 510 470" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
+<rect x="60" y="110" width="240" height="84" rx="12" ry="12" fill="#ffec99" stroke="#343a40" stroke-width="2"/>
+<text x="180.0" y="147.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Listener clicks</text>
+<text x="180.0" y="168.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">Sign in</text>
+<rect x="360" y="110" width="260" height="84" rx="12" ry="12" fill="#b2f2bb" stroke="#343a40" stroke-width="2"/>
+<text x="490.0" y="147.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">/.auth/login/aad</text>
+<text x="490.0" y="168.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">Static Web Apps</text>
+<rect x="680" y="110" width="260" height="84" rx="12" ry="12" fill="#ffc9c9" stroke="#343a40" stroke-width="2"/>
+<text x="810.0" y="147.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Microsoft Entra ID</text>
+<text x="810.0" y="168.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">OAuth + consent</text>
+<rect x="60" y="290" width="240" height="84" rx="12" ry="12" fill="#b2f2bb" stroke="#343a40" stroke-width="2"/>
+<text x="180.0" y="327.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">/.auth/me</text>
+<text x="180.0" y="348.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">session cookie</text>
+<rect x="360" y="290" width="300" height="84" rx="12" ry="12" fill="#a5d8ff" stroke="#343a40" stroke-width="2"/>
+<text x="510.0" y="327.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">x-ms-client-principal</text>
+<text x="510.0" y="348.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">injected on /api/*</text>
+<rect x="720" y="290" width="260" height="84" rx="12" ry="12" fill="#a5d8ff" stroke="#343a40" stroke-width="2"/>
+<text x="850.0" y="327.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Functions decodes</text>
+<text x="850.0" y="348.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">stable userId</text>
+<rect x="360" y="470" width="300" height="84" rx="12" ry="12" fill="#d8f5a2" stroke="#343a40" stroke-width="2"/>
+<text x="510.0" y="507.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Cosmos DB</text>
+<text x="510.0" y="528.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">progress + admin role</text>
+<rect x="429.1" y="219.0" width="131.8" height="19" fill="#ffffff"/>
+<text x="495.0" y="231.0" font-size="13" fill="#5c5f66" text-anchor="middle">redirect + cookie</text>
+<rect x="617.8" y="399.0" width="124.5" height="19" fill="#ffffff"/>
+<text x="680.0" y="411.0" font-size="13" fill="#5c5f66" text-anchor="middle">lookup by userId</text>
+<rect x="60" y="596" width="16" height="16" rx="4" ry="4" fill="#ffec99" stroke="#343a40" stroke-width="1.5"/>
+<text x="84" y="609" font-size="14" fill="#5c5f66">Browser</text>
+<rect x="164.88" y="596" width="16" height="16" rx="4" ry="4" fill="#b2f2bb" stroke="#343a40" stroke-width="1.5"/>
+<text x="188.88" y="609" font-size="14" fill="#5c5f66">Static Web Apps</text>
+<rect x="332.48" y="596" width="16" height="16" rx="4" ry="4" fill="#ffc9c9" stroke="#343a40" stroke-width="1.5"/>
+<text x="356.48" y="609" font-size="14" fill="#5c5f66">Microsoft Entra ID</text>
+<rect x="523.6" y="596" width="16" height="16" rx="4" ry="4" fill="#a5d8ff" stroke="#343a40" stroke-width="1.5"/>
+<text x="547.6" y="609" font-size="14" fill="#5c5f66">Functions compute</text>
+<rect x="706.88" y="596" width="16" height="16" rx="4" ry="4" fill="#d8f5a2" stroke="#343a40" stroke-width="1.5"/>
+<text x="730.88" y="609" font-size="14" fill="#5c5f66">Data plane</text>
+</svg>
