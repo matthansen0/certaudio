@@ -6,16 +6,11 @@ This document explains how CertAudio discovers and organizes content for Microso
 
 Microsoft provides two distinct content structures for certification preparation:
 
+![certaudio two content sources](diagrams/content-sources.svg)
+
 ### 1. Learning Paths (Educational Content)
 
 **Source**: Microsoft Learn Catalog API (`https://learn.microsoft.com/api/catalog/`)
-
-**Structure**:
-```
-Learning Path
-  └─ Module
-       └─ Unit (topic)
-```
 
 **Purpose**: Teaches concepts and foundational knowledge.
 
@@ -34,13 +29,6 @@ Learning Path
 ### 2. Exam Skills Outline (Testable Skills)
 
 **Source**: Exam Study Guide page (e.g., `https://aka.ms/DP700-StudyGuide`)
-
-**Structure**:
-```
-Domain (with % weight)
-  └─ Objective
-       └─ Skill (specific testable item)
-```
 
 **Purpose**: Defines exactly what Microsoft will test on the exam.
 

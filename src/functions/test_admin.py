@@ -54,7 +54,7 @@ def _body(response: func.HttpResponse) -> dict:
 
 # Routes are exposed as blueprint FunctionBuilders; unwrap to the plain callable.
 def _fn(name):
-    return getattr(admin, name)._function.get_user_function()
+    return getattr(admin, name)._function._func
 
 
 # ---------------------------------------------------------------------------
@@ -150,9 +150,12 @@ def test_claim_succeeds_with_correct_token():
         ({"certificationId": "x' or true or '"}, "lowercase"),
         # Path traversal into blob prefixes.
         ({"certificationId": "../../etc"}, "lowercase"),
-        ({"voices": ["en-US-AndrewNeural"], "certificationId": "dp-700"}, "voices must be an object"),
+        ({"voices": ["en-US-GuyNeural"], "certificationId": "dp-700"}, "voices must be an object"),
         ({"certificationId": "dp-700", "voices": {"evil": "en-US-AndrewNeural"}}, "voice role"),
-        ({"certificationId": "dp-700", "voices": {"primary": "'; DROP"}}, "invalid voice name"),
+        # Was accepted then silently ignored: the API took primary/secondary
+        # while the orchestrator reads instructional/podcastHost/podcastExpert.
+        ({"certificationId": "dp-700", "voices": {"primary": "en-US-GuyNeural"}}, "voice role"),
+        ({"certificationId": "dp-700", "voices": {"instructional": "'; DROP"}}, "invalid voice name"),
     ],
 )
 def test_post_job_rejects_invalid_input(body, expected_fragment):
@@ -182,7 +185,7 @@ def test_post_job_accepts_valid_request():
             "certificationId": "DP-700",  # normalised to lowercase
             "mode": "generate",
             "audioFormat": "podcast",
-            "voices": {"primary": "en-US-AndrewMultilingualNeural"},
+            "voices": {"podcastHost": "en-US-Ava:DragonHDLatestNeural"},
         },
     )
     job = {"jobId": "job-1", "status": "queued"}
@@ -228,3 +231,32 @@ def test_status_reports_anonymous_without_touching_cosmos():
         response = _fn("admin_status")(_request())
     is_admin.assert_not_called()
     assert _body(response) == {"authenticated": False, "isAdmin": False}
+
+
+def test_voice_roles_match_the_orchestrator():
+    """The API and the pipeline must agree on voice role names.
+
+    They disagreed once: the API validated primary/secondary while the
+    orchestrator read instructional/podcastHost/podcastExpert, so an override
+    was accepted and then silently dropped.
+    """
+    from pipeline.orchestrator import _voices
+
+    assert set(_voices({})) == set(admin.VALID_VOICE_ROLES)
+
+
+@pytest.mark.parametrize(
+    "voice",
+    [
+        "en-US-Andrew:DragonHDLatestNeural",
+        "en-US-Ava:DragonHDLatestNeural",
+        "en-US-AndrewMultilingualNeural",
+        "en-US-GuyNeural",
+    ],
+)
+def test_default_voices_pass_validation(voice):
+    """The shipped defaults must survive our own input validation.
+
+    The Dragon HD names contain a colon, which an earlier pattern rejected.
+    """
+    assert admin.VOICE_NAME_RE.match(voice), voice

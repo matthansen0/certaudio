@@ -235,7 +235,7 @@ def retrieve_content(
             search_text=query_text,
             vector_queries=[vector_query],
             select=["content", "sourceUrl", "title", "chunkId"],
-            filter=cert_filter,
+            filter=f"certificationId eq '{certification_id}'",
             top=15,
         )
     except Exception as e:
@@ -243,7 +243,7 @@ def retrieve_content(
         results = search_client.search(
             search_text=query_text,
             select=["content", "sourceUrl", "title", "chunkId"],
-            filter=cert_filter,
+            filter=f"certificationId eq '{certification_id}'",
             top=15,
         )
 
@@ -1069,11 +1069,11 @@ def main() -> None:
     parser.add_argument("--certification-id", required=True, help="Certification ID (e.g., dp-700)")
     parser.add_argument("--audio-format", default="instructional", choices=["instructional", "podcast"])
     parser.add_argument("--instructional-voice", default=DEFAULT_INSTRUCTIONAL_VOICE,
-                        help="Voice for instructional format (see .env.example for options)")
+                        help="Voice for instructional format")
     parser.add_argument("--podcast-host-voice", default=DEFAULT_PODCAST_HOST_VOICE,
-                        help="Host voice for podcast format (see .env.example for options)")
+                        help="Host voice for podcast format")
     parser.add_argument("--podcast-expert-voice", default=DEFAULT_PODCAST_EXPERT_VOICE,
-                        help="Expert voice for podcast format (see .env.example for options)")
+                        help="Expert voice for podcast format")
     parser.add_argument("--skills-outline", required=True, help="JSON skills outline from discover step")
     parser.add_argument("--batch-index", type=int, default=0, help="Batch index for parallel processing")
     parser.add_argument("--batch-size", type=int, default=10, help="Number of episode units per batch")

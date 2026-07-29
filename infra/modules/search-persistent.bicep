@@ -10,6 +10,10 @@ param resourcePrefix string
 param location string
 param uniqueSuffix string
 param automationPrincipalId string = ''
+
+@description('Type of the deploying principal. azd sets AZURE_PRINCIPAL_TYPE; a human running azd is a User, a service principal in automation is not.')
+param automationPrincipalType string = 'User'
+
 param tags object
 
 @description('Whether to actually deploy the search service')
@@ -58,7 +62,7 @@ resource searchIndexDataContributorRole 'Microsoft.Authorization/roleAssignments
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '8ebe5a00-799e-43f5-93ac-243d3dce84a7')
     principalId: automationPrincipalId
-    principalType: 'ServicePrincipal'
+    principalType: automationPrincipalType
   }
 }
 

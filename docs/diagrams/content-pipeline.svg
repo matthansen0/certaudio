@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="440" viewBox="0 0 900 440" role="img" aria-label="certaudio - content pipeline" font-family="Segoe UI, Helvetica Neue, Arial, DejaVu Sans, sans-serif">
+<title>certaudio - content pipeline</title>
+<defs>
+<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#343a40"/></marker>
+</defs>
+<rect width="900" height="440" fill="#ffffff"/>
+<text x="60" y="44" font-size="24" font-weight="600" fill="#1e1e1e">certaudio - content pipeline</text>
+<path d="M 310 148 L 356 148" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
+<path d="M 576 148 L 622 148" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
+<path d="M 732 186 L 732.0 216.0 Q 732 228 720.0 228.0 L 182.0 228.0 Q 170 228 170.0 240.0 L 170 270" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
+<path d="M 280 308 L 326 308" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
+<path d="M 556 308 L 602 308" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
+<rect x="60" y="110" width="250" height="76" rx="12" ry="12" fill="#d8f5a2" stroke="#343a40" stroke-width="2"/>
+<text x="185.0" y="143.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Microsoft Learn</text>
+<text x="185.0" y="164.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">catalog + study guide</text>
+<rect x="356" y="110" width="220" height="76" rx="12" ry="12" fill="#a5d8ff" stroke="#343a40" stroke-width="2"/>
+<text x="466.0" y="143.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Discovery</text>
+<text x="466.0" y="164.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">modules + skills</text>
+<rect x="622" y="110" width="220" height="76" rx="12" ry="12" fill="#a5d8ff" stroke="#343a40" stroke-width="2"/>
+<text x="732.0" y="143.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">RAG index</text>
+<text x="732.0" y="164.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">Azure AI Search</text>
+<rect x="60" y="270" width="220" height="76" rx="12" ry="12" fill="#d0bfff" stroke="#343a40" stroke-width="2"/>
+<text x="170.0" y="303.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">AI narration</text>
+<text x="170.0" y="324.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">GPT-4o script</text>
+<rect x="326" y="270" width="230" height="76" rx="12" ry="12" fill="#d0bfff" stroke="#343a40" stroke-width="2"/>
+<text x="441.0" y="303.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Text to speech</text>
+<text x="441.0" y="324.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">Azure AI Speech</text>
+<rect x="602" y="270" width="240" height="76" rx="12" ry="12" fill="#b2f2bb" stroke="#343a40" stroke-width="2"/>
+<text x="722.0" y="303.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Web player</text>
+<text x="722.0" y="324.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">Static Web Apps</text>
+<rect x="381.5" y="207.0" width="139.0" height="19" fill="#ffffff"/>
+<text x="451.0" y="219.0" font-size="13" fill="#5c5f66" text-anchor="middle">grounded retrieval</text>
+<rect x="60" y="396" width="16" height="16" rx="4" ry="4" fill="#d8f5a2" stroke="#343a40" stroke-width="1.5"/>
+<text x="84" y="409" font-size="14" fill="#5c5f66">Source content</text>
+<rect x="219.76" y="396" width="16" height="16" rx="4" ry="4" fill="#a5d8ff" stroke="#343a40" stroke-width="1.5"/>
+<text x="243.76" y="409" font-size="14" fill="#5c5f66">Pipeline step</text>
+<rect x="371.68" y="396" width="16" height="16" rx="4" ry="4" fill="#d0bfff" stroke="#343a40" stroke-width="1.5"/>
+<text x="395.68" y="409" font-size="14" fill="#5c5f66">Azure AI</text>
+<rect x="484.4" y="396" width="16" height="16" rx="4" ry="4" fill="#b2f2bb" stroke="#343a40" stroke-width="1.5"/>
+<text x="508.4" y="409" font-size="14" fill="#5c5f66">Web player</text>
+</svg>

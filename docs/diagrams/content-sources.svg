@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="700" viewBox="0 0 1000 700" role="img" aria-label="certaudio - two content sources" font-family="Segoe UI, Helvetica Neue, Arial, DejaVu Sans, sans-serif">
+<title>certaudio - two content sources</title>
+<defs>
+<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#343a40"/></marker>
+</defs>
+<rect width="1000" height="700" fill="#ffffff"/>
+<text x="60" y="44" font-size="24" font-weight="600" fill="#1e1e1e">certaudio - two content sources</text>
+<rect x="70" y="95" width="400" height="350" rx="16" ry="16" fill="none" stroke="#5c5f66" stroke-width="2" stroke-dasharray="8 6"/>
+<text x="86" y="122" font-size="14" font-weight="600" fill="#5c5f66">Learning paths - catalog API</text>
+<rect x="540" y="95" width="400" height="350" rx="16" ry="16" fill="none" stroke="#5c5f66" stroke-width="2" stroke-dasharray="8 6"/>
+<text x="556" y="122" font-size="14" font-weight="600" fill="#5c5f66">Exam skills outline - study guide</text>
+<path d="M 270 211 L 270 245" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
+<path d="M 270 311 L 270 345" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
+<path d="M 740 211 L 740 245" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
+<path d="M 740 311 L 740 345" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
+<path d="M 270 411 L 270.0 473.0 Q 270 485 282.0 485.0 L 438.0 485.0 Q 450 485 450.0 497.0 L 450 540" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
+<path d="M 740 411 L 740.0 473.0 Q 740 485 728.0 485.0 L 572.0 485.0 Q 560 485 560.0 497.0 L 560 540" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
+<rect x="110" y="145" width="320" height="66" rx="12" ry="12" fill="#b2f2bb" stroke="#343a40" stroke-width="2"/>
+<text x="270.0" y="184.0" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Learning path</text>
+<rect x="110" y="245" width="320" height="66" rx="12" ry="12" fill="#b2f2bb" stroke="#343a40" stroke-width="2"/>
+<text x="270.0" y="284.0" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Module</text>
+<rect x="110" y="345" width="320" height="66" rx="12" ry="12" fill="#b2f2bb" stroke="#343a40" stroke-width="2"/>
+<text x="270.0" y="384.0" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Unit (topic)</text>
+<rect x="580" y="145" width="320" height="66" rx="12" ry="12" fill="#ffd8a8" stroke="#343a40" stroke-width="2"/>
+<text x="740.0" y="184.0" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Domain (% weight)</text>
+<rect x="580" y="245" width="320" height="66" rx="12" ry="12" fill="#ffd8a8" stroke="#343a40" stroke-width="2"/>
+<text x="740.0" y="284.0" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Objective</text>
+<rect x="580" y="345" width="320" height="66" rx="12" ry="12" fill="#ffd8a8" stroke="#343a40" stroke-width="2"/>
+<text x="740.0" y="384.0" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Skill (testable item)</text>
+<rect x="330" y="540" width="350" height="76" rx="12" ry="12" fill="#a5d8ff" stroke="#343a40" stroke-width="2"/>
+<text x="505.0" y="573.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Coverage sweep</text>
+<text x="505.0" y="594.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">skills checked against content</text>
+<rect x="297.8" y="464.0" width="124.5" height="19" fill="#ffffff"/>
+<text x="360.0" y="476.0" font-size="13" fill="#5c5f66" text-anchor="middle">narration source</text>
+<rect x="591.4" y="464.0" width="117.2" height="19" fill="#ffffff"/>
+<text x="650.0" y="476.0" font-size="13" fill="#5c5f66" text-anchor="middle">coverage target</text>
+<rect x="60" y="656" width="16" height="16" rx="4" ry="4" fill="#b2f2bb" stroke="#343a40" stroke-width="1.5"/>
+<text x="84" y="669" font-size="14" fill="#5c5f66">Learning path content</text>
+<rect x="274.64" y="656" width="16" height="16" rx="4" ry="4" fill="#ffd8a8" stroke="#343a40" stroke-width="1.5"/>
+<text x="298.64" y="669" font-size="14" fill="#5c5f66">Exam skills outline</text>
+<rect x="473.6" y="656" width="16" height="16" rx="4" ry="4" fill="#a5d8ff" stroke="#343a40" stroke-width="1.5"/>
+<text x="497.6" y="669" font-size="14" fill="#5c5f66">Pipeline step</text>
+</svg>

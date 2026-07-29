@@ -1,0 +1,38 @@
+# Azure Developer CLI definition.
+#
+# `azd up` provisions the infrastructure and deploys both services. There is no
+# CI/CD dependency: once deployed, the app runs content generation itself from
+# the admin portal, so a fork does not need GitHub Actions at all.
+
+name: certaudio
+metadata:
+  template: certaudio@1.0.0
+
+infra:
+  provider: bicep
+  path: infra
+  module: main
+
+services:
+  api:
+    project: src/functions
+    language: python
+    host: function
+
+  web:
+    project: src/web
+    language: js
+    host: staticwebapp
+    dist: .
+
+hooks:
+  # Two things cannot be expressed in Bicep: linking the Static Web App to the
+  # Functions backend, and enforcing EasyAuth on that backend. Both are required
+  # for the app to work and to be secure, so they run automatically after
+  # provisioning rather than being left as manual steps.
+  postprovision:
+    posix:
+      shell: sh
+      run: ./scripts/postprovision.sh
+      continueOnError: false
+      interactive: false

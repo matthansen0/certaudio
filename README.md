@@ -1,27 +1,30 @@
-# CertAudio - Microsoft Certification Audio Learning Platform
+# CertAudio
 
-A fully automated Azure-native system that generates podcast-style or instructional audio content from Microsoft Learn documentation for **all 50+ Microsoft certification exams**.
+Turn Microsoft Learn documentation into audio courses for **50+ Microsoft
+certification exams**. Deploys into your own Azure subscription with one command,
+then generates and refreshes its own content from an admin portal.
 
-## Features
+- 🎧 Episodes generated from official Microsoft Learn content
+- 🎙️ Instructional (single voice) or podcast (two-voice dialogue) formats
+- 🔄 Selective refresh when Microsoft updates exam content
+- 📊 Progress tracking behind Microsoft Entra sign-in
+- 🤖 Optional AI Study Partner grounded on the same indexed content
+- 🚀 `azd up` deployment — no fork, no CI/CD, no secrets to configure
 
-- 🎧 **Auto-generated audio episodes** from official Microsoft Learn documentation
-- 📚 **All Microsoft certifications** - Azure, AI, Data, Security, M365, Power Platform, Dynamics 365
-- 🎙️ **Two formats**: Instructional (single authoritative voice) or Podcast (two-voice dialogue)
-- 🔄 **Selective episode refresh** when Microsoft updates exam content
-- 📊 **Progress tracking** with optional Static Web Apps Microsoft authentication
-- 🤖 **AI Study Partner** (optional) - Chat with an AI agent that has RAG access to exam content
-- 🚀 **One-click deployment** with Bicep IaC
+![certaudio player](media/certaudio-player.png)
+![certaudio study partner](media/certaudio-studyPartner1.png)
 
-## Screenshots
+<details>
+<summary>More screenshots</summary>
 
+![certaudio study partner](media/certaudio-studyPartner2.png)
+![certaudio study partner](media/certaudio-studyPartner3.png)
+![certaudio study partner](media/certaudio-studyPartner4.png)
 
-![certaudio-player](/media/certaudio-player.png)
-![certaudio-study](/media/certaudio-studyPartner1.png)
-![certaudio-study](/media/certaudio-studyPartner2.png)
-![certaudio-study](/media/certaudio-studyPartner3.png)
-![certaudio-study](/media/certaudio-studyPartner4.png)
+</details>
 
-## Supported Certifications
+<details>
+<summary><strong>Supported certifications</strong> (50+)</summary>
 
 ### Azure
 | Exam | Certification |
@@ -95,356 +98,152 @@ A fully automated Azure-native system that generates podcast-style or instructio
 | MB-800 | Dynamics 365 Business Central Functional Consultant |
 | MB-820 | Dynamics 365 Business Central Developer |
 
+</details>
+
 ## Architecture
 
-```mermaid
-flowchart LR
-  USER[Browser] --> SWA[Static Web Apps<br/>Entra sign-in]
-  SWA --> FN[Functions API<br/>VNet integrated]
-  FN -- enqueue --> Q[content-jobs queue]
-  Q --> FN
-  FN --> AI[OpenAI, Speech, AI Search]
-  FN --> PE[Private Endpoints]
-  PE --> DATA[Private Cosmos DB + Storage]
-```
+![certaudio target architecture](docs/diagrams/architecture.svg)
 
-Everything runs behind one Function App. Static Web Apps handles sign-in and is the
-only public entry point; it forwards authenticated requests to the Function as a
-linked backend, so calling the Function hostname directly returns `401`.
+Static Web Apps handles sign-in and is the only public entry point. It forwards
+authenticated requests to a single Function App as a linked backend, so calling
+the Function hostname directly returns `401`. That same Function App also runs
+content generation in-process off the `content-jobs` queue, triggered from the
+admin portal — it is already VNet integrated, so jobs reach Cosmos DB and Storage
+over Private Endpoints and no credential ever leaves Azure.
 
-Content generation is triggered from the admin portal at `/admin.html`, which
-enqueues a job on the `content-jobs` queue. A queue trigger in the same Function
-App runs the generation in-process. Because the Function is already VNet
-integrated, the job reaches Cosmos DB and Storage over Private Endpoints without
-any separate compute, and no credential ever leaves Azure.
+Private networking is not optional: tenant Azure Policy forces
+`publicNetworkAccess=Disabled` and disables shared-key access, so anything
+touching the data plane has to run inside the VNet.
 
-Private networking is not optional here — tenant Azure Policy forces
-`publicNetworkAccess=Disabled` and disables shared-key access on Storage and
-Cosmos DB. Anything that needs the data plane must run inside the VNet.
+[How It Works](docs/HOW_IT_WORKS.md) covers the design decisions, job lifecycle,
+security model, and troubleshooting in depth.
 
-For the full topology and the job lifecycle, see
-[architecture.svg](docs/diagrams/architecture.svg) and
-[generation-flow.svg](docs/diagrams/generation-flow.svg).
+## Deploy
 
-## Prerequisites
-
-- Azure subscription with permissions to create resources
-- GitHub repository with Actions enabled
-- Azure CLI installed locally (for initial setup)
-
-## Quick Start
-
-### 1. Fork and Clone
+You need an Azure subscription with permission to create resources and assign
+roles, plus the [Azure Developer CLI](https://aka.ms/azd) and
+[Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli).
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/certaudio.git
-cd certaudio
-```
+curl -fsSL https://aka.ms/install-azd.sh | bash
 
-### 2. Create Azure Resources and Configure OIDC
-
-GitHub Actions uses **OpenID Connect (OIDC)** for secure, keyless authentication to Azure. This is more secure than storing credentials as secrets.
-
-```bash
-# Login to Azure
 az login
+azd config set auth.useAzCliAuth true   # reuse the az login, no second sign-in
 
-# Set your subscription
-SUBSCRIPTION_ID=$(az account show --query id -o tsv)
-TENANT_ID=$(az account show --query tenantId -o tsv)
-
-# Create resource group
-az group create --name rg-certaudio-dev --location centralus
-
-# Create an App Registration for GitHub Actions
-APP_NAME="sp-certaudio-github-$(whoami)"
-APP_ID=$(az ad app create --display-name "$APP_NAME" --query appId -o tsv)
-echo "App (Client) ID: $APP_ID"
-
-# Create service principal and assign Contributor role
-SP_ID=$(az ad sp create --id "$APP_ID" --query id -o tsv)
-az role assignment create \
-  --assignee "$APP_ID" \
-  --role "Contributor" \
-  --scope "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/rg-certaudio-dev"
-
-# Add federated credential for GitHub Actions OIDC
-# Replace YOUR_GITHUB_USERNAME with your GitHub username or org
-GITHUB_REPO="YOUR_GITHUB_USERNAME/certaudio"
-az ad app federated-credential create \
-  --id "$APP_ID" \
-  --parameters '{
-    "name": "github-actions-main",
-    "issuer": "https://token.actions.githubusercontent.com",
-    "subject": "repo:'"$GITHUB_REPO"':ref:refs/heads/main",
-    "audiences": ["api://AzureADTokenExchange"]
-  }'
-
-# Also allow workflow_dispatch (manual triggers)
-az ad app federated-credential create \
-  --id "$APP_ID" \
-  --parameters '{
-    "name": "github-actions-workflow-dispatch",
-    "issuer": "https://token.actions.githubusercontent.com", 
-    "subject": "repo:'"$GITHUB_REPO"':environment:production",
-    "audiences": ["api://AzureADTokenExchange"]
-  }'
-
-echo ""
-echo "=== Add these as GitHub Secrets ==="
-echo "AZURE_CLIENT_ID: $APP_ID"
-echo "AZURE_TENANT_ID: $TENANT_ID"
-echo "AZURE_SUBSCRIPTION_ID: $SUBSCRIPTION_ID"
-echo "AZURE_RESOURCE_GROUP: rg-certaudio-dev"
-echo "AZURE_UNIQUE_SUFFIX: (optional) e.g., 001 - pins deployments to stable resource names"
+git clone https://github.com/matthansen0/certaudio.git
+cd certaudio
+azd up
 ```
 
-### 3. Configure GitHub Secrets
+`azd` prompts for an environment name, subscription, and region, then provisions
+everything and deploys both the API and the site. Expect roughly 15 minutes on a
+first run, most of it Azure OpenAI and AI Search.
 
-Go to your repository **Settings > Secrets and variables > Actions** and add:
-
-| Secret | Description | Example |
-|--------|-------------|---------|
-| `AZURE_CLIENT_ID` | App registration client ID | `12345678-1234-...` |
-| `AZURE_TENANT_ID` | Azure AD tenant ID | `87654321-4321-...` |
-| `AZURE_SUBSCRIPTION_ID` | Azure subscription ID | `abcdef12-...` |
-| `AZURE_RESOURCE_GROUP` | Resource group name | `rg-certaudio-dev` |
-| `AZURE_UNIQUE_SUFFIX` | (Optional) Pin resource names | `001` |
-
-> **Note:** `AZURE_UNIQUE_SUFFIX` is recommended to prevent creating new resources on every workflow run. Without it, each run creates a full new set of resources.
-
-### 4. Deploy Infrastructure
-
-Run the **Deploy Infrastructure** workflow from GitHub Actions, or:
+Optional settings, applied before `azd up`:
 
 ```bash
-az deployment group create \
-  --resource-group rg-certaudio-dev \
-  --template-file infra/main.bicep \
-  --parameters uniqueSuffix=001 enableStudyPartner=false
+azd env set ENABLE_STUDY_PARTNER true      # AI Foundry chat agent, billed per chat token
+azd env set AZURE_OPENAI_LOCATION eastus   # GPT-4o has limited regional availability
+azd env set AZURE_UNIQUE_SUFFIX 001        # pin names to adopt an existing deployment
 ```
 
-### 5. Claim Admin Access
+### Claim admin access
 
-Deployment writes a one-time `ADMIN_BOOTSTRAP_TOKEN` app setting. Read it:
+Provisioning writes a one-time `ADMIN_BOOTSTRAP_TOKEN` app setting. Read it:
 
 ```bash
 az functionapp config appsettings list \
-  -g rg-certaudio-dev -n <function-app-name> \
+  -g rg-certaudio-<env> -n <function-app-name> \
   --query "[?name=='ADMIN_BOOTSTRAP_TOKEN'].value | [0]" -o tsv
 ```
 
 Sign in to `https://<your-swa>.azurestaticapps.net/admin.html` and paste the
 token. That registers you as the first admin; the token cannot be claimed twice
 and rotates on every deployment. From then on you add other admins from the
-portal itself.
+portal.
 
-### 6. Generate Content
+## Generate content
 
-Submit a job from the admin portal: pick a certification and format, then press
-**Start**. The portal shows live progress and keeps a history of past runs.
+Pick a certification and format in the admin portal and press **Start**. The
+portal shows live progress and keeps a history of past runs. Submit a **refresh**
+job later to re-index only the sources Microsoft has changed and regenerate just
+the affected episodes.
 
-Jobs run inside the Function App on the existing B1 plan, so a run adds no
-compute cost. Only one job runs at a time — a second submission returns `409`
-while one is active. A full certification takes a few hours; the portal warns
-you not to redeploy mid-run.
+Jobs run inside the Function App on the existing plan, so a run adds no compute
+cost. Only one job runs at a time — a second submission returns `409` while one
+is active. A full certification takes a few hours; don't redeploy mid-run.
 
-## Configuration
+Discovery combines Microsoft Learn learning paths with the exam study guide
+skills outline, resolves paths dynamically by role and product tags, and reports
+a coverage confidence score. See
+[Content Discovery](docs/CONTENT_DISCOVERY.md) for how that works and
+[How It Works](docs/HOW_IT_WORKS.md#customization-guide) for voices, episode
+length, and job parameters.
 
-### Parameters
+## Cost
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `certificationId` | `ai-102` | Microsoft certification ID (see supported list above) |
-| `audioFormat` | `instructional` | `instructional` or `podcast` |
-| `instructionalVoice` | `en-US-Andrew:DragonHDLatestNeural` | Voice for instructional format |
-| `podcastHostVoice` | `en-US-Ava:DragonHDLatestNeural` | Host voice for podcast format |
-| `podcastExpertVoice` | `en-US-Andrew:DragonHDLatestNeural` | Expert voice for podcast format |
-| `forceRegenerate` | `false` | Regenerate episodes that already exist |
-| `enableStudyPartner` | `false` | Deploy the AI Foundry Study Partner agent |
-| `location` | `centralus` | Core Azure region |
+List prices, Central US, USD, excluding tax and discounts. Generation runs inside
+the Function App, so it adds no separate compute SKU.
 
-## Project Structure
+| Service | Monthly |
+|---------|---------|
+| Azure AI Search (Basic) | ~$73.75 |
+| Five Private Endpoints | ~$36.50 + data |
+| Azure Functions (B1 Linux, also runs generation) | ~$13.15 |
+| Azure Static Web Apps (Standard) | $9.00 |
+| Four Private DNS zones | $2.00 |
+| Azure Cosmos DB (serverless) | ~$1-5 |
+| Application Insights | ~$0-5 |
+| Azure Storage (Hot LRS) | ~$0.10-0.50 |
+| **Base total** | **~$135-145** |
 
-```
-├── .github/
-│   ├── agents.md              # Copilot agent definitions
-│   └── workflows/
-│       └── deploy-infra.yml   # Infrastructure deployment
-├── infra/
-│   ├── main.bicep             # Main orchestrator
-│   └── modules/               # Bicep modules
-├── src/
-│   ├── functions/             # Azure Functions API
-│   │   ├── function_app.py    # Player and progress API
-│   │   ├── admin.py           # Admin API + content-jobs queue worker
-│   │   ├── admin_store.py     # Cosmos access for admins and jobs
-│   │   └── pipeline/          # Content generation, run in-process
-│   └── web/                   # Static Web App frontend (incl. admin.html)
-└── README.md
-```
+About $134 of that is fixed regardless of use, and AI Search plus the private
+endpoints are roughly 80% of it — both structural rather than optional.
+Generation is billed per token and per synthesized character, landing around
+**$0.25 per episode**, so a whole certification runs from a few dollars to a few
+tens of dollars per format. Subscription-level Microsoft Defender plans are
+separate and can exceed service usage; review them with the subscription security
+owner. Full breakdown in
+[How It Works](docs/HOW_IT_WORKS.md#cost-optimization).
 
-## Audio Generation
+## Study Partner (optional)
 
-### Discovery Strategy (Combined)
-
-Content generation always uses the **combined** strategy: Microsoft Learn learning paths **plus** the exam study guide skills outline for full official coverage.
-
-**Key features**:
-- **Dynamic learning path resolution** — discovers paths by role + product tags instead of hardcoded UIDs (resilient to Microsoft restructuring)
-- **Coverage sweep** — checks every exam topic against discovered content with fallback chain (catalog → search API → explicit gap)
-- **Confidence score** — outputs a weighted coverage percentage (Grade A–F) so you know how complete the content is
-
-See [docs/CONTENT_DISCOVERY.md](docs/CONTENT_DISCOVERY.md) for details.
-
-### Instructional Format
-
-- Single voice: Configurable (default `en-US-AndrewNeural`)
-- Research-backed prosody: -8% rate, 500ms pauses after key concepts
-- ~20-25 minute episodes targeting 2,500-3,500 words
-
-### Podcast Format
-
-- Two voices for natural dialogue:
-  - Host: Configurable (default `en-US-GuyNeural`) - newscast style, conversational
-  - Expert: Configurable (default `en-US-TonyNeural`) - expressive, detailed
-- Back-and-forth Q&A style
-
-### Voice Options
-
-Available voices: `en-US-AndrewNeural`, `en-US-BrianNeural`, `en-US-GuyNeural`, `en-US-DavisNeural`, `en-US-JasonNeural`, `en-US-TonyNeural`, `en-US-AvaNeural`, `en-US-EmmaNeural`, `en-US-JennyNeural`, `en-US-AriaNeural`, `en-US-SaraNeural`
-
-## Content Updates
-
-Submit a **refresh** job from the admin portal to pick up upstream changes. It:
-
-1. Checks Microsoft Learn pages for content changes
-2. Compares content hashes against stored versions
-3. Re-indexes changed sources into the shared search index
-4. Regenerates only the episode batches affected by changed sources
-5. Republishes the validated episode index
-
-## Local Development
-
-### Development Environment
-
-Reopen the repository in its dev container to get Python 3.11, Node 22, Azure Functions Core Tools, SWA CLI, Azurite, Bicep, and the exact development dependency lock. The bootstrap recreates a mismatched virtual environment automatically.
-
-Cosmos DB, Storage, and AI Search are private and reachable only from inside the
-VNet, so content generation cannot run from a laptop. Run it from the admin
-portal instead. Locally you get unit tests and emulators:
+An AI chat agent for interactive exam prep, backed by Azure AI Foundry and a
+GPT-4o agent with a search tool over the indexed exam content. It is off by
+default:
 
 ```bash
-# Unit tests for the Functions API, auth, and admin authorization
+azd env set ENABLE_STUDY_PARTNER true
+azd provision
+```
+
+It adds no fixed monthly charge — the deployment is billed per token, roughly
+**$0.005-$0.03 per message**. AI Search is not part of this toggle; generation
+needs it regardless, so it sits in the base table above.
+
+## Local development
+
+Reopen the repository in its dev container for Python 3.11, Node 22, Azure
+Functions Core Tools, SWA CLI, Azurite, Bicep, and the pinned dev dependencies.
+
+```bash
 cd src/functions
 python -m pytest -q
 ```
 
-### Run the Web App
+Content generation cannot run from a laptop — Cosmos DB, Storage, and AI Search
+are reachable only from inside the VNet — so use the admin portal instead.
+`/admin.html` needs the Static Web Apps auth headers, so it only works against a
+deployed environment or the SWA CLI emulator.
 
-```bash
-cd src/web
-python -m http.server 8080
-# Open http://localhost:8080
-```
+## Documentation
 
-Note that `/admin.html` needs the Static Web Apps auth headers, so it only works
-against a deployed environment or the SWA CLI emulator.
-
-## Study Partner (Optional)
-
-The **Study Partner** feature adds an AI-powered chat interface for interactive exam preparation. When enabled, it deploys:
-
-- **Azure AI Foundry** - Account with project for agent orchestration
-- **GPT-4o Agent** - Conversational AI with a search tool over indexed exam content
-
-AI Search is *not* part of this toggle. It is always deployed because content
-generation grounds on the same `certification-content` index the agent queries.
-
-### Enabling Study Partner
-
-1. **Via GitHub Actions** (recommended):
-   - Go to Actions → Deploy Infrastructure
-   - Click "Run workflow"
-   - Check "Enable Study Partner" checkbox
-   - Click "Run workflow"
-
-2. **Via Azure CLI**:
-   ```bash
-   az deployment group create \
-     --resource-group rg-certaudio-dev \
-     --template-file infra/main.bicep \
-     --parameters enableStudyPartner=true
-   ```
-
-### Study Partner Architecture
-
-```
-┌──────────────────┐     ┌─────────────────────────────────────────────┐
-│   Web Frontend   │────►│              Azure Functions                │
-│  (Study Partner  │     │  /api/chat → AI Foundry Agent SDK           │
-│      Tab)        │     └──────────────────┬──────────────────────────┘
-└──────────────────┘                        │
-                                            ▼
-                              ┌─────────────────────────────┐
-                              │     Azure AI Foundry        │
-                              │  ┌───────────────────────┐  │
-                              │  │   Study Partner       │  │
-                              │  │      Project          │  │
-                              │  │  ┌─────────────────┐  │  │
-                              │  │  │   GPT-4o Agent  │  │  │
-                              │  │  │  + Search Tool  │──┼──┼──► AI Search
-                              │  │  └─────────────────┘  │  │   (RAG Index)
-                              │  └───────────────────────┘  │
-                              └─────────────────────────────┘
-```
-
-### Additional Cost (when enabled)
-
-| Service | Estimated Cost |
-|---------|---------------|
-| Azure AI Foundry | ~$5-10/month (usage-based) |
-| **Study Partner Add-on** | **~$5-10/month** |
-
-> **Note**: The agent is disabled by default. The AI Search cost is already in
-> the base platform table above, because generation needs it regardless.
-
----
-
-## Cost Estimation
-
-Approximate platform costs vary by region and tenant policy. The private topology adds five Private Endpoints (roughly `$36.50/month` at `$0.01/hour` each, plus data processing). Content generation runs inside the Function App, so it adds no separate compute SKU.
-
-| Service | Estimated Cost |
-|---------|---------------|
-| Azure Static Web Apps (Standard) | $9 |
-| Azure Functions (B1 Basic, also runs generation) | $13 |
-| Azure AI Search (Basic) | ~$75 |
-| Azure Cosmos DB (Serverless) | $2-5 |
-| Azure Storage | $0.10 |
-| Five Private Endpoints | ~$36.50 + data |
-
-AI Search is always deployed. It holds the single `certification-content` index
-that serves both generation grounding and Study Partner retrieval, so the cost
-is shared rather than duplicated per certification.
-
-Microsoft Defender plans are subscription-policy costs and can materially exceed service usage. Review them with the subscription security owner rather than disabling them as an application deployment side effect.
-
-**Per-Generation Cost** (one certification):
-
-| Service | Cost |
-|---------|------|
-| Azure OpenAI (GPT-4o) | ~$15-25 |
-| Azure OpenAI (Embeddings) | ~$0.25 |
-| Azure AI Speech (TTS) | ~$15-20 |
-| **Per-Generation Total** | **~$30-45** |
+- [How It Works](docs/HOW_IT_WORKS.md) — architecture, security, deployment, customization, troubleshooting
+- [Content Discovery](docs/CONTENT_DISCOVERY.md) — how exam content is found, deduplicated, and scored
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
+Fork, branch, and open a pull request.
 
 ## License
 
