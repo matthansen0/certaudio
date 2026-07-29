@@ -1060,25 +1060,34 @@ largest lever on synthesis cost.
 
 ### "I want shorter/longer episodes"
 
-In the workflow, change topics per episode:
+Episodes are built from fixed-size groups of exam topics, so topics per episode
+is the coarse control. Change `DEFAULT_TOPICS_PER_EPISODE` in
+[`src/functions/pipeline/orchestrator.py`](../src/functions/pipeline/orchestrator.py):
+fewer topics means shorter episodes and more of them.
 
-```yaml
-env:
-  TOPICS_PER_EPISODE: 5  # Fewer = shorter episodes
-```
-
-Or edit the narration prompt in [`src/functions/pipeline/prompts/narration.jinja2`](../src/functions/pipeline/prompts/narration.jinja2).
+For length within an episode, edit the length guidance in the narration prompt,
+[`src/functions/pipeline/prompts/narration.jinja2`](../src/functions/pipeline/prompts/narration.jinja2).
 
 ---
 
 ### "I want to add a new certification"
 
-1. Find the learning path UIDs from [Microsoft Learn Catalog](https://learn.microsoft.com/api/catalog/)
-2. Add them to [`src/functions/pipeline/deep_discover.py`](../src/functions/pipeline/deep_discover.py):
+Discovery resolves learning paths dynamically from role and product tags, so most
+exams work by typing the exam ID into the admin portal without any code change.
+If an exam resolves poorly, add it to the maps in
+[`src/functions/pipeline/deep_discover.py`](../src/functions/pipeline/deep_discover.py):
 
 ```python
-CERTIFICATION_PATH_UIDS = {
+CERTIFICATION_ROLE_PRODUCTS = {
     # ...existing...
+    "your-cert": {
+        "roles": ["data-engineer"],
+        "products": {"azure", "azure-storage"},
+    },
+}
+
+# Optional fallback, used when tag resolution comes up short
+CERTIFICATION_PATH_UIDS = {
     "your-cert": [
         "learn.wwl.path-uid-1",
         "learn.wwl.path-uid-2",
@@ -1086,12 +1095,11 @@ CERTIFICATION_PATH_UIDS = {
 }
 ```
 
-3. Add to the workflow dropdown:
-```yaml
-certificationId:
-  options:
-    - your-cert  # Add this
-```
+Path UIDs come from the [Microsoft Learn Catalog API](https://learn.microsoft.com/api/catalog/);
+stale ones are detected and skipped rather than failing the run. The player lists
+whatever certifications have generated content, falling back to
+`FALLBACK_CERTIFICATIONS` in [`src/web/js/app.js`](../src/web/js/app.js) until
+the first episodes exist.
 
 ---
 
@@ -1114,31 +1122,29 @@ resource appServicePlan 'Microsoft.Web/serverfarms@2023-12-01' = {
 
 ### "I want podcast-style two-voice episodes"
 
-Select `podcast` format in the workflow. It uses two voices with dialogue:
-
-```yaml
-audioFormat: 'podcast'
-podcastHostVoice: 'en-US-GuyNeural'
-podcastExpertVoice: 'en-US-TonyNeural'
-```
-
-The narration prompt changes to generate a conversation between host and expert.
+Choose **Podcast** as the format when you submit the job in the admin portal, and
+optionally override the host and expert voices there. The narration prompt
+switches to a conversation between a host and an expert.
 
 ---
 
 ## Troubleshooting
 
-### "Workflow failed during discovery"
+Job failures surface in the admin portal with the stage that failed. For the
+underlying exception, query Application Insights traces for the Function App.
+
+### "Discovery found nothing"
 
 1. Check the study guide URL exists: `https://aka.ms/{CERT-ID}-StudyGuide`
-2. If it's a new cert, it might not be in the Catalog API yet
-3. Try `skills` mode instead of `comprehensive`
+2. A brand new exam may not be in the Catalog API yet
+3. Add explicit role/product tags or path UIDs for the exam (see
+   [adding a new certification](#i-want-to-add-a-new-certification))
 
 ### "Rate limits during generation"
 
-The code has retry logic, but if you're generating multiple certs:
-- Reduce `max-parallel` in the matrix
-- Increase GPT-4o capacity in Azure Portal
+`call_openai_with_retry` already backs off exponentially and honours
+`retry-after` for five attempts. If runs still fail, raise the tokens-per-minute
+quota on the GPT-4o deployment in the Azure portal.
 
 ### "Audio sounds robotic"
 
@@ -1146,7 +1152,9 @@ Make sure you're using Neural voices (names end in `Neural`). The SSML conversio
 
 ### "Episodes are too short/long"
 
-Adjust the narration prompt's length guidance, or change `TOPICS_PER_EPISODE`.
+Adjust the narration prompt's length guidance, or change
+`DEFAULT_TOPICS_PER_EPISODE` in
+[`src/functions/pipeline/orchestrator.py`](../src/functions/pipeline/orchestrator.py).
 
 ---
 
