@@ -31,9 +31,12 @@ VALID_FORMATS = ("instructional", "podcast")
 # Cosmos/blob path segment downstream, so it is constrained at the boundary
 # rather than escaped at each use site.
 CERTIFICATION_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
-# Azure TTS short names, e.g. "en-US-AndrewMultilingualNeural".
-VOICE_NAME_RE = re.compile(r"^[A-Za-z]{2,3}-[A-Za-z0-9]{2,8}-[A-Za-z0-9]{1,48}$")
-VALID_VOICE_ROLES = ("primary", "secondary")
+# Azure TTS short names. The trailing segment may contain a colon, as the Dragon
+# HD voices do: "en-US-Andrew:DragonHDLatestNeural".
+VOICE_NAME_RE = re.compile(r"^[A-Za-z]{2,3}-[A-Za-z0-9]{2,8}-[A-Za-z0-9:]{1,48}$")
+# Must match the keys pipeline.orchestrator._voices() reads, or an override is
+# accepted here and then silently ignored.
+VALID_VOICE_ROLES = ("instructional", "podcastHost", "podcastExpert")
 
 
 def _json(payload: dict, status: int = 200) -> func.HttpResponse:

@@ -18,6 +18,7 @@
 6. [Job Orchestration](#job-orchestration)
 7. [Deployment](#deployment)
 8. [Customization Guide](#customization-guide)
+9. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -236,9 +237,21 @@ Popular voice choices:
 
 **What We Deployed**:
 - Serverless Cosmos DB account (pay-per-RU, no provisioned capacity)
-- Three containers: `episodes`, `sources`, `userProgress`
-- Partition key: `/certificationId` (episodes, sources) and `/userId` (progress)
+- Five containers:
+
+| Container | Partition key | Holds |
+|---|---|---|
+| `episodes` | `/certificationId` | Episode metadata and audio references |
+| `sources` | `/certificationId` | Source URLs and content hashes for refresh |
+| `userProgress` | `/userId` | Playback position and completion |
+| `admins` | `/id` | Who may use the admin portal |
+| `jobs` | `/jobId` | Generation job status and progress |
+
 - Public network access disabled, with a Cosmos SQL Private Endpoint
+
+Containers are declared in Bicep rather than created at runtime: the Cosmos SQL
+Data Contributor role covers item operations but not container management, so
+the app could not create them itself even if it tried.
 
 **Why Serverless**:
 ```bicep
@@ -254,6 +267,7 @@ Episode metadata is accessed infrequently—users load the episode list once, th
 **Why These Partition Keys**:
 - `/certificationId` for episodes: All episodes for one cert are in one partition → fast "get all DP-700 episodes" queries
 - `/userId` for progress: All progress for one user is in one partition → fast "get my progress" queries
+- `/jobId` for jobs: Each job is read and updated by id while it runs, so a per-job partition keeps progress writes cheap
 
 **Tradeoffs**:
 - ❌ Provisioned throughput would give consistent performance (overkill for this use case)
@@ -765,27 +779,65 @@ there is no execution cap, so a multi-hour run is fine.
 
 ### Monthly Cost Breakdown
 
-| Service | Configuration | Monthly Cost |
-|---------|--------------|--------------|
-| Cosmos DB | Serverless | ~$2-5 |
-| Storage | LRS, ~5GB | ~$0.10 |
-| Static Web Apps | Standard | ~$9 |
-| Functions | B1 Basic, also runs generation | ~$13 |
-| AI Search | Basic, shared index | ~$75 |
-| Private Endpoints | Five endpoints | ~$36.50 + data |
-| OpenAI | Pay-per-token | ~$0 (no usage) |
-| Speech | Pay-per-char | ~$0 (no usage) |
-| AI Foundry | Optional Study Partner agent | ~$5-10 |
+List prices, Central US, USD, excluding tax and any agreement discount.
 
-Subscription-level Microsoft Defender plans are separate from these service estimates.
+| Service | Rate | Monthly |
+|---------|------|---------|
+| Azure AI Search (Basic) | $0.101/hour | ~$73.75 |
+| Five Private Endpoints | $0.01/hour each | ~$36.50 + data |
+| Azure Functions (B1 Linux, also runs generation) | $0.018/hour | ~$13.15 |
+| Azure Static Web Apps (Standard) | $9/month | $9.00 |
+| Four Private DNS zones | $0.50/zone | $2.00 |
+| Azure Cosmos DB (serverless) | $0.282/1M RU + $0.25/GB stored | ~$1-5 |
+| Application Insights | $2.76/GB ingested | ~$0-5 |
+| Azure Storage (Hot LRS) | ~$0.02/GB | ~$0.10-0.50 |
+| **Base total** | | **~$135-145** |
 
-**Per-Generation Cost**:
-| Service | Cost per DP-700 generation |
-|---------|---------------------------|
-| OpenAI GPT-4o | ~$15-25 |
-| OpenAI Embeddings | ~$0.25 |
-| Speech TTS | ~$15-18 |
-| **Total** | **~$30-43** |
+About $134 of that is fixed regardless of use, and AI Search plus the private
+endpoints are roughly 80% of it.
+
+The endpoints exist because the Function App reaches Cosmos DB and Storage over
+Private Link. Network Security Perimeter would be the cheaper alternative, and
+some governance policies explicitly accept it in place of disabled public access,
+but App Service is not currently an NSP-onboardable resource and Cosmos DB's NSP
+support is still in preview — so the Function would have to sit outside the
+perimeter and reach in. Tracked in
+[issue #4](https://github.com/matthansen0/certaudio/issues/4).
+
+AI Search holds the single `certification-content` index that serves both
+generation grounding and Study Partner retrieval, so its cost is shared rather
+than duplicated per certification. At 773 documents and 35 MB it would fit the
+Free tier today, at the cost of the SLA, the semantic ranker, and any room to
+grow much past five certifications.
+
+Subscription-level Microsoft Defender plans are separate from these estimates and
+can materially exceed service usage. Review them with the subscription security
+owner rather than disabling them as an application deployment side effect.
+
+**Per generation**, billing is per token and per synthesized character, so it
+scales with the size of the certification instead of being a flat fee:
+
+| Meter | Rate |
+|-------|------|
+| Azure OpenAI GPT-4o input | $2.50 / 1M tokens |
+| Azure OpenAI GPT-4o output | $10.00 / 1M tokens |
+| Azure OpenAI embeddings (`text-embedding-3-large`) | $0.14 / 1M tokens |
+| Azure AI Speech, Dragon HD voices | $22 / 1M characters (~$1.10 per audio hour) |
+
+In practice that lands around **$0.25 per episode** — narration, SSML conversion,
+and the quality pass account for most of it, with HD synthesis adding roughly a
+dime for a five-minute episode. A whole certification is a function of how many
+episodes its exam outline produces, typically a few dollars to a few tens of
+dollars per format.
+
+**Study Partner**, when enabled, adds no fixed monthly charge. The Foundry
+account, the project, and the GPT-4o deployment cost nothing while idle:
+`GlobalStandard` is billed per token, and the deployment's `capacity: 30` is a
+30K tokens-per-minute quota, not reserved capacity. Agent Service adds no
+surcharge of its own. A typical exchange is 1K-5K input and 300-1,500 output
+tokens, so roughly **$0.005-$0.03 per message**. Long chats cost more per turn
+because history is resent on every request, and `/api/chat` limits each client to
+50 requests per hour.
 
 ---
 
@@ -794,11 +846,12 @@ Subscription-level Microsoft Defender plans are separate from these service esti
 ### Why Not CI/CD?
 
 Content generation used to run in GitHub Actions. That worked while the data
-plane was public, but tenant policy forces `publicNetworkAccess=Disabled` and
-`allowSharedKeyAccess=false` on Storage and Cosmos DB, so a GitHub-hosted runner
-simply cannot reach them. Every workaround — self-hosted runners, Container Apps
-jobs, ACI, App Service WebJobs — was a new piece of compute that existed only to
-be inside the VNet.
+plane was public. It stopped working when Storage and Cosmos DB moved behind
+Private Link with `publicNetworkAccess=Disabled` and `allowSharedKeyAccess=false`
+— settings that Azure Policy enforces in many enterprise tenants — because a
+GitHub-hosted runner has no route to a private endpoint. Every workaround —
+self-hosted runners, Container Apps jobs, ACI, App Service WebJobs — was a new
+piece of compute that existed only to be inside the VNet.
 
 The Function App was already inside the VNet, already had a managed identity with
 the right roles, and was already paid for. So generation moved there.
@@ -886,6 +939,28 @@ subscription scope, `azd up` genuinely is the whole thing.
 
 ---
 
+### Adopting resources that already exist
+
+`azd up` into a fresh subscription needs nothing extra. Pointing it at resources
+created some other way can fail with `RoleAssignmentExists`.
+
+Bicep names role assignments deterministically, as `guid(scope, principal, role)`.
+If the same principal already holds the same role at the same scope under a
+different assignment name, Azure rejects the new one rather than adopting it.
+Delete the older assignment and re-run; Bicep recreates it and owns it from then
+on:
+
+```bash
+az role assignment delete \
+  --assignee <principal-id> --role "<role name>" --scope <resource-id>
+```
+
+Set `AZURE_UNIQUE_SUFFIX` to pin resource names onto the existing deployment.
+Left unset, names are derived deterministically from the subscription and
+environment name, so repeated `azd up` runs are stable.
+
+---
+
 ### Why RBAC lives in Bicep
 
 The Function's role assignments used to be a few hundred lines of `az role
@@ -940,11 +1015,44 @@ filter.
 
 ## Customization Guide
 
+### Job parameters
+
+Every generation job is submitted from the admin portal. The defaults live in
+`_voices()` in
+[pipeline/orchestrator.py](../src/functions/pipeline/orchestrator.py), not in app
+settings.
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `certificationId` | *required* | Lowercase letters, digits and hyphens |
+| `mode` | `generate` | `generate` or `refresh` |
+| `audioFormat` | `instructional` | `instructional` or `podcast` |
+| `force` | `false` | Regenerate episodes that already exist |
+| `voices.instructional` | `en-US-Andrew:DragonHDLatestNeural` | Voice for instructional format |
+| `voices.podcastHost` | `en-US-Ava:DragonHDLatestNeural` | Host voice for podcast format |
+| `voices.podcastExpert` | `en-US-Andrew:DragonHDLatestNeural` | Expert voice for podcast format |
+
+The voice role names have to match what `_voices()` reads. They did not once, and
+an override was accepted by the API and then silently dropped, so a test now
+asserts the two agree.
+
+`enableStudyPartner` and `location` are deployment parameters, set with
+`azd env set` before `azd up` rather than per job.
+
+---
+
 ### "I want to use a different voice"
 
 Pick it in the admin portal when you submit a job. To change the default for
 every job, update the `INSTRUCTIONAL_VOICE` app setting in
 [infra/modules/web.bicep](../infra/modules/web.bicep).
+
+Commonly used options: `en-US-AndrewNeural`, `en-US-BrianNeural`,
+`en-US-GuyNeural`, `en-US-DavisNeural`, `en-US-JasonNeural`, `en-US-TonyNeural`,
+`en-US-AvaNeural`, `en-US-EmmaNeural`, `en-US-JennyNeural`, `en-US-AriaNeural`,
+`en-US-SaraNeural`. The `DragonHDLatestNeural` defaults sound better and cost
+$22 per 1M characters against $15 for standard neural, so the voice is the
+largest lever on synthesis cost.
 
 [Listen to voice samples](https://speech.microsoft.com/portal/voicegallery)
 
