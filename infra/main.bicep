@@ -40,10 +40,6 @@ param foundryLocation string = 'eastus'
 @description('Object ID of the principal running the deployment. azd supplies this automatically. Granted data-plane roles so you can inspect Cosmos, Storage and Search from your own machine.')
 param principalId string = ''
 
-@description('Type of the deploying principal. azd sets AZURE_PRINCIPAL_TYPE; a human running azd is a User, automation is a ServicePrincipal.')
-@allowed(['User', 'ServicePrincipal', 'Group'])
-param principalType string = 'User'
-
 @description('Enable Study Partner feature with AI Foundry Agent (~$5-10/month for the agent; AI Search is always deployed because generation needs it). When false, the Study Partner page shows "not deployed".')
 param enableStudyPartner bool = false
 
@@ -103,7 +99,6 @@ module aiServices 'modules/ai-services.bicep' = {
     speechLocation: speechLocation
     uniqueSuffix: suffix
     automationPrincipalId: principalId
-    automationPrincipalType: principalType
     tags: tags
   }
 }
@@ -117,7 +112,6 @@ module data 'modules/data.bicep' = {
     location: location
     uniqueSuffix: suffix
     automationPrincipalId: principalId
-    automationPrincipalType: principalType
     tags: tags
   }
 }
@@ -132,7 +126,6 @@ module search 'modules/search-persistent.bicep' = {
     location: location
     uniqueSuffix: suffix
     automationPrincipalId: principalId
-    automationPrincipalType: principalType
     enabled: true
     tags: tags
   }

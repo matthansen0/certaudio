@@ -28,7 +28,7 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 - **Linking a backend is not enough to protect it**: `az staticwebapp backends link` registers the `azureStaticWebApps` identity provider and sets `platform.enabled=true`, but leaves `globalValidation.requireAuthentication=false`. EasyAuth is then present but *not enforcing*, and the Function hostname still answers anonymous requests. The deploy workflow explicitly PUTs `requireAuthentication=true` and `unauthenticatedClientAction=Return401` after linking. **The auth module only picks this up on restart**, so the workflow restarts the app and then asserts the direct hostname returns 401.
 - **Disabling EasyAuth also wipes the provider registration**: it clears `identityProviders.azureStaticWebApps`, and setting `platform.enabled=true` afterwards is not enough — auth would be on with nothing that trusts SWA, locking out the site. Re-linking (unlink then link) is the only supported repair, which is why the workflow checks the provider registration before enforcing.
 - **Cosmos SQL RBAC scope**: Cosmos DB SQL role assignment scope must be the fully-qualified DB scope `${cosmosDb.id}/dbs/${cosmosDbDatabaseName}`.
-- **RBAC is declarative**: every role the Function's managed identity needs is in `infra/modules/rbac.bicep`, deployed after the web module so it can consume `functionsAppPrincipalId`. Assignment names are `guid(scope, principalId, roleId)`, so redeploys are no-ops. Do not move role assignments back into scripts.
+- **Cosmos RBAC for GitHub OIDC**: The deploy-infra workflow extracts the service principal `oid` from the ARM access token and passes it as `automationPrincipalId` to Bicep, which grants Cosmos SQL Data Contributor at the database scope.
 - **Search RBAC**: Azure AI Search data-plane operations (create/update indexes, upload documents) require RBAC. The Function identity holds **Search Index Data Contributor** because it both writes the grounding index during generation and reads it for Study Partner RAG.
 - **Shared search index**: One Basic Search service holds a single `certification-content` index for every certification, discriminated by a filterable `certificationId` field. There is no per-certification index and no ephemeral Search service — both were removed.
 - **SWA deploy token**: Static Web Apps deploy token is retrieved at runtime in CI (no long-lived repo secret).
@@ -36,14 +36,13 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 - **RG cleanup helper**: [scripts/cleanup-rg.sh](../scripts/cleanup-rg.sh) can delete old tagged deployment sets while keeping the active suffix.
 - **Dynamic certification list**: Frontend dropdown is populated from the API (`GET /api/certifications`) with a safe fallback that includes `dp-700`.
 - **Content generation runs in the Function App, not CI**: Tenant policy forces `publicNetworkAccess=Disabled` on Storage and Cosmos, so a GitHub-hosted runner cannot reach the data plane. Generation runs in-process in the already VNet-integrated Function App. An admin submits a job at `/admin.html` → `POST /api/portal/jobs` → message on the `content-jobs` queue → `run_content_job` queue trigger → `src/functions/pipeline/orchestrator.py`. Progress is written back to the job document and polled by the UI.
-- **No workflows at all**: deployment is `azd up`, defined by `azure.yaml`. The `deploy-infra.yml`, `generate-content.yml`, and `refresh-content.yml` workflows and the `run-local.sh`, `index-content.sh`, and `get-endpoints.sh` helpers were all deleted. Do not reintroduce them. This is a public template: a fork must be deployable with no GitHub setup, no app registration, and no secrets.
-- **azd gotchas**: `azd` prefers `infra/main.bicepparam` over `infra/main.parameters.json`, and resolves `module: main` to a compiled `infra/main.json` over `main.bicep`. Both files were deleted and `main.json` is gitignored, because a stale copy silently deploys the wrong template. `infra/main.bicep` is **subscription-scoped** and creates the resource group itself.
+- **Only one workflow**: `deploy-infra.yml`. The `generate-content.yml` and `refresh-content.yml` workflows and the `scripts/run-local.sh`, `index-content.sh`, and `get-endpoints.sh` helpers were deleted. Do not reintroduce them; once deployed, the app does not need the repository.
 - **Admin bootstrap**: Bicep writes a rotating `ADMIN_BOOTSTRAP_TOKEN` app setting. The first admin claims it once at `/admin.html`; afterwards admins are managed in the portal. Compared with `hmac.compare_digest`, and the claim marker is written before the admin record so a partial failure spends the token rather than leaving it reusable.
 - **One job at a time**: `host.json` sets `functionTimeout: -1` (allowed on a dedicated plan) and queue `batchSize: 1`, `newBatchThreshold: 0`, `maxDequeueCount: 2`. `POST /api/portal/jobs` also returns `409` if a job is already queued or running.
 - **Input validation**: `certificationId` is interpolated into an AI Search OData filter, so it is constrained to `^[a-z0-9][a-z0-9-]{0,63}$` at the API boundary and quotes are additionally escaped at the filter. Voice names are constrained to the Azure short-name shape.
 - **Workflow triggers**: Deploy Infrastructure triggers on `infra/**`, `src/web/**`, `src/functions/**`, or workflow file changes.
 - **Local Development**: Content generation cannot run locally — the data plane is private and tenant policy silently reverts firewall changes. Run `python -m pytest -q` in `src/functions` for unit tests, and generate from the admin portal.
-- **Private networking is mandatory**: The `MCAPSGov Deploy and Modify Policies` assignment at the Tenant Root Group uses `Modify` effects to force `publicNetworkAccess=Disabled`, `allowSharedKeyAccess=false`, and `disableLocalAuth=true`. ARM returns HTTP 200 while silently rewriting the payload, so a template asking for public access appears to succeed and does not take effect. Do not try to "fix" connectivity by enabling public access.
+- **Private networking is mandatory**: Azure Policy in this tenant uses `Modify` effects to force `publicNetworkAccess=Disabled`, `allowSharedKeyAccess=false`, and `disableLocalAuth=true` on Storage and Cosmos. ARM returns HTTP 200 while silently rewriting the payload, so a template asking for public access appears to succeed and simply does not take effect. Do not try to "fix" connectivity by enabling public access — check the effective policy for the target subscription instead.
 
 ## Agents
 
@@ -197,9 +196,7 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 - `infra/modules/web.bicep` - Static Web Apps, Functions
 - `infra/modules/search-persistent.bicep` - AI Search (always deployed)
 - `infra/modules/identity.bicep` - B2C (conditional)
-- `azure.yaml` - azd project definition: infra, services, and the postprovision hook
-- `infra/main.parameters.json` - binds azd environment variables to Bicep parameters
-- `scripts/postprovision.sh` - SWA backend link and EasyAuth enforcement
+- `.github/workflows/deploy-infra.yml` - Infrastructure and code deployment (the only workflow)
 
 **Context**:
 - All resources prefer Managed Identity for authentication

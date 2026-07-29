@@ -12,10 +12,6 @@ param tags object
 @description('Optional AAD object ID of an automation principal (e.g., GitHub OIDC service principal) that runs content-generation workflows. If provided, it is granted Storage Blob Data Contributor on the storage account.')
 param automationPrincipalId string = ''
 
-@description('Type of the deploying principal. azd sets AZURE_PRINCIPAL_TYPE; a human running azd is a User, a service principal in automation is not.')
-param automationPrincipalType string = 'User'
-
-
 // ============================================================================
 // VARIABLES
 // ============================================================================
@@ -269,7 +265,7 @@ resource storageBlobDataContributorRole 'Microsoft.Authorization/roleAssignments
     // Built-in role: Storage Blob Data Contributor
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
     principalId: automationPrincipalId
-    principalType: automationPrincipalType
+    principalType: 'ServicePrincipal'
   }
 }
 

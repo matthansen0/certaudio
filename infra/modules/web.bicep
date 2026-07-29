@@ -111,7 +111,6 @@ resource functionsApp 'Microsoft.Web/sites@2023-12-01' = {
   name: functionsAppName
   location: location
   tags: union(tags, {
-    'azd-service-name': 'api'
     'hidden-link: /app-insights-resource-id': appInsights.id
   })
   kind: 'functionapp,linux'
@@ -256,9 +255,7 @@ resource functionsApp 'Microsoft.Web/sites@2023-12-01' = {
 resource staticWebApp 'Microsoft.Web/staticSites@2023-12-01' = {
   name: staticWebAppName
   location: location
-  tags: union(tags, {
-    'azd-service-name': 'web'
-  })
+  tags: tags
   sku: {
     name: 'Standard'
     tier: 'Standard'

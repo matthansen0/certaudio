@@ -23,9 +23,6 @@ from pipeline.orchestrator import RUNNERS
 bp = func.Blueprint()
 logger = logging.getLogger(__name__)
 
-# Routes are under "portal/", not "admin/": the Functions host reserves the
-# "admin" route prefix for its own management API and refuses to serve any
-# function whose route starts with it.
 QUEUE_NAME = "content-jobs"
 VALID_MODES = ("generate", "refresh")
 VALID_FORMATS = ("instructional", "podcast")
@@ -74,7 +71,7 @@ def _queue_client() -> QueueClient:
 
 
 # ------------------------------------------------------------------ bootstrap
-@bp.route(route="portal/claim", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@bp.route(route="admin/claim", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
 def claim_admin(req: func.HttpRequest) -> func.HttpResponse:
     """Claim the first admin account using the one-time bootstrap token."""
     user = _get_user(req)
@@ -106,7 +103,7 @@ def claim_admin(req: func.HttpRequest) -> func.HttpResponse:
     return _json({"claimed": True, "admin": record})
 
 
-@bp.route(route="portal/status", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@bp.route(route="admin/status", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def admin_status(req: func.HttpRequest) -> func.HttpResponse:
     """Report whether the caller is an admin and whether bootstrap is available."""
     user = _get_user(req)
@@ -123,7 +120,7 @@ def admin_status(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # --------------------------------------------------------------------- admins
-@bp.route(route="portal/admins", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@bp.route(route="admin/admins", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def get_admins(req: func.HttpRequest) -> func.HttpResponse:
     _, error = _require_admin(req)
     if error:
@@ -131,7 +128,7 @@ def get_admins(req: func.HttpRequest) -> func.HttpResponse:
     return _json({"admins": admin_store.list_admins()})
 
 
-@bp.route(route="portal/admins", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@bp.route(route="admin/admins", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
 def post_admin(req: func.HttpRequest) -> func.HttpResponse:
     user, error = _require_admin(req)
     if error:
@@ -154,7 +151,7 @@ def post_admin(req: func.HttpRequest) -> func.HttpResponse:
 
 
 @bp.route(
-    route="portal/admins/{adminId}", methods=["DELETE"], auth_level=func.AuthLevel.ANONYMOUS
+    route="admin/admins/{adminId}", methods=["DELETE"], auth_level=func.AuthLevel.ANONYMOUS
 )
 def delete_admin(req: func.HttpRequest) -> func.HttpResponse:
     user, error = _require_admin(req)
@@ -174,7 +171,7 @@ def delete_admin(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ----------------------------------------------------------------------- jobs
-@bp.route(route="portal/jobs", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@bp.route(route="admin/jobs", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def get_jobs(req: func.HttpRequest) -> func.HttpResponse:
     _, error = _require_admin(req)
     if error:
@@ -182,7 +179,7 @@ def get_jobs(req: func.HttpRequest) -> func.HttpResponse:
     return _json({"jobs": admin_store.list_jobs()})
 
 
-@bp.route(route="portal/jobs", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@bp.route(route="admin/jobs", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
 def post_job(req: func.HttpRequest) -> func.HttpResponse:
     user, error = _require_admin(req)
     if error:
@@ -248,7 +245,7 @@ def post_job(req: func.HttpRequest) -> func.HttpResponse:
     return _json({"jobId": job["jobId"], "status": job["status"]}, 202)
 
 
-@bp.route(route="portal/jobs/{jobId}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@bp.route(route="admin/jobs/{jobId}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def get_job(req: func.HttpRequest) -> func.HttpResponse:
     _, error = _require_admin(req)
     if error:

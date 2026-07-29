@@ -1,7 +1,7 @@
 /**
  * Admin portal.
  *
- * Access is decided server-side: every /api/portal/* route re-checks the caller
+ * Access is decided server-side: every /api/admin/* route re-checks the caller
  * against the admin list. Hiding UI here is presentation only, not a control.
  */
 
@@ -51,7 +51,7 @@ function escapeHtml(value) {
 async function init() {
     let status;
     try {
-        status = await api('portal/status');
+        status = await api('admin/status');
     } catch (err) {
         hide('admin-loading');
         show('admin-denied');
@@ -90,7 +90,7 @@ el('claim-submit').addEventListener('click', async () => {
     setError('claim-error', null);
     el('claim-submit').disabled = true;
     try {
-        await api('portal/claim', { method: 'POST', body: JSON.stringify({ token }) });
+        await api('admin/claim', { method: 'POST', body: JSON.stringify({ token }) });
         hide('admin-claim');
         show('admin-console');
         await Promise.all([refreshJobs(), refreshAdmins()]);
@@ -116,7 +116,7 @@ el('job-submit').addEventListener('click', async () => {
     setError('job-error', null);
     el('job-submit').disabled = true;
     try {
-        await api('portal/jobs', { method: 'POST', body: JSON.stringify(payload) });
+        await api('admin/jobs', { method: 'POST', body: JSON.stringify(payload) });
         await refreshJobs();
     } catch (err) {
         setError('job-error', err.message);
@@ -187,7 +187,7 @@ function renderHistory(jobs) {
 
 async function refreshJobs() {
     try {
-        const { jobs } = await api('portal/jobs');
+        const { jobs } = await api('admin/jobs');
         const active = jobs.find((j) => j.status === 'queued' || j.status === 'running');
         renderActiveJob(active);
         renderHistory(jobs);
@@ -206,7 +206,7 @@ async function refreshJobs() {
 // --------------------------------------------------------------------- admins
 async function refreshAdmins() {
     try {
-        const { admins } = await api('portal/admins');
+        const { admins } = await api('admin/admins');
         const container = el('admin-list');
         if (!admins.length) {
             container.className = 'admin-muted';
@@ -253,7 +253,7 @@ el('add-admin').addEventListener('click', async () => {
     }
     setError('admins-error', null);
     try {
-        await api('portal/admins', { method: 'POST', body: JSON.stringify({ userDetails }) });
+        await api('admin/admins', { method: 'POST', body: JSON.stringify({ userDetails }) });
         el('new-admin').value = '';
         await refreshAdmins();
     } catch (err) {

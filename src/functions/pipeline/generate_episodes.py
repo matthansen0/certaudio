@@ -235,7 +235,7 @@ def retrieve_content(
             search_text=query_text,
             vector_queries=[vector_query],
             select=["content", "sourceUrl", "title", "chunkId"],
-            filter=cert_filter,
+            filter=f"certificationId eq '{certification_id}'",
             top=15,
         )
     except Exception as e:
@@ -243,7 +243,7 @@ def retrieve_content(
         results = search_client.search(
             search_text=query_text,
             select=["content", "sourceUrl", "title", "chunkId"],
-            filter=cert_filter,
+            filter=f"certificationId eq '{certification_id}'",
             top=15,
         )
 

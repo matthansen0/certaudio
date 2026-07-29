@@ -11,9 +11,6 @@
     "principalId": {
       "value": "${AZURE_PRINCIPAL_ID}"
     },
-    "principalType": {
-      "value": "${AZURE_PRINCIPAL_TYPE=User}"
-    },
     "resourceGroupName": {
       "value": "${AZURE_RESOURCE_GROUP}"
     },
