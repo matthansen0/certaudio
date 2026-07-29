@@ -1,13 +1,17 @@
 {
   "routes": [
     {
+      "route": "/package.json",
+      "statusCode": 404
+    },
+    {
       "route": "/admin.html",
       "allowedRoles": [
         "authenticated"
       ]
     },
     {
-      "route": "/api/admin/*",
+      "route": "/api/portal/*",
       "allowedRoles": [
         "authenticated"
       ]

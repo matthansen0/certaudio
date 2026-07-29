@@ -4,7 +4,7 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 
 ## Recent Implementation Notes (Post v1 Plan)
 
-- **Study Partner (AI Foundry Agent)**: Optional feature that deploys Azure AI Foundry with a GPT-4o agent for interactive exam prep chat. Enable via `enableStudyPartner=true` in workflow or Bicep params. Adds ~$5-10/month; AI Search is *not* part of this toggle because generation needs it too. See [Study Partner section in README](../README.md#study-partner-optional).
+- **Study Partner (AI Foundry Agent)**: Optional feature that deploys Azure AI Foundry with a GPT-4o agent for interactive exam prep chat. Enable with `azd env set ENABLE_STUDY_PARTNER true`. Adds ~$5-10/month; AI Search is *not* part of this toggle because generation needs it too. See [Study Partner section in README](../README.md#study-partner-optional).
 - **Discovery Strategy (Combined)**: Content generation always uses the combined strategy (learning paths **plus** exam skills outline) for full coverage. See [docs/CONTENT_DISCOVERY.md](../docs/CONTENT_DISCOVERY.md) for details.
 - **Dynamic Learning Path Resolution**: Learning paths are resolved dynamically via catalog role + product tag filtering (`CERTIFICATION_ROLE_PRODUCTS` mapping) instead of hardcoded UIDs. Hardcoded UIDs are kept as a fallback but stale entries are auto-detected and skipped. This prevents silent content loss when Microsoft renames or restructures learning paths.
 - **Coverage Sweep**: In comprehensive mode, every exam skill topic is checked against discovered content. Uncovered topics go through a fallback chain: catalog module description matching → Learn search API → explicit gap reporting. Supplemental URLs from the sweep are merged into the indexing pipeline.
@@ -24,23 +24,24 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 - **SWA built-in auth (Microsoft only)**: User sign-in uses SWA's built-in Microsoft (AAD) provider. Zero app registrations, zero cost. The `x-ms-client-principal` header is decoded by `_get_swa_user()` in Functions. GitHub, Twitter, and Google providers are blocked via `staticwebapp.config.json` route rules. Progress is synced to Cosmos DB `userProgress` container keyed by stable SWA `userId`.
 - **Cross-device progress sync**: On sign-in, the frontend fetches server progress, merges with localStorage (keeping `completed=True` and `max(position)`), and pushes the merged result back. Subsequent saves go to both localStorage and the authenticated `/api/me/progress/{certId}` endpoint.
 - **Auth unit tests**: `src/functions/test_auth.py` covers `_get_swa_user` header parsing (valid, missing, malformed), `/api/me` identity endpoint, and progress GET/POST endpoints (401 for unauthenticated, single update, bulk merge, validation).
-- **EasyAuth is the security control — do not disable it**: SWA-managed EasyAuth is what stops a caller reaching the Function hostname directly and forging `x-ms-client-principal`. An earlier version of the deploy workflow disabled it to ease debugging. A direct call returning `401` is correct behaviour, not a bug. Test through the SWA hostname.
-- **Linking a backend is not enough to protect it**: `az staticwebapp backends link` registers the `azureStaticWebApps` identity provider and sets `platform.enabled=true`, but leaves `globalValidation.requireAuthentication=false`. EasyAuth is then present but *not enforcing*, and the Function hostname still answers anonymous requests. The deploy workflow explicitly PUTs `requireAuthentication=true` and `unauthenticatedClientAction=Return401` after linking. **The auth module only picks this up on restart**, so the workflow restarts the app and then asserts the direct hostname returns 401.
-- **Disabling EasyAuth also wipes the provider registration**: it clears `identityProviders.azureStaticWebApps`, and setting `platform.enabled=true` afterwards is not enough — auth would be on with nothing that trusts SWA, locking out the site. Re-linking (unlink then link) is the only supported repair, which is why the workflow checks the provider registration before enforcing.
+- **EasyAuth is the security control — do not disable it**: SWA-managed EasyAuth is what stops a caller reaching the Function hostname directly and forging `x-ms-client-principal`. An earlier version of the deployment disabled it to ease debugging. A direct call returning `401` is correct behaviour, not a bug. Test through the SWA hostname.
+- **Linking a backend is not enough to protect it**: `az staticwebapp backends link` registers the `azureStaticWebApps` identity provider and sets `platform.enabled=true`, but leaves `globalValidation.requireAuthentication=false`. EasyAuth is then present but *not enforcing*, and the Function hostname still answers anonymous requests. `scripts/postprovision.sh` explicitly PUTs `requireAuthentication=true` and `unauthenticatedClientAction=Return401` after linking. **The auth module only picks this up on restart**, so the hook restarts the app and then asserts the direct hostname returns 401.
+- **Disabling EasyAuth also wipes the provider registration**: it clears `identityProviders.azureStaticWebApps`, and setting `platform.enabled=true` afterwards is not enough — auth would be on with nothing that trusts SWA, locking out the site. Re-linking (unlink then link) is the only supported repair, which is why the hook checks the provider registration before enforcing.
 - **Cosmos SQL RBAC scope**: Cosmos DB SQL role assignment scope must be the fully-qualified DB scope `${cosmosDb.id}/dbs/${cosmosDbDatabaseName}`.
-- **Cosmos RBAC for GitHub OIDC**: The deploy-infra workflow extracts the service principal `oid` from the ARM access token and passes it as `automationPrincipalId` to Bicep, which grants Cosmos SQL Data Contributor at the database scope.
+- **RBAC is declarative**: every role the Function's managed identity needs is in `infra/modules/rbac.bicep`, deployed after the web module so it can consume `functionsAppPrincipalId`. Assignment names are `guid(scope, principalId, roleId)`, so redeploys are no-ops. Do not move role assignments into scripts.
+- **principalType matters**: role assignments for the *deploying* principal must pass `principalType` from `AZURE_PRINCIPAL_TYPE` (default `User`). Hardcoding `ServicePrincipal` fails with `UnmatchedPrincipalType`, because `azd` deploys as the signed-in human.
 - **Search RBAC**: Azure AI Search data-plane operations (create/update indexes, upload documents) require RBAC. The Function identity holds **Search Index Data Contributor** because it both writes the grounding index during generation and reads it for Study Partner RAG.
 - **Shared search index**: One Basic Search service holds a single `certification-content` index for every certification, discriminated by a filterable `certificationId` field. There is no per-certification index and no ephemeral Search service — both were removed.
 - **SWA deploy token**: Static Web Apps deploy token is retrieved at runtime in CI (no long-lived repo secret).
 - **Deployment sprawl control**: CI supports an optional pinned suffix secret `AZURE_UNIQUE_SUFFIX` to avoid creating a full new resource set every run.
-- **RG cleanup helper**: [scripts/cleanup-rg.sh](../scripts/cleanup-rg.sh) can delete old tagged deployment sets while keeping the active suffix.
 - **Dynamic certification list**: Frontend dropdown is populated from the API (`GET /api/certifications`) with a safe fallback that includes `dp-700`.
-- **Content generation runs in the Function App, not CI**: Tenant policy forces `publicNetworkAccess=Disabled` on Storage and Cosmos, so a GitHub-hosted runner cannot reach the data plane. Generation runs in-process in the already VNet-integrated Function App. An admin submits a job at `/admin.html` → `POST /api/portal/jobs` → message on the `content-jobs` queue → `run_content_job` queue trigger → `src/functions/pipeline/orchestrator.py`. Progress is written back to the job document and polled by the UI.
-- **Only one workflow**: `deploy-infra.yml`. The `generate-content.yml` and `refresh-content.yml` workflows and the `scripts/run-local.sh`, `index-content.sh`, and `get-endpoints.sh` helpers were deleted. Do not reintroduce them; once deployed, the app does not need the repository.
+- **Content generation runs in the Function App, not CI**: Storage and Cosmos sit behind Private Link with `publicNetworkAccess=Disabled`, which Azure Policy enforces in many enterprise tenants, so a GitHub-hosted runner has no route to the data plane. Generation runs in-process in the already VNet-integrated Function App. An admin submits a job at `/admin.html` → `POST /api/portal/jobs` → message on the `content-jobs` queue → `run_content_job` queue trigger → `src/functions/pipeline/orchestrator.py`. Progress is written back to the job document and polled by the UI.
+- **No workflows at all**: deployment is `azd up`, defined by `azure.yaml`. The `deploy-infra.yml`, `generate-content.yml`, `refresh-content.yml`, and `private-pipeline.yml` workflows, and the `run-local.sh`, `index-content.sh`, `get-endpoints.sh`, and WebJob helpers, were all deleted. Do not reintroduce them. This is a public template: a fork must deploy with no GitHub setup, no app registration, and no secrets.
+- **azd file precedence**: `azd` prefers `infra/main.bicepparam` over `infra/main.parameters.json`, and resolves `module: main` to a compiled `infra/main.json` over `main.bicep`. Both were deleted and `main.json` is gitignored, because a stale copy silently deploys the wrong template. `infra/main.bicep` is **subscription-scoped** and creates the resource group itself.
+- **Service tags**: `azd` maps a service in `azure.yaml` to a resource by an `azd-service-name` tag (`api` on the Function App, `web` on the Static Web App). A Static Web Apps service also needs a `package.json` even with no build step.
 - **Admin bootstrap**: Bicep writes a rotating `ADMIN_BOOTSTRAP_TOKEN` app setting. The first admin claims it once at `/admin.html`; afterwards admins are managed in the portal. Compared with `hmac.compare_digest`, and the claim marker is written before the admin record so a partial failure spends the token rather than leaving it reusable.
 - **One job at a time**: `host.json` sets `functionTimeout: -1` (allowed on a dedicated plan) and queue `batchSize: 1`, `newBatchThreshold: 0`, `maxDequeueCount: 2`. `POST /api/portal/jobs` also returns `409` if a job is already queued or running.
 - **Input validation**: `certificationId` is interpolated into an AI Search OData filter, so it is constrained to `^[a-z0-9][a-z0-9-]{0,63}$` at the API boundary and quotes are additionally escaped at the filter. Voice names are constrained to the Azure short-name shape.
-- **Workflow triggers**: Deploy Infrastructure triggers on `infra/**`, `src/web/**`, `src/functions/**`, or workflow file changes.
 - **Local Development**: Content generation cannot run locally — the data plane is private and tenant policy silently reverts firewall changes. Run `python -m pytest -q` in `src/functions` for unit tests, and generate from the admin portal.
 - **Private networking is mandatory**: Azure Policy in this tenant uses `Modify` effects to force `publicNetworkAccess=Disabled`, `allowSharedKeyAccess=false`, and `disableLocalAuth=true` on Storage and Cosmos. ARM returns HTTP 200 while silently rewriting the payload, so a template asking for public access appears to succeed and simply does not take effect. Do not try to "fix" connectivity by enabling public access — check the effective policy for the target subscription instead.
 
@@ -121,7 +122,7 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 - Retry with exponential backoff for OpenAI rate limits (429 errors)
 
 **Auth & Access (no keys)**:
-- GitHub Actions uses OIDC via `azure/login@v2`; Python tools use `DefaultAzureCredential()`.
+- Everything uses `DefaultAzureCredential()`: the managed identity at runtime, and the deployer's `az login` for `azd`.
 - Cosmos access uses Entra ID auth to `CosmosClient(endpoint, DefaultAzureCredential())`.
 - Blob access uses `BlobServiceClient(account_url=..., DefaultAzureCredential())`.
 
@@ -175,33 +176,33 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 
 ### infra
 
-**Scope**: `infra/**`, `.github/workflows/**`
+**Scope**: `infra/**`, `azure.yaml`, `scripts/postprovision.sh`
 
-**Description**: Infrastructure as Code and CI/CD pipelines.
+**Description**: Infrastructure as Code and the `azd` deployment definition.
 
 **Responsibilities**:
-- Bicep modules for all Azure resources
-- Parameterized deployment for any Microsoft certification
-- Conditional B2C deployment via feature flag
-- GitHub Actions for infrastructure deployment
-- GitHub Actions for content generation pipeline
-- GitHub Actions for scheduled content refresh
+- Bicep modules for all Azure resources, at subscription scope
+- Declarative role assignments in `rbac.bicep`
+- Conditional B2C and AI Foundry deployment via feature flags
+- The postprovision hook: SWA backend link and EasyAuth enforcement
 
 **Key Files**:
 - `infra/main.bicep` - Orchestrator module
-- `infra/main.bicepparam` - Parameter file
+- `infra/main.parameters.json` - binds azd environment variables to Bicep parameters
 - `infra/modules/ai-services.bicep` - OpenAI, Speech, Doc Intel, AI Search
 - `infra/modules/ai-foundry.bicep` - AI Foundry account, project, connections (conditional)
 - `infra/modules/data.bicep` - Cosmos DB, Storage Account (incl. the `admins` and `jobs` containers)
 - `infra/modules/web.bicep` - Static Web Apps, Functions
 - `infra/modules/search-persistent.bicep` - AI Search (always deployed)
 - `infra/modules/identity.bicep` - B2C (conditional)
-- `.github/workflows/deploy-infra.yml` - Infrastructure and code deployment (the only workflow)
+- `infra/modules/rbac.bicep` - Function managed identity data-plane roles
+- `azure.yaml` - azd project: infra, services, hooks
+- `scripts/postprovision.sh` - SWA backend link and EasyAuth enforcement
 
 **Context**:
 - All resources prefer Managed Identity for authentication
-- Storage and Cosmos have public network access disabled; this is enforced by tenant policy and cannot be turned off
-- Parameters: `enableStudyPartner`, `location`, `foundryLocation`, `adminBootstrapToken`
+- Storage and Cosmos have public network access disabled and are reached over Private Link. Azure Policy enforces this in many enterprise tenants; check the effective policy before assuming it can be changed.
+- Parameters: `environmentName`, `location`, `principalId`, `principalType`, `uniqueSuffix`, `enableStudyPartner`, `foundryLocation`, `adminBootstrapToken`
 - Cosmos containers must be declared in Bicep. The Cosmos SQL Data Contributor role covers item operations but *not* container management, so the app cannot create them at runtime.
 
 **Keyless storage + RBAC**:
@@ -211,10 +212,10 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 	- Storage Table Data Contributor
 - On the *content* storage account the Functions identity holds Storage Blob Data **Contributor** (it writes generated episodes as well as streaming them).
 
-**CI/CD notes**:
-- Deploy workflow supports `AZURE_UNIQUE_SUFFIX` (optional secret) to keep one stable environment.
-- Static Web Apps deploy token is fetched via `az staticwebapp secrets list` during the workflow.
-- Functions deployment packages dependencies into `.python_packages/lib/site-packages` and deploys via zip deploy.
+**Deployment notes**:
+- `azd env set AZURE_UNIQUE_SUFFIX <value>` pins resource names to adopt an existing environment. Left unset, names derive deterministically from the subscription and environment name.
+- `azd config set auth.useAzCliAuth true` makes azd reuse the `az login` credential instead of prompting for its own.
+- Adopting pre-existing resources can fail with `RoleAssignmentExists` when an assignment already exists under a randomly generated name; delete it and let Bicep own the deterministic one.
 
 ---
 
