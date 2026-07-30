@@ -5,10 +5,13 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 ## Recent Implementation Notes (Post v1 Plan)
 
 - **Study Partner (AI Foundry Agent)**: Optional feature that deploys Azure AI Foundry with a GPT-4o agent for interactive exam prep chat. Enable with `azd env set ENABLE_STUDY_PARTNER true`. Adds ~$5-10/month; AI Search is *not* part of this toggle because generation needs it too. See [Study Partner section in README](../README.md#study-partner-optional).
-- **Discovery Strategy (Combined)**: Content generation always uses the combined strategy (learning paths **plus** exam skills outline) for full coverage. See [docs/CONTENT_DISCOVERY.md](../docs/CONTENT_DISCOVERY.md) for details.
-- **Dynamic Learning Path Resolution**: Learning paths are resolved dynamically via catalog role + product tag filtering (`CERTIFICATION_ROLE_PRODUCTS` mapping) instead of hardcoded UIDs. Hardcoded UIDs are kept as a fallback but stale entries are auto-detected and skipped. This prevents silent content loss when Microsoft renames or restructures learning paths.
-- **Coverage Sweep**: In comprehensive mode, every exam skill topic is checked against discovered content. Uncovered topics go through a fallback chain: catalog module description matching → Learn search API → explicit gap reporting. Supplemental URLs from the sweep are merged into the indexing pipeline.
-- **Confidence Score**: Discovery outputs a weighted confidence score (0–100%, Grade A–F) showing content coverage completeness. Weights: learning-path=1.0, catalog-supplement=0.8, search-supplement=0.5, gap=0.0. Surfaced in generation output via `--discovery-json` flag.
+- **Discovery Strategy (Combined)**: There is one discovery path and it always runs learning paths **plus** the exam skills outline. There is no "fast" or "skills-only" mode; earlier docs describing three modes were wrong. See [docs/CONTENT_DISCOVERY.md](../docs/CONTENT_DISCOVERY.md).
+- **Certification Resolution**: An exam code is resolved against the Learn catalog, not a hand-maintained map. The catalog's `exams` collection holds only 141 mostly-legacy records (AZ-104, DP-700 and AI-102 have none) and `mergedCertifications` carries no exam field, so the join goes through the redirect from `/credentials/certifications/exams/<code>/` to `/certifications/<slug>/`, matched against the record's `url`. An unresolvable code fails the job immediately.
+- **Resolution Ladder**: Learning paths come from the first tier that yields UIDs still present in the catalog: (1) `study_guide` on the certification record, (2) `CERTIFICATION_PATH_UIDS`, (3) role + product tag matching capped at `MAX_TAG_FILTER_PATHS`. **Each tier is validated before it is accepted** — AZ-104's curated UIDs have all been restructured away, and validating after tier selection produced an empty syllabus. Tag matching is last because role + product alone matches 116 paths / ~4,200 units for AZ-104.
+- **Coverage Sweep**: Every exam skill topic is checked against discovered content. Uncovered topics go through a fallback chain: catalog module description matching → Learn search API → explicit gap reporting. Supplemental URLs from the sweep are merged into the indexing pipeline. This is called from `orchestrator._discover()`; it previously existed but ran only from the `deep_discover.py` CLI, so production never saw it.
+- **Confidence Score**: Discovery outputs a weighted confidence score (0–100%, Grade A–F). Weights: learning-path=1.0, catalog-supplement=0.8, search-supplement=0.5, gap=0.0. It is folded into a `discoveryReport` stored on the blob artifact and the course record, and rendered on the course detail panel in the admin portal.
+- **Fail Fast on Partial Discovery**: `orchestrator._assert_discovery_is_usable()` raises when no learning paths resolve, when more than 25% of unit fetches fail, or when units were found but no text was extracted. These all used to be reported as success with an empty or hollow outline.
+- **Exam Skills From Two Sources**: The study guide page is scraped for weights and sub-bullets, and merged with the `skills` array on the certification record (present for 145 of 151 certifications). The scrape wins on overlap; the catalog list survives a page restructure.
 - **Hierarchy API for URLs**: Unit URLs are fetched from `/api/hierarchy/modules/{uid}` because the catalog API doesn't provide actual URLs, and URL patterns can be non-sequential (e.g., `3b-optimize` instead of `4-optimize`).
 - **Voice Selection**: Voices for instructional, podcast host, and podcast expert formats are chosen when submitting a job in the admin portal, validated against `VOICE_NAME_RE` in `src/functions/admin.py`, and defaulted from app settings.
 - **Dragon HD Voices**: Azure Speech Dragon HD voices (e.g., `en-US-Andrew:DragonHDLatestNeural`) are only available in **eastus**, **westeurope**, and **southeastasia** regions. The Speech service is deployed to eastus to enable HD voice support.
@@ -40,7 +43,8 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 - **azd file precedence**: `azd` prefers `infra/main.bicepparam` over `infra/main.parameters.json`, and resolves `module: main` to a compiled `infra/main.json` over `main.bicep`. Both were deleted and `main.json` is gitignored, because a stale copy silently deploys the wrong template. `infra/main.bicep` is **subscription-scoped** and creates the resource group itself.
 - **Service tags**: `azd` maps a service in `azure.yaml` to a resource by an `azd-service-name` tag (`api` on the Function App, `web` on the Static Web App). A Static Web Apps service also needs a `package.json` even with no build step.
 - **Admin bootstrap**: Bicep writes a rotating `ADMIN_BOOTSTRAP_TOKEN` app setting. The first admin claims it once at `/admin.html`; afterwards admins are managed in the portal. Compared with `hmac.compare_digest`, and the claim marker is written before the admin record so a partial failure spends the token rather than leaving it reusable.
-- **One job at a time**: `host.json` sets `functionTimeout: -1` (allowed on a dedicated plan) and queue `batchSize: 1`, `newBatchThreshold: 0`, `maxDequeueCount: 2`. `POST /api/portal/jobs` also returns `409` if a job is already queued or running.
+- **One job at a time**: `host.json` sets `functionTimeout: -1` (allowed on a dedicated plan) and queue `batchSize: 1`, `newBatchThreshold: 0`, `maxDequeueCount: 2`. `POST /api/portal/jobs` returns `409` if a job is already queued or running. A job left `queued` for more than `STALE_QUEUED_AFTER_SECONDS` is treated as orphaned and cancelled automatically, and `POST /api/portal/jobs/{jobId}/cancel` clears one by hand — otherwise a job the worker never claimed locks the portal out permanently.
+- **Queue message encoding**: `host.json` pins `extensions.queues.messageEncoding` to `none` to match `admin.QUEUE_MESSAGE_ENCODING`. The Storage Queues extension defaults to base64 while the Python SDK sends plain text; a mismatch dead-letters every message without ever invoking the trigger, so jobs sit in `queued` forever with no error anywhere. `test_admin.py` asserts the two agree.
 - **Input validation**: `certificationId` is interpolated into an AI Search OData filter, so it is constrained to `^[a-z0-9][a-z0-9-]{0,63}$` at the API boundary and quotes are additionally escaped at the filter. Voice names are constrained to the Azure short-name shape.
 - **Local Development**: Content generation cannot run locally — the data plane is private and tenant policy silently reverts firewall changes. Run `python -m pytest -q` in `src/functions` for unit tests, and generate from the admin portal.
 - **Private networking is mandatory**: Azure Policy in this tenant uses `Modify` effects to force `publicNetworkAccess=Disabled`, `allowSharedKeyAccess=false`, and `disableLocalAuth=true` on Storage and Cosmos. ARM returns HTTP 200 while silently rewriting the payload, so a template asking for public access appears to succeed and simply does not take effect. Do not try to "fix" connectivity by enabling public access — check the effective policy for the target subscription instead.
@@ -93,7 +97,7 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 **Description**: Handles exam content discovery, RAG-based script generation, and audio synthesis. Runs in-process inside the Function App, not as a separate job.
 
 **Responsibilities**:
-- Discover and scrape Microsoft Learn content from exam skills outline pages
+- Resolve a certification against the Learn catalog and walk its learning paths to unit level
 - Index content into the shared Azure AI Search index for RAG retrieval
 - Generate episode scripts with GPT-4o
 - Convert scripts to SSML with proper prosody for learning retention
@@ -105,8 +109,7 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 **Key Files**:
 - `src/functions/pipeline/orchestrator.py` - `run_generate` / `run_refresh`, the in-process entry points
 - `src/functions/admin.py` - admin API and the `run_content_job` queue trigger
-- `src/functions/pipeline/discover_exam_content.py` - Exam page scraping (skills mode)
-- `src/functions/pipeline/deep_discover.py` - Deep discovery via Catalog API (dynamic path resolution, coverage sweep, confidence scoring)
+- `src/functions/pipeline/deep_discover.py` - certification resolution, learning path discovery via the Catalog API, study guide parsing, coverage sweep, confidence scoring
 - `src/functions/pipeline/check_content_delta.py` - Content change detection
 - `src/functions/pipeline/generate_episodes.py` - Episode generation with retry/skip logic
 - `src/functions/pipeline/synthesize_audio.py` - Azure AI Speech synthesis
@@ -132,7 +135,7 @@ This file defines specialized agents for the Azure AI Certification Audio Learni
 
 **Scope**: `src/web/**`
 
-**Description**: Audio player web interface with progress tracking.
+**Description**: Audio player, Study Partner and admin portal. Plain static files — there is no bundler, and `src/web/package.json` has a no-op build.
 
 **Responsibilities**:
 - Display episode list grouped by skill domain (exam outline sections)

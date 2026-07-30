@@ -8,7 +8,7 @@
 <rect x="70" y="95" width="400" height="350" rx="16" ry="16" fill="none" stroke="#5c5f66" stroke-width="2" stroke-dasharray="8 6"/>
 <text x="86" y="122" font-size="14" font-weight="600" fill="#5c5f66">Learning paths - catalog API</text>
 <rect x="540" y="95" width="400" height="350" rx="16" ry="16" fill="none" stroke="#5c5f66" stroke-width="2" stroke-dasharray="8 6"/>
-<text x="556" y="122" font-size="14" font-weight="600" fill="#5c5f66">Exam skills outline - study guide</text>
+<text x="556" y="122" font-size="14" font-weight="600" fill="#5c5f66">Exam skills - catalog + guide</text>
 <path d="M 270 211 L 270 245" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
 <path d="M 270 311 L 270 345" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
 <path d="M 740 211 L 740 245" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>

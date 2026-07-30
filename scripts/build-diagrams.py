@@ -291,7 +291,7 @@ CONTENT_SOURCES = diagram(
     groups=[
         group("paths", "Learning paths - catalog API",
               70, 95, 400, 350, ["lp", "mod", "unit"]),
-        group("skills", "Exam skills outline - study guide",
+        group("skills", "Exam skills - catalog + guide",
               540, 95, 400, 350, ["dom", "obj", "skill"]),
     ],
 )

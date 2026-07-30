@@ -24,7 +24,12 @@ then generates and refreshes its own content from an admin portal.
 </details>
 
 <details>
-<summary><strong>Supported certifications</strong> (50+)</summary>
+<summary><strong>Supported certifications</strong> (any current Microsoft exam)</summary>
+
+Certifications are resolved from the Microsoft Learn catalog at index time, so
+any current exam code works by typing it into the admin portal — the list below
+is a sample, not a whitelist. An ID that is not a real exam is rejected before
+any crawling starts.
 
 ### Azure
 | Exam | Certification |
@@ -173,9 +178,15 @@ Jobs run inside the Function App on the existing plan, so a run adds no compute
 cost. Only one job runs at a time — a second submission returns `409` while one
 is active. A full certification takes a few hours; don't redeploy mid-run.
 
-Discovery combines Microsoft Learn learning paths with the exam study guide
-skills outline, resolves paths dynamically by role and product tags, and reports
-a coverage confidence score. See
+Indexing is the cheap half: it discovers content, reports the exact episode count
+and a cost estimate, and stops. Generation is the half that costs money, so you
+see the bill before committing to it.
+
+Discovery resolves the exam against the Microsoft Learn catalog, walks its
+learning paths down to unit level, merges in the official skills-measured list,
+then checks every exam topic against what it found and grades the coverage. The
+result is shown on the course, including any topics it could not find content
+for. See
 [Content Discovery](docs/CONTENT_DISCOVERY.md) for how that works and
 [How It Works](docs/HOW_IT_WORKS.md#customization-guide) for voices, episode
 length, and job parameters.
@@ -239,7 +250,7 @@ deployed environment or the SWA CLI emulator.
 ## Documentation
 
 - [How It Works](docs/HOW_IT_WORKS.md) — architecture, security, deployment, customization, troubleshooting
-- [Content Discovery](docs/CONTENT_DISCOVERY.md) — how exam content is found, deduplicated, and scored
+- [Content Discovery](docs/CONTENT_DISCOVERY.md) — how a certification resolves to content, and how coverage is graded
 
 ## Contributing
 

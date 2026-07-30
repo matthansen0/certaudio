@@ -4,7 +4,8 @@ This document explains how CertAudio discovers and organizes content for Microso
 
 ## Two Content Sources
 
-Microsoft provides two distinct content structures for certification preparation:
+Microsoft describes a certification in two different structures, and CertAudio uses
+both. Neither alone is sufficient.
 
 ![certaudio two content sources](diagrams/content-sources.svg)
 
@@ -28,7 +29,8 @@ Microsoft provides two distinct content structures for certification preparation
 
 ### 2. Exam Skills Outline (Testable Skills)
 
-**Source**: Exam Study Guide page (e.g., `https://aka.ms/DP700-StudyGuide`)
+**Source**: the `skills` array on the certification's Learn catalog record,
+merged with the exam study guide page (e.g. `https://aka.ms/DP700-StudyGuide`)
 
 **Purpose**: Defines exactly what Microsoft will test on the exam.
 
@@ -70,36 +72,86 @@ Some exam skills don't have dedicated learning path content:
 - ❌ "Choose between accelerated vs non-accelerated shortcuts"
 - ❌ "Create windowing functions"
 
-## Discovery Modes
+## How a Certification Resolves to Content
 
-### `skills` Mode (Basic)
-- Scrapes exam page for skills outline only
-- Fastest, least content
-- Good for quick overview
+There is one discovery path, and it always runs. It resolves an exam code to a
+set of learning paths, walks them to unit level, and then reconciles what it
+found against the exam's official skills-measured list.
 
-### `deep` Mode (Learning Paths Only - Legacy)
-- Fetches all learning paths via Catalog API
-- ~5-7 hours for DP-700
-- Missing some testable skills
+### Step 1 — Identify the certification
 
-### `comprehensive` Mode (Recommended)
-- Combines BOTH learning paths AND exam skills outline
-- **Dynamic learning path resolution**: Uses catalog role + product filtering instead of hardcoded UIDs
-- Hardcoded UIDs kept as fallback (stale UIDs auto-detected and skipped)
-- Learning path content provides foundations
-- Exam skills ensure all testable items are covered
-- **Coverage sweep**: Each exam topic is checked against discovered content with a 3-level fallback chain:
-  1. Title match against discovered module/unit titles
-  2. Catalog module description search
-  3. Microsoft Learn docs search API
-  4. Explicit gap reporting for truly uncovered topics
-- **Confidence score**: Weighted percentage showing content completeness (Grade A–F)
-- ~10-12 hours for DP-700
-- **Full official content coverage**
+`resolve_certification()` turns an exam code such as `dp-700` into a
+`CertificationRef` by consulting two things:
+
+1. The catalog's `exams` collection, matched on `uid` (`exam.dp-700`) or
+   `display_name`.
+2. The certification record, found by following the redirect from
+   `https://learn.microsoft.com/credentials/certifications/exams/<code>/` to
+   `.../certifications/<slug>/` and matching that slug against the `url` of a
+   `mergedCertifications` or `certifications` record.
+
+The redirect is necessary because the catalog's `exams` collection holds only
+141 records and they are mostly legacy — AZ-104, DP-700 and AI-102 have none —
+while `mergedCertifications` carries no exam field to join on.
+
+If neither lookup finds anything, the exam does not exist and the job fails
+immediately rather than discovering nothing slowly.
+
+### Step 2 — Resolve learning paths, in priority order
+
+`resolve_content_sources()` walks a ladder and stops at the first tier that
+yields paths **still present in the catalog**. Each tier is validated before it
+is accepted, because a tier whose UIDs have all been restructured away must fall
+through rather than produce an empty syllabus.
+
+| Tier | Source | Notes |
+|------|--------|-------|
+| 1 | `study_guide` on the certification record | Microsoft's own curated list. Carries bare modules as well as learning paths. Populated for 48 of 151 certifications. |
+| 2 | `CERTIFICATION_PATH_UIDS` | Hand-verified syllabus for a handful of exams that have no catalog study guide. |
+| 3 | Role + product tag matching | Uses the roles and products on the certification's own catalog record, ranked by product overlap and capped at `MAX_TAG_FILTER_PATHS`. |
+
+Tier 3 is deliberately last. Role plus product alone matches every path
+Microsoft tags for the product family — 116 paths and roughly 4,200 units for
+AZ-104, most of it off-syllabus. When it is used, the run records a warning
+suggesting the exam be pinned in `CERTIFICATION_PATH_UIDS`.
+
+Modules listed directly on a study guide, with no parent learning path, are
+wrapped in a synthetic path so the rest of the walk is uniform.
+
+### Step 3 — Walk to unit level
+
+For each learning path: read its modules from the catalog, fetch each module's
+hierarchy to get accurate unit URLs, then fetch and extract the text of every
+unit. Failed unit fetches are counted, not swallowed.
+
+### Step 4 — Assemble the exam skills outline
+
+Two sources are merged by domain name:
+
+- The **study guide page**, scraped for domains, percentage weights and the
+  sub-bullets under each objective.
+- The **`skills` array on the certification record**, which is the official
+  skills-measured list and needs no HTML parsing. Present for 145 of 151
+  certifications.
+
+The scrape wins on overlap because it carries weights and sub-topics; the
+catalog list fills in anything the scrape missed. If Microsoft restructures the
+study guide page, the catalog list still holds.
+
+### Step 5 — Coverage sweep and confidence score
+
+Every exam skill topic is checked against the discovered module and unit titles.
+Uncovered topics go through a fallback chain:
+
+1. Title match against discovered module/unit titles
+2. Catalog module description search
+3. Microsoft Learn docs search API
+4. Explicit gap reporting
+
+The result is a weighted confidence score, and both are written into the
+discovery artifact and surfaced in the admin portal.
 
 ### Confidence Score
-
-In comprehensive mode, the output includes a confidence score grading content coverage:
 
 | Grade | Score | Meaning |
 |-------|-------|---------|
@@ -115,13 +167,54 @@ The score weights different coverage sources:
 - **Search supplement (0.5)**: Topic found via Learn docs search API
 - **Gap (0.0)**: No content found
 
+## Failing Loudly
+
+Discovery used to report success while producing a structurally complete outline
+with nothing behind it. `_assert_discovery_is_usable()` in `orchestrator.py` now
+raises when:
+
+- No learning paths resolved. The message names the tiers that were tried.
+- More than 25% of unit fetches failed. The outline would look complete with no
+  content behind it.
+- Units were discovered but no text was extracted from any of them.
+
+A missing exam skills outline is a warning rather than an error: learning path
+content still generates, but the coverage figures are measured against nothing
+and the report says so.
+
+## The Discovery Report
+
+Every index run writes a `discoveryReport` onto both the blob artifact and the
+course record, and the admin portal renders it on the course detail panel:
+
+| Field | Meaning |
+|-------|---------|
+| `examFound`, `examTitle` | Whether the certification resolved, and to what |
+| `resolvedPaths`, `resolvedStandaloneModules` | Size of the syllabus |
+| `sources` | Which tier of the ladder supplied it |
+| `warnings` | Stale UIDs, tag-matching caps, unresolved exams |
+| `unitsDiscovered`, `unitsFailed` | Download health |
+| `coverageGrade`, `coverageScore` | Confidence score |
+| `topicsCovered`, `topicsSupplemented`, `topicsUncovered` | Coverage sweep totals |
+| `gaps` | The exam topics with no content behind them, up to 100 |
+
 ## Expected Duration by Certification
 
-| Certification | Learning Paths | Exam Skills | Combined (Comprehensive) |
-|--------------|----------------|-------------|--------------------------|
-| DP-700 | 22 modules (~5h) | 55 skills (~7h) | ~10-12 hours |
-| AZ-104 | 28 modules (~6h) | ~60 skills (~8h) | ~12-14 hours |
-| AI-102 | ~20 modules (~5h) | ~45 skills (~6h) | ~9-11 hours |
+Resolved scope, measured against the live catalog on 2026-07-30:
+
+| Certification | Tier used | Learning paths | Units |
+|--------------|-----------|----------------|-------|
+| DP-700 | curated UIDs | 6 | 267 |
+| AZ-305 | catalog study guide | 6 | 209 |
+| AZ-400 | catalog study guide | 8 | 445 |
+| MS-102 | catalog study guide | 9 | 346 |
+| SC-100 | catalog study guide | 4 | 168 |
+| SC-300 | curated UIDs | 4 | 194 |
+| AI-102 | tag matching | 11 | 560 |
+| AZ-104 | tag matching (capped) | 25 | 801 |
+
+Indexing takes minutes and costs cents. Generation is the expensive half: roughly
+$0.25 and a couple of minutes per episode, so a full certification runs for hours.
 
 ## Episode Structure
 
@@ -206,14 +299,14 @@ The actual learning happens when you **do** the lab (~45 minutes), not when you 
 | **Knowledge checks** | 22 | ~3,500 | (not narrated) |
 | **Exercises** | 20 | ~1,700 | (instructions only) |
 
-### Comprehensive Mode Adds More
+### Exam Skills Add More
 
-When `--comprehensive` mode is enabled, we also include exam skill objectives:
+On top of the learning path content, the exam skill objectives are narrated too:
 - 8 skill domains with 45 specific skills
 - Each skill gets its own episode or shares with related skills
 - Adds ~1-2 hours of targeted exam prep content
 
-**Total with comprehensive mode: ~7-8 hours**
+**Total: ~7-8 hours**
 
 ### Completeness Guarantee
 
@@ -238,6 +331,9 @@ The system **NEVER truncates content**. Every topic in the discovery output is c
 These run in-process inside the Function App, invoked by
 `src/functions/pipeline/orchestrator.py` when an admin submits a job.
 
-- `src/functions/pipeline/deep_discover.py` - Learning path discovery via Catalog API
-- `src/functions/pipeline/discover_exam_content.py` - Exam skills outline scraping
+- `src/functions/pipeline/deep_discover.py` - certification resolution, learning path
+  discovery via the Catalog API, study guide parsing, coverage sweep, confidence score
+- `src/functions/pipeline/orchestrator.py` - wires the above together, applies the
+  fail-fast gates and builds the discovery report
 - `src/functions/pipeline/generate_episodes.py` - Episode generation from discovered content
+- `src/functions/test_discovery.py` - resolution, merge and fail-fast tests

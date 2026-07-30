@@ -397,12 +397,14 @@ This is where the magic happens. The pipeline transforms Microsoft Learn content
 **File**: [`src/functions/pipeline/deep_discover.py`](../src/functions/pipeline/deep_discover.py)
 
 **What Happens**:
-1. Fetch Microsoft Learn Catalog API
-2. **Dynamically resolve** learning paths by filtering on certification role + product tags
-3. Get all modules and units from each path
-4. Scrape the exam study guide for specific skills (comprehensive mode)
-5. **Coverage sweep**: check each exam topic against discovered content with a fallback chain
-6. **Confidence score**: compute a weighted coverage percentage (Grade A–F)
+1. Fetch the Microsoft Learn Catalog API
+2. **Resolve the certification** from the exam code
+3. **Resolve learning paths** through a priority ladder
+4. Get all modules and units from each path
+5. Read the exam skills outline from the catalog and the study guide page
+6. **Coverage sweep**: check each exam topic against discovered content with a fallback chain
+7. **Confidence score**: compute a weighted coverage percentage (Grade A–F)
+8. **Fail fast** if the result is structurally complete but hollow
 
 **The Two Content Sources**:
 
@@ -416,26 +418,44 @@ Learning paths teach concepts. Exam skills define what you'll be tested on. They
 
 **Discovery Strategy (Combined)**:
 
-The platform always uses the **combined** strategy: learning paths **plus** the exam study guide skills outline. This provides the most complete coverage and avoids surprising gaps.
+There is one discovery path and it always runs learning paths **plus** the exam
+skills outline. There is no fast or skills-only mode.
 
-**Dynamic Learning Path Resolution**:
+**Certification Resolution**:
 
-Instead of relying on hardcoded learning path UIDs (which go stale when Microsoft renames or restructures content), the platform dynamically discovers paths by filtering the catalog on role + product tags:
+An exam code is resolved against the catalog rather than a hand-maintained map.
+The catalog's `exams` collection holds only 141 records and they are mostly
+legacy — AZ-104, DP-700 and AI-102 have none — while `mergedCertifications`
+carries no exam field to join on. So the link runs through the redirect:
 
-```python
-# Dynamic: filter by role + product tags (resilient to restructuring)
-CERTIFICATION_ROLE_PRODUCTS = {
-    "ai-102": {
-        "roles": ["ai-engineer"],
-        "products": {"azure-ai-services", "azure-ai-search", "azure-openai", ...},
-    },
-}
-# Hardcoded UIDs kept as fallback (stale UIDs auto-detected and skipped)
 ```
+/credentials/certifications/exams/az-104/  →  /credentials/certifications/azure-administrator/
+                                                                          └── matched against the record's `url`
+```
+
+If neither an exam nor a certification record matches, the job fails immediately
+instead of discovering nothing slowly.
+
+**Learning Path Resolution Ladder**:
+
+Paths come from the first tier that yields UIDs *still present in the catalog*.
+Each tier is validated before it is accepted, because a tier whose UIDs have all
+been restructured away has to fall through rather than produce an empty syllabus:
+
+| Tier | Source | Coverage |
+|------|--------|----------|
+| 1 | `study_guide` on the certification record | Microsoft's own curated list, populated for 48 of 151 certifications |
+| 2 | `CERTIFICATION_PATH_UIDS` | Hand-verified syllabus for exams with no catalog study guide |
+| 3 | Role + product tag matching | Capped at `MAX_TAG_FILTER_PATHS`, ranked by product overlap |
+
+Tag matching is last on purpose: role plus product alone matches everything
+Microsoft tags for the product family, which for AZ-104 is 116 paths and roughly
+4,200 units of largely off-syllabus content. When a run falls through to it, the
+discovery report says so and suggests pinning the exam in tier 2.
 
 **Coverage Sweep & Confidence Score**:
 
-In comprehensive mode, every exam topic is checked against discovered content with a 3-level fallback chain:
+Every exam topic is checked against discovered content with a 3-level fallback chain:
 1. **Title match** against learning path module/unit titles
 2. **Catalog module description search** for uncovered topics
 3. **Learn docs search API** as a last resort
@@ -449,6 +469,15 @@ The output includes a confidence score (0–100%) with a letter grade:
 | B | ≥ 75% | Good — most topics covered, some supplemented from search |
 | C | ≥ 60% | Adequate — significant supplementation needed |
 | D/F | < 60% | Poor — major content gaps |
+
+**Failing Loudly**:
+
+Discovery used to report success while producing an outline with nothing behind
+it. `orchestrator._assert_discovery_is_usable()` now raises when no learning
+paths resolve, when more than 25% of unit fetches fail, or when units were found
+but no text was extracted from any of them. The counts, the tier that supplied
+the syllabus, any warnings and the list of uncovered exam topics are written to
+a `discoveryReport` on the course record and rendered in the admin portal.
 
 **🎓 Learn More**:
 - [Microsoft Learn Catalog API](https://learn.microsoft.com/en-us/training/support/catalog-api)
@@ -560,12 +589,10 @@ We don't just send plain text to Speech. We convert to SSML for natural prosody:
 ```
 
 **Batch Processing**:
-Episodes are generated in parallel batches:
-```yaml
-# Workflow creates a matrix of batch indices
-batch_size: 10  # Episodes per batch
-# 100 episodes → 10 parallel jobs
-```
+Episodes are generated in batches of `DEFAULT_BATCH_SIZE` (10) so progress is
+reported and a failure loses one batch rather than the whole run. The batches run
+sequentially: `host.json` pins the queue to one job at a time, and generation
+shares a single B1 instance with audio streaming.
 
 **🎓 Learn More**:
 - [SSML reference](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-synthesis-markup)
@@ -848,6 +875,18 @@ active.
 dead-lettered, because these runs are expensive and a genuine failure is unlikely
 to fix itself.
 
+`messageEncoding` is pinned to `none` to match the producer. The Storage Queues
+extension defaults to base64 while the Python SDK sends plain text, and a message
+the host cannot decode is dead-lettered **without ever invoking the trigger** —
+the job document just sits at `queued` with no error recorded anywhere. If jobs
+never start, check that `host.json` and `admin.QUEUE_MESSAGE_ENCODING` still
+agree; `test_admin.py` asserts they do.
+
+A job stuck at `queued` also blocks every later submission, because the `409`
+guard counts it as active. One left there longer than `STALE_QUEUED_AFTER_SECONDS`
+is cancelled automatically on the next submission, and `POST /api/portal/jobs/{id}/cancel`
+clears one by hand from the Jobs view.
+
 ### Admin Access
 
 The first admin claims access with a one-time bootstrap token, written by Bicep
@@ -1042,6 +1081,10 @@ GET    /api/portal/courses/{certId}/estimate       # Server-side cost estimate
 GET    /api/portal/jobs                            # Job history
 POST   /api/portal/jobs                            # Submit index/generate/refresh
 GET    /api/portal/jobs/{jobId}                    # Job progress
+POST   /api/portal/jobs/{jobId}/cancel             # Release a stuck or unwanted job
+GET    /api/portal/admins                          # Administrator list
+POST   /api/portal/admins                          # Add an administrator
+DELETE /api/portal/admins/{adminId}                # Remove an administrator
 ```
 
 Deleting a course also removes that certification's documents from the AI Search
@@ -1085,21 +1128,17 @@ For length within an episode, edit the length guidance in the narration prompt,
 
 ### "I want to add a new certification"
 
-Discovery resolves learning paths dynamically from role and product tags, so most
-exams work by typing the exam ID into the admin portal without any code change.
-If an exam resolves poorly, add it to the maps in
+Type the exam ID into the admin portal and run an index job. Resolution is driven
+by the Learn catalog, so no code change is needed for a new exam, and an ID that
+is not a real exam is rejected before any crawling starts.
+
+Check the discovery report on the course afterwards. If it says the syllabus came
+from **tag matching** and warns that the match was capped, the exam has no catalog
+study guide and the tag filter was too broad to be precise. Pin it by adding the
+learning path UIDs to
 [`src/functions/pipeline/deep_discover.py`](../src/functions/pipeline/deep_discover.py):
 
 ```python
-CERTIFICATION_ROLE_PRODUCTS = {
-    # ...existing...
-    "your-cert": {
-        "roles": ["data-engineer"],
-        "products": {"azure", "azure-storage"},
-    },
-}
-
-# Optional fallback, used when tag resolution comes up short
 CERTIFICATION_PATH_UIDS = {
     "your-cert": [
         "learn.wwl.path-uid-1",
@@ -1108,9 +1147,11 @@ CERTIFICATION_PATH_UIDS = {
 }
 ```
 
-Path UIDs come from the [Microsoft Learn Catalog API](https://learn.microsoft.com/api/catalog/);
-stale ones are detected and skipped rather than failing the run. The player lists
-whatever certifications have generated content, falling back to
+Path UIDs come from the [Microsoft Learn Catalog API](https://learn.microsoft.com/api/catalog/).
+Stale ones are dropped and reported; if every UID for a tier is stale the next
+tier takes over, so a pinned list going out of date degrades rather than breaks.
+
+The player lists whatever certifications have generated content, falling back to
 `FALLBACK_CERTIFICATIONS` in [`src/web/js/app.js`](../src/web/js/app.js) until
 the first episodes exist.
 
@@ -1148,10 +1189,19 @@ underlying exception, query Application Insights traces for the Function App.
 
 ### "Discovery found nothing"
 
-1. Check the study guide URL exists: `https://aka.ms/{CERT-ID}-StudyGuide`
-2. A brand new exam may not be in the Catalog API yet
-3. Add explicit role/product tags or path UIDs for the exam (see
-   [adding a new certification](#i-want-to-add-a-new-certification))
+Discovery no longer returns quietly empty — it raises. Read the message:
+
+- *"is not a Microsoft Learn exam"* — the code matched neither an exam record nor
+  a certification page. Check the spelling against
+  [the credentials browser](https://learn.microsoft.com/credentials/browse/).
+- *"No learning paths resolved"* — the exam exists but the catalog links no study
+  content to it. Pin the path UIDs (see
+  [adding a new certification](#i-want-to-add-a-new-certification)).
+- *"units failed to download"* — Microsoft Learn was rate limiting or unreachable.
+  Re-run the index job.
+
+If the job succeeds but the coverage grade is poor, the discovery report on the
+course lists the exam topics with no content behind them.
 
 ### "Rate limits during generation"
 
