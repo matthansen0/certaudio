@@ -473,6 +473,32 @@ def delete_course(req: func.HttpRequest) -> func.HttpResponse:
     return _json({"deleted": cert_id, "summary": summary})
 
 
+@bp.route(
+    route="portal/courses/{certificationId}/updates",
+    methods=["GET"],
+    auth_level=func.AuthLevel.ANONYMOUS,
+)
+def get_updates(req: func.HttpRequest) -> func.HttpResponse:
+    """Which episodes are stale. Read-only: generates nothing and costs nothing."""
+    _, error = _require_admin(req)
+    if error:
+        return error
+
+    cert_id = (req.route_params.get("certificationId") or "").lower()
+    if not CERTIFICATION_ID_RE.match(cert_id):
+        return _json({"error": "Invalid certificationId"}, 400)
+    if not admin_store.get_course(cert_id):
+        return _json({"error": "Course not found"}, 404)
+
+    from pipeline.orchestrator import check_updates
+
+    try:
+        return _json(check_updates(cert_id))
+    except Exception as exc:
+        logger.warning("Update check failed for %s: %s", cert_id, exc)
+        return _json({"error": f"Could not check for updates: {exc}"}, 502)
+
+
 # ------------------------------------------------------------------- estimates
 @bp.route(
     route="portal/courses/{certificationId}/estimate",

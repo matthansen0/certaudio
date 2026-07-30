@@ -1078,6 +1078,7 @@ GET    /api/portal/courses/{certId}                # Detail, job history, rates
 PATCH  /api/portal/courses/{certId}                # Display name, exam URL, published
 DELETE /api/portal/courses/{certId}                # Purge episodes, blobs, search docs
 GET    /api/portal/courses/{certId}/estimate       # Server-side cost estimate
+GET    /api/portal/courses/{certId}/updates        # Which episodes are stale (read-only, free)
 GET    /api/portal/jobs                            # Job history
 POST   /api/portal/jobs                            # Submit index/generate/refresh
 GET    /api/portal/jobs/{jobId}                    # Job progress

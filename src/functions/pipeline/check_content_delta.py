@@ -4,16 +4,14 @@ and previously indexed content.
 """
 
 import argparse
-import hashlib
 import json
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-import requests
 from azure.cosmos import CosmosClient
 from azure.identity import DefaultAzureCredential
-from bs4 import BeautifulSoup
+from .content_hash import compute_content_hash, fetch_page_content
 
 
 @dataclass
@@ -34,40 +32,6 @@ class DeltaCheckResult:
     changed_sources: list[ContentDelta]
     unchanged_count: int
     error_count: int
-
-
-def compute_content_hash(html: str) -> str:
-    """
-    Compute a hash of the main content, ignoring navigation, ads, etc.
-    """
-    soup = BeautifulSoup(html, "lxml")
-
-    # Remove elements that change frequently but aren't content
-    for element in soup.find_all(["nav", "footer", "aside", "script", "style"]):
-        element.decompose()
-
-    # Find the main content area
-    main_content = soup.find("main") or soup.find("article") or soup.find("div", class_="content")
-
-    if main_content:
-        text = main_content.get_text(separator=" ", strip=True)
-    else:
-        text = soup.get_text(separator=" ", strip=True)
-
-    # Normalize whitespace
-    text = " ".join(text.split())
-
-    return hashlib.sha256(text.encode()).hexdigest()
-
-
-def fetch_page_content(url: str) -> str:
-    """Fetch HTML content from a URL."""
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    }
-    response = requests.get(url, headers=headers, timeout=30)
-    response.raise_for_status()
-    return response.text
 
 
 def check_content_delta(
@@ -107,6 +71,8 @@ def check_content_delta(
 
     for source in sources:
         url = source["url"]
+        # contentHash is what the audio was generated from. indexedHash moves on
+        # every index run and must not be used here.
         old_hash = source.get("contentHash", "")
         episode_refs = source.get("episodeRefs", [])
 
@@ -137,8 +103,8 @@ def check_content_delta(
                     )
                 )
 
-                # Update the stored hash
-                source["contentHash"] = new_hash
+                # The baseline is NOT advanced here. save_episode moves it once
+                # the replacement audio exists, so a failed run stays outstanding.
                 source["lastChecked"] = datetime.now(timezone.utc).isoformat()
                 sources_container.upsert_item(source)
 

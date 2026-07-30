@@ -241,11 +241,27 @@ $0.25 and a couple of minutes per episode, so a full certification runs for hour
 
 ## Content Hashing for Updates
 
-Each content item has a hash stored in Cosmos DB:
-- Learning path unit: hash of unit content
-- Exam skill: hash of skill description
+Each source page gets a document in the Cosmos `sources` container carrying two
+hashes that mean deliberately different things:
 
-When Microsoft updates content, the hash changes, triggering amendment episode generation.
+| Field | Written by | Means |
+|-------|-----------|-------|
+| `indexedHash` | every index run | what the Search index currently holds |
+| `contentHash` | `save_episode`, on success | what the audio was actually generated from |
+
+Staleness compares the live page against `contentHash` only. Anchoring it to
+generation rather than to the last index means re-indexing as often as you like
+never reports stale episodes as fresh, and a generation that fails leaves its
+sources still outstanding instead of silently absorbing the change. The delta
+check deliberately does **not** advance the baseline.
+
+Both sides hash pages through `pipeline/content_hash.py`. They have to: if the
+hash stored at index time were computed differently from the one compared at
+refresh time, every page would read as changed and a selective refresh would
+quietly become a full-cost regeneration. `test_delta.py` pins them together.
+
+`GET /api/portal/courses/{certId}/updates` reports which episodes are out of
+date without generating anything, so the question costs nothing to ask.
 
 ## Understanding Audio Duration vs Microsoft's Course Times
 

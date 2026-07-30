@@ -11,6 +11,8 @@ from typing import Optional
 
 import requests
 from azure.core.credentials import AzureKeyCredential
+from . import source_store
+from .content_hash import HEADERS as PAGE_HEADERS, compute_content_hash
 from azure.identity import DefaultAzureCredential
 from azure.search.documents import SearchClient
 from azure.search.documents.indexes import SearchIndexClient
@@ -82,19 +84,20 @@ def create_search_index(index_client: SearchIndexClient, index_name: str) -> Non
     print(f"Created/updated index: {index_name}")
 
 
-def fetch_and_chunk_content(url: str, chunk_size: int = 1000) -> list[dict]:
-    """Fetch a URL and split into chunks."""
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    }
-    
+def fetch_and_chunk_content(url: str, chunk_size: int = 1000) -> tuple[list[dict], str]:
+    """Fetch a URL and split into chunks.
+
+    Also returns the page hash, computed by the same function the delta check
+    uses, so the two can never disagree about whether a page has changed.
+    """
     try:
-        response = requests.get(url, headers=headers, timeout=30)
+        response = requests.get(url, headers=PAGE_HEADERS, timeout=30)
         response.raise_for_status()
     except Exception as e:
         print(f"Error fetching {url}: {e}")
-        return []
-    
+        return [], ""
+
+    page_hash = compute_content_hash(response.text)
     soup = BeautifulSoup(response.text, "lxml")
     
     # Remove non-content elements
@@ -111,8 +114,8 @@ def fetch_and_chunk_content(url: str, chunk_size: int = 1000) -> list[dict]:
         main = soup.body
     
     if not main:
-        return []
-    
+        return [], page_hash
+
     # Extract text and split into chunks
     text = main.get_text(separator="\n", strip=True)
     
@@ -142,7 +145,7 @@ def fetch_and_chunk_content(url: str, chunk_size: int = 1000) -> list[dict]:
             "chunkId": i,
         }
         for i, chunk in enumerate(chunks)
-    ]
+    ], page_hash
 
 
 def get_embedding(text: str, openai_client: AzureOpenAI) -> list[float]:
@@ -269,7 +272,13 @@ def index_content(
                     "index", source_index, total_sources,
                     f"Indexing source {source_index} of {total_sources}",
                 )
-        chunks = fetch_and_chunk_content(url)
+        chunks, page_hash = fetch_and_chunk_content(url)
+        if page_hash:
+            try:
+                source_store.record_indexed(certification_id, url, page_hash)
+            except Exception as e:
+                # Tracking is not worth failing an index run over.
+                print(f"Warning: could not record source hash for {url}: {e}")
         
         for chunk in chunks:
             # Generate embedding

@@ -434,6 +434,7 @@ async function openCourse(certId) {
 
         renderFacts(course);
         renderDiscoveryReport(course.discoveryReport);
+        el('updates-report').innerHTML = '';
         renderIndexAge(course);
         toggleVoiceFields();
         renderEstimate();
@@ -450,6 +451,50 @@ el('course-close').addEventListener('click', () => {
     hide('confirm-panel');
     store.current = null;
 });
+
+el('check-updates').addEventListener('click', async (event) => {
+    if (!store.current) return;
+    const target = el('updates-report');
+    target.innerHTML = skeleton(2);
+    await withBusy(event.currentTarget, async () => {
+        try {
+            const r = await api(`portal/courses/${encodeURIComponent(store.current.id)}/updates`);
+            renderUpdates(r);
+        } catch (err) {
+            target.innerHTML = '';
+            fail('job-error', err);
+        }
+    });
+});
+
+function renderUpdates(r) {
+    const target = el('updates-report');
+    if (!r.tracked) {
+        target.innerHTML = `<p class="admin-warning">Nothing is tracked yet for this course.
+            Staleness is recorded when episodes are generated, so this stays empty until the
+            next generate or refresh run.${r.untracked ? ` ${r.untracked} source(s) indexed.` : ''}</p>`;
+        return;
+    }
+    const stale = r.staleEpisodes || [];
+    if (!stale.length) {
+        target.innerHTML = `<p class="admin-muted" style="margin-top:0.75rem">Up to date —
+            ${r.unchangedSources} source(s) unchanged since these episodes were generated.
+            ${r.errors ? `${r.errors} could not be checked.` : ''}</p>`;
+        return;
+    }
+    target.innerHTML = `
+        <div class="admin-report">
+            <div class="admin-report-head">
+                <strong>${stale.length} episode${stale.length === 1 ? '' : 's'} out of date</strong>
+                <span class="admin-muted" style="margin:0">${r.changedSources} source(s) changed
+                    upstream${r.errors ? `, ${r.errors} unreachable` : ''}</span>
+            </div>
+            <p class="admin-muted" style="margin:0">Run <strong>Refresh changed content</strong>
+                to regenerate only the affected batches.</p>
+            <ul class="admin-gap-list">${stale.slice(0, 12).map((e) =>
+                `<li>${escapeHtml(e)}</li>`).join('')}</ul>
+        </div>`;
+}
 
 el('job-format').addEventListener('change', () => {
     toggleVoiceFields();

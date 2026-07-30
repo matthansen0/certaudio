@@ -350,6 +350,47 @@ def load_discovery(certification_id: str) -> Optional[dict]:
         return None
 
 
+def check_updates(certification_id: str) -> dict:
+    """Report which episodes are out of date, without generating anything.
+
+    Read-only and free: it fetches the source pages and compares them against
+    the hash each episode was generated from. Nothing is written and no model
+    or speech call is made.
+    """
+    from . import source_store
+    from .content_hash import compute_content_hash, fetch_page_content
+
+    sources = source_store.list_sources(certification_id)
+    tracked = [s for s in sources if s.get("contentHash")]
+
+    changed, unchanged, errors = [], 0, 0
+    for source in tracked:
+        try:
+            live = compute_content_hash(fetch_page_content(source["url"]))
+        except Exception:
+            errors += 1
+            continue
+        if live != source["contentHash"]:
+            changed.append(
+                {"url": source["url"], "episodes": source.get("episodeRefs", [])}
+            )
+        else:
+            unchanged += 1
+
+    stale_episodes = sorted({e for c in changed for e in c["episodes"]})
+    return {
+        "certificationId": certification_id,
+        # Sources exist but none has been generated from yet: indexed, never voiced.
+        "tracked": len(tracked),
+        "untracked": len(sources) - len(tracked),
+        "changedSources": len(changed),
+        "unchangedSources": unchanged,
+        "errors": errors,
+        "staleEpisodes": stale_episodes,
+        "changed": changed[:50],
+    }
+
+
 def run_index(
     certification_id: str,
     audio_format: str = "instructional",

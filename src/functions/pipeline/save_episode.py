@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from azure.cosmos import CosmosClient
 from azure.identity import DefaultAzureCredential
 
+from . import source_store
+
 
 def save_episode(
     certification_id: str,
@@ -90,28 +92,13 @@ def save_episode(
     # Upsert episode
     container.upsert_item(episode_doc)
 
-    # Update source documents with episode reference
-    sources_container = database.get_container_client("sources")
+    # Move the staleness baseline only now that the episode has been stored:
+    # a failed run must leave its sources still marked as changed.
     for url in source_urls:
         try:
-            # Query for source document
-            query = "SELECT * FROM c WHERE c.url = @url AND c.certificationId = @certId"
-            params = [
-                {"name": "@url", "value": url},
-                {"name": "@certId", "value": certification_id},
-            ]
-            sources = list(
-                sources_container.query_items(
-                    query=query, parameters=params, enable_cross_partition_query=True
-                )
+            source_store.record_generated(
+                certification_id, url, episode_id, content_hash
             )
-
-            if sources:
-                source_doc = sources[0]
-                if episode_id not in source_doc.get("episodeRefs", []):
-                    source_doc.setdefault("episodeRefs", []).append(episode_id)
-                    sources_container.upsert_item(source_doc)
-
         except Exception as e:
             print(f"Warning: Could not update source reference for {url}: {e}")
 
