@@ -43,6 +43,10 @@ def _jobs():
     return _database().get_container_client("jobs")
 
 
+def _courses():
+    return _database().get_container_client("courses")
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -140,6 +144,8 @@ def create_job(
     voices: dict,
     force: bool,
     requested_by: str,
+    exam_url: str = "",
+    estimate: Optional[dict] = None,
 ) -> dict:
     job = {
         "id": str(uuid.uuid4()),
@@ -148,11 +154,14 @@ def create_job(
         "certificationId": certification_id,
         "audioFormat": audio_format,
         "voices": voices,
+        "examUrl": exam_url,
         "force": force,
         "status": "queued",
         "phase": "queued",
         "progress": {"current": 0, "total": 0, "message": "Waiting for worker"},
         "requestedBy": requested_by,
+        "estimate": estimate,
+        "actualCost": None,
         "createdAt": _now(),
         "startedAt": None,
         "completedAt": None,
@@ -222,3 +231,53 @@ def record_progress(job_id: str, phase: str, current: int, total: int, message: 
         phase=phase,
         progress={"current": current, "total": total, "message": message},
     )
+
+
+# -------------------------------------------------------------------- courses
+def get_course(certification_id: str) -> Optional[dict]:
+    try:
+        return _courses().read_item(certification_id, partition_key=certification_id)
+    except CosmosResourceNotFoundError:
+        return None
+
+
+def list_courses() -> list[dict]:
+    query = "SELECT * FROM c ORDER BY c.id"
+    return list(_courses().query_items(query=query, enable_cross_partition_query=True))
+
+
+def upsert_course(certification_id: str, **fields) -> dict:
+    """Merge fields into a course record, creating it if absent."""
+    course = get_course(certification_id) or {
+        "id": certification_id,
+        "certificationId": certification_id,
+        "displayName": "",
+        "examUrl": "",
+        "audioFormat": "",
+        "voices": {},
+        "published": True,
+        "createdAt": _now(),
+        "lastDiscoveryAt": None,
+        "discoveryBlobPath": None,
+        "unitCount": 0,
+        "totalWords": 0,
+        "lastGeneratedAt": None,
+        "lastJobId": None,
+        "episodeCount": 0,
+        "totalDurationSeconds": 0,
+        "measuredCharsPerEpisode": None,
+        "lastEstimateUsd": None,
+        "lastActualUsd": None,
+    }
+    course.update(fields)
+    course["updatedAt"] = _now()
+    _courses().upsert_item(course)
+    return course
+
+
+def delete_course(certification_id: str) -> bool:
+    try:
+        _courses().delete_item(certification_id, partition_key=certification_id)
+        return True
+    except CosmosResourceNotFoundError:
+        return False

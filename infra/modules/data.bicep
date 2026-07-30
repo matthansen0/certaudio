@@ -204,6 +204,33 @@ resource jobsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/conta
   }
 }
 
+// Admin portal: course-level metadata (voices, exam URL, publish state, index
+// age, last cost). Episodes alone cannot answer "which voice was this made
+// with", so this is the source of truth the portal reads.
+resource coursesContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = {
+  parent: database
+  name: 'courses'
+  properties: {
+    resource: {
+      id: 'courses'
+      partitionKey: {
+        paths: ['/id']
+        kind: 'Hash'
+      }
+      indexingPolicy: {
+        indexingMode: 'consistent'
+        automatic: true
+        includedPaths: [
+          { path: '/*' }
+        ]
+        excludedPaths: [
+          { path: '/"_etag"/?' }
+        ]
+      }
+    }
+  }
+}
+
 // Storage Account
 // NOTE: Tenant policy enforces allowSharedKeyAccess=false and allowBlobPublicAccess=false via modify effects.
 // Set these explicitly to avoid policy-driven drift.
