@@ -6,6 +6,8 @@ Run:  python -m pytest src/functions/test_admin.py -v
 
 import base64
 import json
+import pathlib
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import azure.functions as func
@@ -68,6 +70,7 @@ ADMIN_ROUTES = [
     ("get_jobs", "GET", None, None),
     ("post_job", "POST", None, {"certificationId": "dp-700"}),
     ("get_job", "GET", {"jobId": "j1"}, None),
+    ("cancel_job", "POST", {"jobId": "j1"}, None),
     ("get_voices", "GET", None, None),
     ("get_courses", "GET", None, None),
     ("get_course", "GET", {"certificationId": "dp-700"}, None),
@@ -345,3 +348,141 @@ def test_default_voices_pass_validation(voice):
     The Dragon HD names contain a colon, which an earlier pattern rejected.
     """
     assert admin.VOICE_NAME_RE.match(voice), voice
+
+
+# ---------------------------------------------------------------------------
+# Queue contract
+# ---------------------------------------------------------------------------
+
+class _FakeQueue:
+    def __init__(self):
+        self.sent = []
+
+    def create_queue(self):
+        pass
+
+    def send_message(self, content):
+        self.sent.append(content)
+
+
+def test_host_queue_encoding_matches_the_producer():
+    """A mismatch here dead-letters every job without ever invoking the trigger.
+
+    The Storage Queues extension defaults to base64 while the Python SDK sends
+    plain text, so the job document sits in "queued" forever with no error
+    anywhere. The two sides have to be pinned together explicitly.
+    """
+    host = json.loads((pathlib.Path(__file__).parent / "host.json").read_text())
+    assert host["extensions"]["queues"]["messageEncoding"] == admin.QUEUE_MESSAGE_ENCODING
+
+
+def test_job_submission_enqueues_plain_json():
+    queue = _FakeQueue()
+    req = _request(
+        method="POST",
+        headers=_principal_header(),
+        body={"mode": "index", "certificationId": "dp-700"},
+    )
+    with patch.object(admin.admin_store, "is_admin", return_value=True), \
+            patch.object(admin.admin_store, "active_job", return_value=None), \
+            patch.object(
+                admin.admin_store,
+                "create_job",
+                return_value={"jobId": "job-1", "status": "queued"},
+            ), \
+            patch.object(admin, "_queue_client", return_value=queue):
+        response = _fn("post_job")(req)
+
+    assert response.status_code == 202
+    # Decodes as UTF-8 JSON rather than base64, matching messageEncoding "none".
+    assert json.loads(queue.sent[0]) == {"jobId": "job-1"}
+
+
+# ---------------------------------------------------------------------------
+# Stuck job recovery
+# ---------------------------------------------------------------------------
+
+def _aged(seconds: int) -> str:
+    return (datetime.now(timezone.utc) - timedelta(seconds=seconds)).isoformat()
+
+
+def test_is_stale_flags_a_queued_job_no_worker_claimed():
+    assert admin.admin_store.is_stale({"status": "queued", "createdAt": _aged(3600)})
+
+
+def test_is_stale_ignores_a_freshly_queued_job():
+    assert not admin.admin_store.is_stale({"status": "queued", "createdAt": _aged(5)})
+
+
+def test_is_stale_ignores_running_jobs():
+    """Generation legitimately runs for hours; only unclaimed jobs are stale."""
+    assert not admin.admin_store.is_stale({"status": "running", "createdAt": _aged(86400)})
+
+
+def test_stale_queued_job_does_not_block_new_submissions():
+    """A job the worker never picked up must not lock the portal out forever."""
+    stale = {"jobId": "orphan", "status": "queued", "createdAt": _aged(3600)}
+    req = _request(
+        method="POST",
+        headers=_principal_header(),
+        body={"mode": "index", "certificationId": "dp-700"},
+    )
+    with patch.object(admin.admin_store, "is_admin", return_value=True), \
+            patch.object(admin.admin_store, "active_job", return_value=stale), \
+            patch.object(admin.admin_store, "mark_cancelled") as mark_cancelled, \
+            patch.object(
+                admin.admin_store,
+                "create_job",
+                return_value={"jobId": "job-2", "status": "queued"},
+            ), \
+            patch.object(admin, "_queue_client", return_value=_FakeQueue()):
+        response = _fn("post_job")(req)
+
+    assert response.status_code == 202
+    mark_cancelled.assert_called_once()
+    assert mark_cancelled.call_args[0][0] == "orphan"
+
+
+def test_running_job_still_blocks_new_submissions():
+    running = {"jobId": "busy", "status": "running", "createdAt": _aged(86400)}
+    req = _request(
+        method="POST",
+        headers=_principal_header(),
+        body={"mode": "index", "certificationId": "dp-700"},
+    )
+    with patch.object(admin.admin_store, "is_admin", return_value=True), \
+            patch.object(admin.admin_store, "active_job", return_value=running):
+        response = _fn("post_job")(req)
+
+    assert response.status_code == 409
+    assert _body(response)["jobId"] == "busy"
+
+
+def test_cancel_job_marks_an_active_job_cancelled():
+    active = {"jobId": "j1", "status": "queued"}
+    req = _request(
+        method="POST", headers=_principal_header(), route_params={"jobId": "j1"}
+    )
+    with patch.object(admin.admin_store, "is_admin", return_value=True), \
+            patch.object(admin.admin_store, "get_job", return_value=active), \
+            patch.object(
+                admin.admin_store,
+                "mark_cancelled",
+                return_value={"jobId": "j1", "status": "cancelled"},
+            ) as mark_cancelled:
+        response = _fn("cancel_job")(req)
+
+    assert response.status_code == 200
+    mark_cancelled.assert_called_once()
+
+
+def test_cancel_job_rejects_a_finished_job():
+    req = _request(
+        method="POST", headers=_principal_header(), route_params={"jobId": "j1"}
+    )
+    done = {"jobId": "j1", "status": "succeeded"}
+    with patch.object(admin.admin_store, "is_admin", return_value=True), \
+            patch.object(admin.admin_store, "get_job", return_value=done):
+        response = _fn("cancel_job")(req)
+
+    assert response.status_code == 409

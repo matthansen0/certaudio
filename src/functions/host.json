@@ -14,7 +14,8 @@
       "batchSize": 1,
       "newBatchThreshold": 0,
       "maxDequeueCount": 2,
-      "visibilityTimeout": "00:05:00"
+      "visibilityTimeout": "00:05:00",
+      "messageEncoding": "none"
     }
   },
   "extensionBundle": {

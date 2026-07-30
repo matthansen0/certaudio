@@ -16,6 +16,9 @@ from azure.identity import DefaultAzureCredential
 
 BOOTSTRAP_DOC_ID = "__bootstrap__"
 ACTIVE_JOB_STATES = ("queued", "running")
+# A queued job the worker never picked up. Pickup is near-instant when the queue
+# trigger is healthy, so anything older than this is orphaned, not waiting.
+STALE_QUEUED_AFTER_SECONDS = 900
 
 _client = None
 _credential = None
@@ -132,9 +135,27 @@ def claim_bootstrap(user: dict) -> dict:
 
 # ----------------------------------------------------------------------- jobs
 def active_job() -> Optional[dict]:
-    query = "SELECT * FROM c WHERE c.status IN ('queued', 'running')"
+    states = ", ".join(f"'{state}'" for state in ACTIVE_JOB_STATES)
+    query = f"SELECT * FROM c WHERE c.status IN ({states}) ORDER BY c.createdAt DESC"
     results = list(_jobs().query_items(query=query, enable_cross_partition_query=True))
     return results[0] if results else None
+
+
+def is_stale(job: dict) -> bool:
+    """True when a job is queued but no worker ever claimed it.
+
+    Running jobs are never stale — a generation run legitimately takes hours.
+    """
+    if job.get("status") != "queued":
+        return False
+    try:
+        created = datetime.fromisoformat(job["createdAt"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    age = (datetime.now(timezone.utc) - created).total_seconds()
+    return age > STALE_QUEUED_AFTER_SECONDS
 
 
 def create_job(
@@ -225,6 +246,17 @@ def mark_failed(job_id: str, error: str) -> Optional[dict]:
     )
 
 
+def mark_cancelled(job_id: str, reason: str = "") -> Optional[dict]:
+    return update_job(
+        job_id,
+        status="cancelled",
+        phase="cancelled",
+        completedAt=_now(),
+        error=reason[:2000] or None,
+        progress={"current": 0, "total": 0, "message": reason or "Cancelled"},
+    )
+
+
 def record_progress(job_id: str, phase: str, current: int, total: int, message: str) -> None:
     update_job(
         job_id,
@@ -259,6 +291,7 @@ def upsert_course(certification_id: str, **fields) -> dict:
         "createdAt": _now(),
         "lastDiscoveryAt": None,
         "discoveryBlobPath": None,
+        "discoveryReport": None,
         "unitCount": 0,
         "totalWords": 0,
         "lastGeneratedAt": None,

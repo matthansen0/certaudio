@@ -29,6 +29,11 @@ logger = logging.getLogger(__name__)
 # "admin" route prefix for its own management API and refuses to serve any
 # function whose route starts with it.
 QUEUE_NAME = "content-jobs"
+# The Storage Queues extension defaults to base64 but the Python SDK sends plain
+# text, and a message the host cannot decode is dead-lettered without ever
+# invoking the trigger — the job just sits in "queued" forever. host.json pins
+# the host to this value; test_admin.py asserts the two still agree.
+QUEUE_MESSAGE_ENCODING = "none"
 VALID_MODES = ("index", "generate", "refresh")
 VALID_FORMATS = ("instructional", "podcast")
 
@@ -237,6 +242,12 @@ def post_job(req: func.HttpRequest) -> func.HttpResponse:
     # One generation at a time: these runs are long and compete for the B1 plan
     # with audio streaming.
     existing = admin_store.active_job()
+    if existing and admin_store.is_stale(existing):
+        admin_store.mark_cancelled(
+            existing["jobId"], "No worker claimed this job; superseded by a new request"
+        )
+        logger.warning("Cancelled stale queued job %s", existing["jobId"])
+        existing = None
     if existing:
         return _json(
             {"error": "A job is already running", "jobId": existing["jobId"]}, 409
@@ -290,6 +301,30 @@ def get_job(req: func.HttpRequest) -> func.HttpResponse:
     if not job:
         return _json({"error": "Job not found"}, 404)
     return _json(job)
+
+
+@bp.route(
+    route="portal/jobs/{jobId}/cancel",
+    methods=["POST"],
+    auth_level=func.AuthLevel.ANONYMOUS,
+)
+def cancel_job(req: func.HttpRequest) -> func.HttpResponse:
+    """Mark a job cancelled so it stops blocking new submissions.
+
+    A running job is not interrupted mid-step; run_content_job checks the status
+    on redelivery, and the record stops counting as active either way.
+    """
+    _, error = _require_admin(req)
+    if error:
+        return error
+
+    job = admin_store.get_job(req.route_params.get("jobId"))
+    if not job:
+        return _json({"error": "Job not found"}, 404)
+    if job["status"] not in admin_store.ACTIVE_JOB_STATES:
+        return _json({"error": f"Job is already {job['status']}"}, 409)
+
+    return _json({"job": admin_store.mark_cancelled(job["jobId"], "Cancelled by admin")})
 
 
 # --------------------------------------------------------------------- voices
@@ -488,6 +523,7 @@ def _record_course_outcome(job: dict, result: dict) -> None:
             discoveryBlobPath=result.get("discoveryBlobPath"),
             unitCount=result.get("unitCount", 0),
             totalWords=result.get("totalWords", 0),
+            discoveryReport=result.get("discoveryReport"),
         )
         if job.get("examUrl"):
             fields["examUrl"] = job["examUrl"]
