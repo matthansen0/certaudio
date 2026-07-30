@@ -92,14 +92,36 @@ def _discover(certification_id: str, progress: ProgressFn, exam_url: Optional[st
         discovery = deep_discover.result_to_dict(result)
     else:
         catalog = deep_discover.fetch_catalog()
+        cert_ref = deep_discover.resolve_certification(certification_id, catalog)
+        if cert_ref is None:
+            raise RuntimeError(
+                f"'{certification_id}' is not a Microsoft Learn exam. Check the exam "
+                f"code at https://learn.microsoft.com/credentials/browse/"
+            )
+
         result = deep_discover.deep_discover(
             certification_id=certification_id,
             catalog=catalog,
+            cert_ref=cert_ref,
         )
-        exam_skills = deep_discover.fetch_exam_skills_outline(
-            certification_id, study_guide_url=exam_url
+        progress("discover", 0, 1, "Reading the exam skills outline")
+        exam_skills = deep_discover.merge_exam_skills(
+            deep_discover.fetch_exam_skills_outline(
+                certification_id, study_guide_url=exam_url
+            ),
+            deep_discover.exam_skills_from_catalog(cert_ref),
         )
-        discovery = deep_discover.result_to_dict(result, exam_skills)
+
+        # Learning-path content is what gets narrated; the sweep is what proves
+        # the exam objectives are actually represented in it.
+        progress("discover", 0, 1, "Checking exam skill coverage")
+        outline = deep_discover.result_to_dict(result)["skillsOutline"]
+        coverage = deep_discover.coverage_sweep(exam_skills, outline, catalog)
+        confidence = deep_discover.compute_confidence_score(coverage, exam_skills)
+        discovery = deep_discover.result_to_dict(
+            result, exam_skills, coverage, confidence
+        )
+        _assert_discovery_is_usable(certification_id, result, exam_skills, discovery)
 
     if not isinstance(discovery.get("skillsOutline"), list):
         raise RuntimeError("Discovery did not produce a skillsOutline array")
@@ -108,14 +130,54 @@ def _discover(certification_id: str, progress: ProgressFn, exam_url: Optional[st
     if not discovery["sourceUrls"]:
         raise RuntimeError("Discovery did not produce any source URLs")
 
+    grade = (discovery.get("confidence") or {}).get("grade")
     progress(
         "discover",
         1,
         1,
         f"Discovered {len(discovery['skillsOutline'])} domains, "
-        f"{len(discovery['sourceUrls'])} sources",
+        f"{len(discovery['sourceUrls'])} sources"
+        + (f", coverage {grade}" if grade else ""),
     )
     return discovery
+
+
+# Beyond this share of units returning nothing, the outline is structurally
+# complete but the content behind it is missing, which reads as success.
+MAX_FAILED_UNIT_RATIO = 0.25
+
+
+def _assert_discovery_is_usable(
+    certification_id: str, result, exam_skills: list[dict], discovery: dict
+) -> None:
+    """Fail loudly on the partial results that used to look like success."""
+    if not result.learning_paths:
+        warnings = "; ".join(result.resolution.get("warnings", [])) or "no reason given"
+        raise RuntimeError(
+            f"No learning paths resolved for {certification_id} ({warnings}). "
+            f"The exam exists but the catalog links no study content to it."
+        )
+
+    attempted = result.total_units
+    if attempted and result.units_failed / attempted > MAX_FAILED_UNIT_RATIO:
+        raise RuntimeError(
+            f"{result.units_failed} of {attempted} units failed to download. "
+            f"The outline would look complete with no content behind it."
+        )
+
+    if not result.total_words:
+        raise RuntimeError(
+            f"Discovered {attempted} units for {certification_id} but no text. "
+            f"Every page fetch returned empty."
+        )
+
+    if not exam_skills:
+        # Not fatal: learning-path content still generates. But it means the
+        # coverage numbers are measured against nothing.
+        print(
+            f"  Warning: no exam skills outline for {certification_id}; "
+            f"coverage could not be verified"
+        )
 
 
 def _index(certification_id: str, source_urls: list[str], progress: ProgressFn) -> None:
@@ -222,6 +284,30 @@ def _discovery_blob(certification_id: str):
     )
 
 
+def discovery_report(discovery: dict) -> dict:
+    """Compact, portal-facing summary of how complete a discovery run was."""
+    coverage = discovery.get("coverageReport") or {}
+    confidence = discovery.get("confidence") or {}
+    resolution = discovery.get("resolution") or {}
+    return {
+        "examFound": resolution.get("examFound"),
+        "examTitle": resolution.get("examTitle", ""),
+        "resolvedPaths": resolution.get("resolvedPaths", 0),
+        "resolvedStandaloneModules": resolution.get("resolvedStandaloneModules", 0),
+        "sources": resolution.get("sources", {}),
+        "warnings": resolution.get("warnings", []),
+        "unitsDiscovered": discovery.get("totalUnits", 0),
+        "unitsFailed": discovery.get("unitsFailed", 0),
+        "coverageGrade": confidence.get("grade", ""),
+        "coverageScore": confidence.get("overallScore", 0),
+        "topicsCovered": coverage.get("coveredCount", 0),
+        "topicsSupplemented": coverage.get("supplementedCount", 0),
+        "topicsUncovered": coverage.get("gapCount", 0),
+        # Kept verbatim: this is the actionable half of the report.
+        "gaps": coverage.get("gaps", [])[:100],
+    }
+
+
 def _save_discovery(
     certification_id: str,
     discovery: dict,
@@ -244,6 +330,7 @@ def _save_discovery(
         "totalWords": discovery.get("totalWords", 0),
         "estimatedEpisodes": discovery.get("estimatedEpisodes", 0),
         "unitCount": unit_count,
+        "discoveryReport": discovery_report(discovery),
     }
     _discovery_blob(certification_id).upload_blob(
         json.dumps(artifact),
@@ -294,6 +381,7 @@ def run_index(
         "totalWords": discovery.get("totalWords", 0),
         "sourceCount": len(discovery["sourceUrls"]),
         "discoveryBlobPath": blob_path,
+        "discoveryReport": discovery_report(discovery),
     }
 
 

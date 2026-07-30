@@ -7,9 +7,9 @@ modules, and units for a certification, then fetches the actual content from eac
 Content hierarchy:
 - Certification → Learning Paths → Modules → Units → Content
 
-Discovery modes:
-- deep: Learning paths only (~5-7 hours for DP-700)
-- comprehensive: Learning paths + Exam skills outline (~10-12 hours for DP-700)
+Discovery:
+- One path: learning paths plus the exam skills outline, reconciled by a coverage sweep.
+- Certification resolution is catalog-driven; see docs/CONTENT_DISCOVERY.md.
 
 See docs/CONTENT_DISCOVERY.md for detailed explanation of content sources.
 """
@@ -22,7 +22,7 @@ import time
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from typing import Optional
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -34,6 +34,10 @@ HEADERS = {
 REQUEST_DELAY = 0.3  # Be respectful to Microsoft's servers
 CATALOG_URL = "https://learn.microsoft.com/api/catalog/"
 LEARN_SEARCH_URL = "https://learn.microsoft.com/api/search"
+# Synthetic parent for study-guide modules that belong to no learning path.
+STANDALONE_MODULES_UID = "__exam_study_guide_modules__"
+# Ceiling on the tag-matching fallback, which is broad by nature.
+MAX_TAG_FILTER_PATHS = 25
 
 # Dynamic cert → role + product mapping for catalog-based learning path resolution.
 # The catalog API tags every learning path with roles and products. By filtering on
@@ -178,6 +182,8 @@ class DeepDiscoveryResult:
     total_units: int
     total_words: int
     estimated_episodes: int
+    units_failed: int = 0
+    resolution: dict = field(default_factory=dict)
 
 
 def fetch_catalog() -> dict:
@@ -193,39 +199,49 @@ def fetch_catalog() -> dict:
 
 
 def resolve_learning_paths_dynamic(
-    certification_id: str, catalog: dict
+    certification_id: str,
+    catalog: dict,
+    roles: Optional[list[str]] = None,
+    products: Optional[list[str]] = None,
 ) -> tuple[list[str], str]:
     """
-    Dynamically resolve learning path UIDs by filtering the catalog on role + product tags.
+    Resolve learning path UIDs by filtering the catalog on role + product tags.
 
-    This replaces the brittle hardcoded UID approach. Microsoft frequently renames
-    or restructures learning paths, causing hardcoded UIDs to go stale.
+    *roles* and *products* normally come from the exam's own catalog record, which
+    works for every exam. CERTIFICATION_ROLE_PRODUCTS is only consulted when the
+    catalog has nothing, and covers a handful of exams by hand.
 
     Returns:
         (list of learning path UIDs, resolution method description)
     """
     cert_lower = certification_id.lower()
-    mapping = CERTIFICATION_ROLE_PRODUCTS.get(cert_lower)
+    title_keywords: list[str] = []
 
-    if not mapping:
-        # No role/product mapping — fall back to hardcoded or product search
-        return [], "no-mapping"
+    if roles or products:
+        target_roles = set(roles or [])
+        target_products = set(products or [])
+        method = "catalog-tags"
+    else:
+        mapping = CERTIFICATION_ROLE_PRODUCTS.get(cert_lower)
+        if not mapping:
+            return [], "no-mapping"
+        target_roles = set(mapping.get("roles", []))
+        target_products = set(mapping.get("products", []))
+        title_keywords = [kw.lower() for kw in mapping.get("title_keywords", [])]
+        method = "curated-tags"
 
-    target_roles = set(mapping.get("roles", []))
-    target_products = set(mapping.get("products", []))
-    title_keywords = [kw.lower() for kw in mapping.get("title_keywords", [])]
-    matched_uids = []
+    matched: list[tuple[int, str]] = []
 
     for path in catalog.get("learningPaths", []):
         path_roles = set(path.get("roles", []))
         path_products = set(path.get("products", []))
 
         # Must share at least one role
-        if not path_roles.intersection(target_roles):
+        if target_roles and not path_roles.intersection(target_roles):
             continue
 
-        # Must share at least one product
-        if not path_products.intersection(target_products):
+        overlap = path_products.intersection(target_products)
+        if target_products and not overlap:
             continue
 
         # Optional title keyword filter (for broad certs like az-900)
@@ -234,9 +250,261 @@ def resolve_learning_paths_dynamic(
             if not any(kw in title_lower for kw in title_keywords):
                 continue
 
-        matched_uids.append(path["uid"])
+        matched.append((len(overlap), path["uid"]))
 
-    return matched_uids, "dynamic"
+    # Most product overlap first: role+product alone matches everything Microsoft
+    # tags "administrator" + "azure", which is far wider than any one exam.
+    matched.sort(key=lambda item: (-item[0], item[1]))
+    return [uid for _, uid in matched], method
+
+
+# ---------------------------------------------------------------------------
+# Catalog-driven certification resolution
+# ---------------------------------------------------------------------------
+
+@dataclass
+class CertificationRef:
+    """What the Learn catalog knows about one exam.
+
+    `study_guide` is Microsoft's own curated content list for the exam, so it is
+    preferred over any tag heuristic. It contains bare modules as well as
+    learning paths.
+    """
+    certification_id: str
+    exam_uid: str = ""
+    certification_slug: str = ""
+    title: str = ""
+    url: str = ""
+    skills_pdf_url: str = ""
+    skills_measured: list[str] = field(default_factory=list)
+    study_guide_paths: list[str] = field(default_factory=list)
+    study_guide_modules: list[str] = field(default_factory=list)
+    roles: list[str] = field(default_factory=list)
+    products: list[str] = field(default_factory=list)
+    sources: list[str] = field(default_factory=list)
+
+
+def _split_study_guide(entries) -> tuple[list[str], list[str]]:
+    paths, modules = [], []
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            continue
+        uid, kind = entry.get("uid"), entry.get("type")
+        if not uid:
+            continue
+        if kind == "learningPath":
+            paths.append(uid)
+        elif kind == "module":
+            modules.append(uid)
+    return paths, modules
+
+
+def resolve_certification_slug(certification_id: str) -> str:
+    """Follow the exam page redirect to the certification that owns the exam.
+
+    Only 141 of the ~500 exam codes have a record in the catalog's `exams`
+    collection, and the current role-based ones (az-104, dp-700, ai-102 ...) are
+    not among them. `mergedCertifications` has no exam field to join on, so this
+    redirect is the only reliable exam-code -> certification link.
+    """
+    url = (
+        "https://learn.microsoft.com/en-us/credentials/certifications/exams/"
+        f"{certification_id.lower()}/"
+    )
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=20, allow_redirects=True)
+    except Exception as e:
+        print(f"  Warning: could not resolve the certification page for {certification_id}: {e}")
+        return ""
+    if resp.status_code != 200:
+        return ""
+
+    parts = [p for p in urlparse(resp.url).path.split("/") if p]
+    if "certifications" not in parts:
+        return ""
+    tail = parts[parts.index("certifications") + 1:]
+    # A single segment means we landed on a certification page; two means we
+    # stayed on /exams/<code>/, which has no certification of its own.
+    return tail[0] if len(tail) == 1 else ""
+
+
+def _certification_records(slug: str, catalog: dict):
+    if not slug:
+        return
+    needle = f"/certifications/{slug}/"
+    for collection in ("mergedCertifications", "certifications"):
+        for record in catalog.get(collection, []):
+            if needle in (record.get("url") or ""):
+                yield collection, record
+
+
+def resolve_certification(
+    certification_id: str, catalog: dict, slug: Optional[str] = None
+) -> Optional[CertificationRef]:
+    """Look an exam up in the catalog and collect everything it points at.
+
+    Returns None when neither an exam nor a certification can be found, which is
+    the cheapest way to reject a certification ID that does not exist.
+    """
+    cert_lower = certification_id.lower()
+    wanted_uid = f"exam.{cert_lower}"
+    ref = CertificationRef(certification_id=cert_lower)
+
+    for record in catalog.get("exams", []):
+        if record.get("uid", "").lower() == wanted_uid or (
+            record.get("display_name", "").lower() == cert_lower
+        ):
+            paths, modules = _split_study_guide(record.get("study_guide"))
+            ref.exam_uid = record.get("uid", wanted_uid)
+            ref.title = record.get("title", "")
+            ref.url = record.get("url", "")
+            ref.skills_pdf_url = record.get("pdf_download_url", "")
+            ref.study_guide_paths.extend(paths)
+            ref.study_guide_modules.extend(modules)
+            ref.roles.extend(record.get("roles") or [])
+            ref.products.extend(record.get("products") or [])
+            ref.sources.append("exam")
+            break
+
+    if slug is None:
+        slug = resolve_certification_slug(cert_lower)
+    ref.certification_slug = slug
+
+    for collection, record in _certification_records(slug, catalog):
+        cert_paths, cert_modules = _split_study_guide(record.get("study_guide"))
+        ref.study_guide_paths.extend(cert_paths)
+        ref.study_guide_modules.extend(cert_modules)
+        ref.skills_measured.extend(record.get("skills") or [])
+        ref.roles.extend(record.get("roles") or [])
+        ref.products.extend(record.get("products") or [])
+        ref.title = ref.title or record.get("title", "")
+        ref.url = ref.url or record.get("url", "")
+        ref.sources.append(f"{collection}:{record.get('uid', '')}")
+
+    # Multi-exam certifications do carry an exams array; use it when the exam has
+    # its own record but no certification page of its own.
+    if ref.exam_uid and not slug:
+        for record in catalog.get("certifications", []):
+            if ref.exam_uid not in (record.get("exams") or []):
+                continue
+            cert_paths, cert_modules = _split_study_guide(record.get("study_guide"))
+            ref.study_guide_paths.extend(cert_paths)
+            ref.study_guide_modules.extend(cert_modules)
+            ref.skills_measured.extend(record.get("skills") or [])
+            ref.roles.extend(record.get("roles") or [])
+            ref.products.extend(record.get("products") or [])
+            ref.sources.append(f"certifications:{record.get('uid', '')}")
+
+    if not ref.sources:
+        return None
+
+    ref.study_guide_paths = _dedupe(ref.study_guide_paths)
+    ref.study_guide_modules = _dedupe(ref.study_guide_modules)
+    ref.roles = _dedupe(ref.roles)
+    ref.products = _dedupe(ref.products)
+    ref.skills_measured = _dedupe(ref.skills_measured)
+    return ref
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    seen, out = set(), []
+    for value in values:
+        if value and value not in seen:
+            seen.add(value)
+            out.append(value)
+    return out
+
+
+def resolve_content_sources(
+    certification_id: str,
+    catalog: dict,
+    cert_ref: Optional[CertificationRef] = None,
+    slug: Optional[str] = None,
+) -> tuple[list[str], list[str], dict]:
+    """Union every place the catalog says this exam's content lives.
+
+    Returns (learning path UIDs, standalone module UIDs, report). The report is
+    persisted so a thin result is attributable to a source rather than a mystery.
+    """
+    cert_lower = certification_id.lower()
+    paths_by_uid = {p["uid"] for p in catalog.get("learningPaths", [])}
+    modules_by_uid = {m["uid"] for m in catalog.get("modules", [])}
+
+    report: dict = {"certificationId": cert_lower, "sources": {}, "warnings": []}
+    path_uids: list[str] = []
+    module_uids: list[str] = []
+
+    if cert_ref is None:
+        cert_ref = resolve_certification(cert_lower, catalog, slug=slug)
+
+    def live(uids: list[str], known: set, label: str) -> list[str]:
+        """Keep only UIDs the catalog still publishes, and say so when it doesn't."""
+        kept = [uid for uid in _dedupe(uids) if uid in known]
+        missing = len(_dedupe(uids)) - len(kept)
+        if missing:
+            report["warnings"].append(
+                f"{missing} {label} UID(s) from the {label} list are no longer in the catalog"
+            )
+        return kept
+
+    if cert_ref is None:
+        report["warnings"].append(
+            f"No exam or certification record for '{cert_lower}' in the Microsoft Learn catalog"
+        )
+        report["examFound"] = False
+    else:
+        report["examFound"] = True
+        report["examUid"] = cert_ref.exam_uid
+        report["certificationSlug"] = cert_ref.certification_slug
+        report["examTitle"] = cert_ref.title
+        report["skillsMeasuredCount"] = len(cert_ref.skills_measured)
+        report["skillsPdfUrl"] = cert_ref.skills_pdf_url
+        module_uids = live(cert_ref.study_guide_modules, modules_by_uid, "module")
+        path_uids = live(cert_ref.study_guide_paths, paths_by_uid, "study guide")
+        if path_uids or module_uids:
+            report["sources"]["studyGuide"] = {
+                "paths": len(path_uids),
+                "modules": len(module_uids),
+                "from": cert_ref.sources,
+            }
+
+    # Each tier is validated before the next is considered: the hand-maintained
+    # UIDs go stale as Microsoft restructures, and a tier that resolves to
+    # nothing must fall through rather than yield an empty syllabus.
+    if not path_uids and cert_lower in CERTIFICATION_PATH_UIDS:
+        curated = live(CERTIFICATION_PATH_UIDS[cert_lower], paths_by_uid, "curated")
+        if curated:
+            path_uids = curated
+            report["sources"]["curatedUids"] = {"paths": len(curated)}
+
+    # Tag filtering is the last resort: role + product alone pulls in every path
+    # Microsoft tags for the product family, which for az-104 is 116 paths and
+    # ~4,200 units of largely off-syllabus content. Precision gap-filling is
+    # coverage_sweep's job, not this one's.
+    if not path_uids:
+        tag_paths, tag_method = resolve_learning_paths_dynamic(
+            cert_lower,
+            catalog,
+            roles=cert_ref.roles if cert_ref else None,
+            products=cert_ref.products if cert_ref else None,
+        )
+        tag_paths = [uid for uid in tag_paths if uid in paths_by_uid]
+        path_uids = tag_paths[:MAX_TAG_FILTER_PATHS]
+        report["sources"]["tagFilter"] = {
+            "method": tag_method,
+            "paths": len(path_uids),
+            "matchedBeforeCap": len(tag_paths),
+        }
+        if len(tag_paths) > MAX_TAG_FILTER_PATHS:
+            report["warnings"].append(
+                f"Tag matching returned {len(tag_paths)} learning paths; capped at "
+                f"{MAX_TAG_FILTER_PATHS}. Add {cert_lower} to CERTIFICATION_PATH_UIDS "
+                f"to pin the syllabus."
+            )
+
+    report["resolvedPaths"] = len(path_uids)
+    report["resolvedStandaloneModules"] = len(module_uids)
+    return path_uids, module_uids, report
 
 
 # ---------------------------------------------------------------------------
@@ -747,6 +1015,41 @@ def fetch_exam_skills_outline(
     return skills
 
 
+def exam_skills_from_catalog(cert_ref: Optional[CertificationRef]) -> list[dict]:
+    """The official skills-measured list, straight off the catalog record.
+
+    The study-guide page is scraped for its per-domain sub-bullets, but that
+    parse depends on Microsoft's HTML; this does not.
+    """
+    if not cert_ref or not cert_ref.skills_measured:
+        return []
+    return [
+        {
+            "name": skill,
+            "weight": None,
+            "topics": [skill],
+            "sourceUrls": [],
+            "isExamSkill": True,
+        }
+        for skill in cert_ref.skills_measured
+    ]
+
+
+def merge_exam_skills(scraped: list[dict], catalog_skills: list[dict]) -> list[dict]:
+    """Union the scraped study guide with the catalog list, keyed on domain name.
+
+    The scrape wins on overlap because it carries weights and sub-topics.
+    """
+    merged = list(scraped)
+    seen = {_normalize(s.get("name", "")) for s in scraped}
+    for skill in catalog_skills:
+        key = _normalize(skill.get("name", ""))
+        if key and key not in seen and not _topic_covered(skill["name"], list(seen)):
+            seen.add(key)
+            merged.append(skill)
+    return merged
+
+
 def deep_discover(
     certification_id: str,
     max_paths: Optional[int] = None,
@@ -754,6 +1057,7 @@ def deep_discover(
     max_units_per_module: Optional[int] = None,
     skip_content: bool = False,
     catalog: Optional[dict] = None,
+    cert_ref: Optional["CertificationRef"] = None,
 ) -> DeepDiscoveryResult:
     """
     Perform deep discovery using the Microsoft Learn Catalog API.
@@ -782,38 +1086,38 @@ def deep_discover(
     units_by_uid = {u["uid"]: u for u in catalog.get("units", [])}
     
     # Get learning path UIDs for this certification
-    # Strategy: dynamic first (role+product filtering), hardcoded fallback, then product search
     cert_lower = certification_id.lower()
-    path_uids, resolution_method = resolve_learning_paths_dynamic(cert_lower, catalog)
+    path_uids, standalone_module_uids, resolution_report = resolve_content_sources(
+        cert_lower, catalog, cert_ref=cert_ref
+    )
+    print(
+        f"Resolved {len(path_uids)} learning paths and "
+        f"{len(standalone_module_uids)} standalone modules for {certification_id}"
+    )
+    for warning in resolution_report.get("warnings", []):
+        print(f"  Warning: {warning}")
 
-    if path_uids:
-        print(f"Using {len(path_uids)} dynamically resolved learning paths (role+product filtering)")
-    elif cert_lower in CERTIFICATION_PATH_UIDS:
-        # Fallback to hardcoded UIDs — filter out stale ones
-        raw_uids = CERTIFICATION_PATH_UIDS[cert_lower]
-        path_uids = [uid for uid in raw_uids if uid in paths_by_uid]
-        stale = len(raw_uids) - len(path_uids)
-        if stale > 0:
-            print(f"  Warning: {stale}/{len(raw_uids)} hardcoded UIDs are stale (not in catalog)")
-        print(f"Using {len(path_uids)} hardcoded learning paths for {certification_id}")
-        resolution_method = "hardcoded"
-    else:
-        # Last resort: generic product search
-        path_uids = []
-        for p in catalog.get("learningPaths", []):
-            products = p.get("products", [])
-            if any(cert_lower in str(prod).lower() for prod in products):
-                path_uids.append(p["uid"])
-        print(f"Found {len(path_uids)} learning paths by product search (last resort)")
-        resolution_method = "product-search"
-    
     if max_paths:
         path_uids = path_uids[:max_paths]
-    
+
+    # Modules the study guide lists directly, with no parent path, are wrapped in
+    # a synthetic path so the rest of the walk is uniform.
+    if standalone_module_uids:
+        path_uids = list(path_uids) + [STANDALONE_MODULES_UID]
+        paths_by_uid[STANDALONE_MODULES_UID] = {
+            "uid": STANDALONE_MODULES_UID,
+            "title": "Exam study guide modules",
+            "url": "",
+            "durationInMinutes": 0,
+            "summary": "Modules listed directly on the exam study guide.",
+            "modules": standalone_module_uids,
+        }
+
     learning_paths = []
     total_modules = 0
     total_units = 0
     total_words = 0
+    units_failed = 0
     
     # Process each learning path
     for i, path_uid in enumerate(path_uids):
@@ -896,6 +1200,7 @@ def deep_discover(
                         total_words += word_count
                         print(f"        [{k+1}/{len(unit_uids)}] {unit.title} ({word_count} words)")
                     except Exception as e:
+                        units_failed += 1
                         print(f"        [{k+1}/{len(unit_uids)}] {unit.title} (fetch error: {e})")
                 
                 module.units.append(unit)
@@ -909,7 +1214,11 @@ def deep_discover(
     # Calculate estimated episodes (assuming ~1400 words per episode)
     words_per_episode = 1400
     estimated_episodes = max(1, total_words // words_per_episode) if total_words > 0 else total_units
-    
+
+    resolution_report["unitsDiscovered"] = total_units
+    resolution_report["unitsFailed"] = units_failed
+    resolution_report["totalWords"] = total_words
+
     result = DeepDiscoveryResult(
         certification_id=certification_id,
         certification_url=f"https://learn.microsoft.com/en-us/credentials/certifications/exams/{certification_id}/",
@@ -917,17 +1226,20 @@ def deep_discover(
         total_modules=total_modules,
         total_units=total_units,
         total_words=total_words,
-        estimated_episodes=estimated_episodes
+        estimated_episodes=estimated_episodes,
+        units_failed=units_failed,
+        resolution=resolution_report,
     )
-    
+
     print("\n" + "=" * 60)
     print("Discovery complete!")
     print(f"  Learning Paths: {len(learning_paths)}")
     print(f"  Total Modules: {total_modules}")
     print(f"  Total Units: {total_units}")
+    print(f"  Failed unit fetches: {units_failed}")
     print(f"  Total Words: {total_words:,}")
     print(f"  Estimated Episodes: {estimated_episodes}")
-    
+
     return result
 
 
@@ -1028,9 +1340,8 @@ def result_to_dict(
     Output includes both detailed structure AND workflow-compatible format
     (skillsOutline, sourceUrls) for use with generate-content.yml workflow.
     
-    Field names match discover_exam_content.py format:
-    - skill["name"] (not "skillName")
-    - skill["weight"] (not "weightPercentage")
+    Skill dicts use "name"/"weight", matching the exam skills outline format
+    that generate_episodes.py consumes.
     
     IMPORTANT: Modules are deduplicated by UID since the same module can appear
     in multiple learning paths. This prevents processing duplicates and wasting
@@ -1059,7 +1370,7 @@ def result_to_dict(
             seen_module_uids.add(module.uid)
             
             skill = {
-                "name": module.title,  # Match discover_exam_content format
+                "name": module.title,
                 "weight": None,  # Deep discovery doesn't have weights
                 "learningPath": path.title,
                 "topics": [],
@@ -1139,6 +1450,8 @@ def result_to_dict(
         "totalModules": result.total_modules,
         "totalUnits": result.total_units,
         "totalWords": result.total_words,
+        "unitsFailed": result.units_failed,
+        "resolution": result.resolution,
         "estimatedEpisodes": result.estimated_episodes
     }
 
