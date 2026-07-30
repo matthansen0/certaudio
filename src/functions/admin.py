@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import time
 
 import azure.functions as func
 from azure.core.exceptions import ResourceExistsError
@@ -18,7 +19,8 @@ from azure.identity import DefaultAzureCredential
 from azure.storage.queue import QueueClient
 
 import admin_store
-from pipeline.orchestrator import RUNNERS
+from pipeline import cost
+from pipeline.orchestrator import RUNNERS, _voices as _resolved_voices
 
 bp = func.Blueprint()
 logger = logging.getLogger(__name__)
@@ -27,7 +29,7 @@ logger = logging.getLogger(__name__)
 # "admin" route prefix for its own management API and refuses to serve any
 # function whose route starts with it.
 QUEUE_NAME = "content-jobs"
-VALID_MODES = ("generate", "refresh")
+VALID_MODES = ("index", "generate", "refresh")
 VALID_FORMATS = ("instructional", "podcast")
 
 # certificationId is interpolated into an AI Search OData filter and used as a
@@ -37,6 +39,8 @@ CERTIFICATION_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 # Azure TTS short names. The trailing segment may contain a colon, as the Dragon
 # HD voices do: "en-US-Andrew:DragonHDLatestNeural".
 VOICE_NAME_RE = re.compile(r"^[A-Za-z]{2,3}-[A-Za-z0-9]{2,8}-[A-Za-z0-9:]{1,48}$")
+# Fetched server-side during discovery, so restrict it to the one host we scrape.
+EXAM_URL_RE = re.compile(r"^https://learn\.microsoft\.com/[A-Za-z0-9\-._~/%?=&#]*$")
 # Must match the keys pipeline.orchestrator._voices() reads, or an override is
 # accepted here and then silently ignored.
 VALID_VOICE_ROLES = ("instructional", "podcastHost", "podcastExpert")
@@ -224,6 +228,12 @@ def post_job(req: func.HttpRequest) -> func.HttpResponse:
         if not isinstance(name, str) or not VOICE_NAME_RE.match(name):
             return _json({"error": f"invalid voice name for {role}"}, 400)
 
+    exam_url = (body.get("examUrl") or "").strip()
+    if exam_url and not EXAM_URL_RE.match(exam_url):
+        return _json(
+            {"error": "examUrl must be an https://learn.microsoft.com/ URL"}, 400
+        )
+
     # One generation at a time: these runs are long and compete for the B1 plan
     # with audio streaming.
     existing = admin_store.active_job()
@@ -232,6 +242,23 @@ def post_job(req: func.HttpRequest) -> func.HttpResponse:
             {"error": "A job is already running", "jobId": existing["jobId"]}, 409
         )
 
+    # Recomputed here rather than trusted from the client, so the figure stored
+    # against the job is comparable with the metered actual. An estimate is a
+    # nicety: never block a run because the course lookup was unavailable.
+    estimate = None
+    if mode in ("generate", "refresh"):
+        try:
+            course = admin_store.get_course(certification_id)
+            if course and course.get("unitCount"):
+                estimate = cost.estimate(
+                    episode_count=course["unitCount"],
+                    audio_format=audio_format,
+                    voices=_resolved_voices(voices),
+                    measured_chars_per_episode=course.get("measuredCharsPerEpisode"),
+                )
+        except Exception as exc:
+            logger.warning("Could not estimate cost for %s: %s", certification_id, exc)
+
     job = admin_store.create_job(
         mode=mode,
         certification_id=certification_id,
@@ -239,6 +266,8 @@ def post_job(req: func.HttpRequest) -> func.HttpResponse:
         voices=voices,
         force=bool(body.get("force")),
         requested_by=user.get("userDetails", ""),
+        exam_url=exam_url,
+        estimate=estimate,
     )
 
     client = _queue_client()
@@ -263,7 +292,250 @@ def get_job(req: func.HttpRequest) -> func.HttpResponse:
     return _json(job)
 
 
+# --------------------------------------------------------------------- voices
+VOICE_CACHE_TTL_SECONDS = 3600
+_voice_cache: dict = {"expires": 0.0, "payload": None}
+
+
+@bp.route(route="portal/voices", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def get_voices(req: func.HttpRequest) -> func.HttpResponse:
+    """List the en-* neural voices the deployed Speech region actually supports."""
+    _, error = _require_admin(req)
+    if error:
+        return error
+
+    now = time.monotonic()
+    if _voice_cache["payload"] and now < _voice_cache["expires"]:
+        return _json(_voice_cache["payload"])
+
+    from pipeline.generate_episodes import _fetch_speech_voice_catalog
+
+    try:
+        region, catalog = _fetch_speech_voice_catalog()
+    except Exception as exc:
+        logger.warning("Voice list unavailable: %s", exc)
+        return _json({"error": "Could not reach the Speech voice list"}, 502)
+
+    voices = [
+        {
+            "shortName": v["ShortName"],
+            "displayName": v.get("LocalName") or v.get("DisplayName") or v["ShortName"],
+            "locale": v.get("Locale", ""),
+            "gender": v.get("Gender", ""),
+            "isDragonHD": "DragonHD" in v["ShortName"],
+        }
+        for v in catalog
+        if v.get("ShortName", "").startswith("en-")
+        and VOICE_NAME_RE.match(v.get("ShortName", ""))
+    ]
+    voices.sort(key=lambda v: (not v["isDragonHD"], v["shortName"]))
+
+    payload = {"region": region, "voices": voices}
+    _voice_cache["payload"] = payload
+    _voice_cache["expires"] = now + VOICE_CACHE_TTL_SECONDS
+    return _json(payload)
+
+
+# -------------------------------------------------------------------- courses
+@bp.route(route="portal/courses", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def get_courses(req: func.HttpRequest) -> func.HttpResponse:
+    _, error = _require_admin(req)
+    if error:
+        return error
+    return _json({"courses": admin_store.list_courses(), "rates": cost.RATES})
+
+
+@bp.route(
+    route="portal/courses/{certificationId}",
+    methods=["GET"],
+    auth_level=func.AuthLevel.ANONYMOUS,
+)
+def get_course(req: func.HttpRequest) -> func.HttpResponse:
+    _, error = _require_admin(req)
+    if error:
+        return error
+
+    cert_id = (req.route_params.get("certificationId") or "").lower()
+    course = admin_store.get_course(cert_id)
+    if not course:
+        return _json({"error": "Course not found"}, 404)
+
+    jobs = [j for j in admin_store.list_jobs(limit=100) if j.get("certificationId") == cert_id]
+    return _json(
+        {
+            "course": course,
+            "jobs": jobs[:20],
+            # Served so the browser can recompute the estimate live without a
+            # round trip, and without a second copy of the price list.
+            "rates": cost.RATES,
+            "defaults": {
+                "wordsPerEpisode": cost.DEFAULT_WORDS_PER_EPISODE,
+                "charsPerWord": cost.CHARS_PER_WORD,
+                "gptInputTokensPerEpisode": cost.GPT_INPUT_TOKENS_PER_EPISODE,
+                "gptOutputTokensPerEpisode": cost.GPT_OUTPUT_TOKENS_PER_EPISODE,
+            },
+        }
+    )
+
+
+@bp.route(
+    route="portal/courses/{certificationId}",
+    methods=["PATCH"],
+    auth_level=func.AuthLevel.ANONYMOUS,
+)
+def patch_course(req: func.HttpRequest) -> func.HttpResponse:
+    _, error = _require_admin(req)
+    if error:
+        return error
+
+    cert_id = (req.route_params.get("certificationId") or "").lower()
+    if not admin_store.get_course(cert_id):
+        return _json({"error": "Course not found"}, 404)
+
+    try:
+        body = req.get_json() or {}
+    except ValueError:
+        return _json({"error": "Invalid JSON body"}, 400)
+
+    fields = {}
+    if "displayName" in body:
+        fields["displayName"] = str(body["displayName"]).strip()[:200]
+    if "examUrl" in body:
+        exam_url = (body.get("examUrl") or "").strip()
+        if exam_url and not EXAM_URL_RE.match(exam_url):
+            return _json(
+                {"error": "examUrl must be an https://learn.microsoft.com/ URL"}, 400
+            )
+        fields["examUrl"] = exam_url
+    if "published" in body:
+        fields["published"] = bool(body["published"])
+
+    if not fields:
+        return _json({"error": "Nothing to update"}, 400)
+    return _json({"course": admin_store.upsert_course(cert_id, **fields)})
+
+
+@bp.route(
+    route="portal/courses/{certificationId}",
+    methods=["DELETE"],
+    auth_level=func.AuthLevel.ANONYMOUS,
+)
+def delete_course(req: func.HttpRequest) -> func.HttpResponse:
+    _, error = _require_admin(req)
+    if error:
+        return error
+
+    cert_id = (req.route_params.get("certificationId") or "").lower()
+    if not CERTIFICATION_ID_RE.match(cert_id):
+        return _json({"error": "Invalid certificationId"}, 400)
+    if admin_store.active_job():
+        return _json({"error": "Cannot delete while a job is running"}, 409)
+
+    from course_teardown import purge_certification
+
+    summary = purge_certification(cert_id)
+    admin_store.delete_course(cert_id)
+    return _json({"deleted": cert_id, "summary": summary})
+
+
+# ------------------------------------------------------------------- estimates
+@bp.route(
+    route="portal/courses/{certificationId}/estimate",
+    methods=["GET"],
+    auth_level=func.AuthLevel.ANONYMOUS,
+)
+def get_estimate(req: func.HttpRequest) -> func.HttpResponse:
+    _, error = _require_admin(req)
+    if error:
+        return error
+
+    cert_id = (req.route_params.get("certificationId") or "").lower()
+    course = admin_store.get_course(cert_id)
+    if not course or not course.get("unitCount"):
+        return _json({"error": "Run an index job first"}, 409)
+
+    audio_format = req.params.get("audioFormat", "instructional")
+    if audio_format not in VALID_FORMATS:
+        return _json({"error": "Invalid audioFormat"}, 400)
+
+    voices = {}
+    for role in VALID_VOICE_ROLES:
+        name = req.params.get(role)
+        if name:
+            if not VOICE_NAME_RE.match(name):
+                return _json({"error": f"invalid voice name for {role}"}, 400)
+            voices[role] = name
+
+    return _json(
+        cost.estimate(
+            episode_count=course["unitCount"],
+            audio_format=audio_format,
+            voices=_resolved_voices(voices),
+            measured_chars_per_episode=course.get("measuredCharsPerEpisode"),
+        )
+    )
+
+
 # --------------------------------------------------------------- queue worker
+def _record_course_outcome(job: dict, result: dict) -> None:
+    """Fold a finished job into the course record the portal reads."""
+    cert_id = job["certificationId"]
+    fields: dict = {}
+
+    if job["mode"] == "index":
+        fields.update(
+            lastDiscoveryAt=_now_iso(),
+            discoveryBlobPath=result.get("discoveryBlobPath"),
+            unitCount=result.get("unitCount", 0),
+            totalWords=result.get("totalWords", 0),
+        )
+        if job.get("examUrl"):
+            fields["examUrl"] = job["examUrl"]
+    else:
+        voices = _resolved_voices(job.get("voices") or {})
+        episodes = result.get("totalEpisodes", 0)
+        fields.update(
+            lastGeneratedAt=_now_iso(),
+            lastJobId=job["jobId"],
+            audioFormat=job["audioFormat"],
+            voices=voices,
+            episodeCount=episodes,
+            totalDurationSeconds=round(result.get("totalDurationMinutes", 0) * 60),
+        )
+        if job.get("estimate"):
+            fields["lastEstimateUsd"] = job["estimate"].get("totalUsd")
+
+        usage = result.get("usage") or {}
+        generated = result.get("episodesGenerated", 0)
+        if usage.get("ttsChars"):
+            actual = cost.actual_cost(
+                tts_chars=usage.get("ttsChars", 0),
+                gpt_input_tokens=usage.get("gptInputTokens", 0),
+                gpt_output_tokens=usage.get("gptOutputTokens", 0),
+                audio_format=job["audioFormat"],
+                voices=voices,
+            )
+            fields["lastActualUsd"] = actual["totalUsd"]
+            admin_store.update_job(job["jobId"], actualCost=actual)
+            # Feeds the next estimate, so only measure episodes actually synthesised.
+            if generated:
+                fields["measuredCharsPerEpisode"] = round(
+                    usage["ttsChars"] / generated
+                )
+
+    # The portal is not worth failing a multi-hour run over.
+    try:
+        admin_store.upsert_course(cert_id, **fields)
+    except Exception as exc:
+        logger.warning("Could not update course record for %s: %s", cert_id, exc)
+
+
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
+
+
 @bp.queue_trigger(
     arg_name="msg", queue_name=QUEUE_NAME, connection="AzureWebJobsStorage"
 )
@@ -299,8 +571,10 @@ def run_content_job(msg: func.QueueMessage) -> None:
             audio_format=job["audioFormat"],
             voices=job.get("voices") or {},
             force=bool(job.get("force")),
+            exam_url=job.get("examUrl") or None,
             progress=progress,
         )
+        _record_course_outcome(job, result)
         admin_store.mark_succeeded(job_id, result)
         logger.info("Job %s succeeded: %s", job_id, result)
     except Exception as exc:  # surfaced to the admin UI via the job record

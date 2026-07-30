@@ -89,24 +89,50 @@
             <!-- Console -->
             <section id="admin-console" hidden>
                 <section class="admin-panel">
-                    <h1>Content generation</h1>
+                    <h1>Manage audio courses</h1>
                     <p class="admin-muted">
-                        Runs inside the Function App so it can reach the private data
-                        plane. One job runs at a time.
+                        Generation runs inside the Function App so it can reach the
+                        private data plane. One job runs at a time.
                     </p>
+                    <div id="course-list" class="admin-muted">Loading…</div>
+                </section>
+
+                <!-- Course detail -->
+                <section class="admin-panel" id="course-detail" hidden>
+                    <div class="admin-row admin-row-between">
+                        <h2 id="course-title">Course</h2>
+                        <button id="course-close" class="admin-button admin-button-secondary">Close</button>
+                    </div>
+
+                    <dl class="admin-facts" id="course-facts"></dl>
 
                     <div class="admin-grid">
                         <label class="admin-field">
-                            <span>Mode</span>
-                            <select id="job-mode" class="admin-input">
-                                <option value="generate">Generate</option>
-                                <option value="refresh">Refresh</option>
-                            </select>
+                            <span>Display name</span>
+                            <input id="course-name" class="admin-input" placeholder="DP-700: Fabric Data Engineer">
                         </label>
                         <label class="admin-field">
-                            <span>Certification</span>
-                            <input id="job-cert" class="admin-input" placeholder="e.g. ai-102" value="test">
+                            <span>Microsoft Learn exam URL</span>
+                            <input id="course-exam-url" class="admin-input"
+                                   placeholder="https://learn.microsoft.com/en-us/credentials/certifications/exams/dp-700/">
                         </label>
+                        <label class="admin-field admin-field-check">
+                            <input id="course-published" type="checkbox">
+                            <span>Published (visible in the player)</span>
+                        </label>
+                    </div>
+                    <div class="admin-row">
+                        <button id="course-save" class="admin-button admin-button-secondary">Save details</button>
+                        <button id="course-delete" class="admin-button admin-button-danger">Delete course</button>
+                    </div>
+                    <p id="course-error" class="admin-error" hidden></p>
+
+                    <hr class="admin-divider">
+
+                    <h3>Run a job</h3>
+                    <p class="admin-muted" id="index-age">—</p>
+
+                    <div class="admin-grid">
                         <label class="admin-field">
                             <span>Format</span>
                             <select id="job-format" class="admin-input">
@@ -114,14 +140,75 @@
                                 <option value="podcast">Podcast</option>
                             </select>
                         </label>
+                        <label class="admin-field" id="field-voice-instructional">
+                            <span>Voice</span>
+                            <select id="voice-instructional" class="admin-input"></select>
+                        </label>
+                        <label class="admin-field" id="field-voice-host" hidden>
+                            <span>Host voice</span>
+                            <select id="voice-podcastHost" class="admin-input"></select>
+                        </label>
+                        <label class="admin-field" id="field-voice-expert" hidden>
+                            <span>Expert voice</span>
+                            <select id="voice-podcastExpert" class="admin-input"></select>
+                        </label>
                         <label class="admin-field admin-field-check">
                             <input id="job-force" type="checkbox">
                             <span>Force regenerate existing episodes</span>
                         </label>
                     </div>
 
-                    <button id="job-submit" class="admin-button">Start job</button>
+                    <div class="admin-estimate" id="estimate-box">
+                        <span class="admin-estimate-label">Estimated cost</span>
+                        <span class="admin-estimate-value" id="estimate-value">—</span>
+                        <span class="admin-muted" id="estimate-detail"></span>
+                    </div>
+
+                    <div class="admin-row">
+                        <button id="run-index" class="admin-button admin-button-secondary">
+                            1. Index content (~$0.03)
+                        </button>
+                        <button id="run-generate" class="admin-button">2. Generate audio…</button>
+                        <button id="run-refresh" class="admin-button admin-button-secondary">Refresh changed content</button>
+                    </div>
                     <p id="job-error" class="admin-error" hidden></p>
+                </section>
+
+                <!-- Confirm generation -->
+                <section class="admin-panel admin-panel-confirm" id="confirm-panel" hidden>
+                    <h2>Confirm generation</h2>
+                    <p id="confirm-summary"></p>
+                    <div class="admin-row">
+                        <button id="confirm-run" class="admin-button">Start generation</button>
+                        <button id="confirm-cancel" class="admin-button admin-button-secondary">Cancel</button>
+                    </div>
+                </section>
+
+                <!-- Add new -->
+                <section class="admin-panel">
+                    <h2>Add a new course</h2>
+                    <p class="admin-muted">
+                        Indexing only discovers and indexes content. It is cheap, and it
+                        tells you the exact episode count before you commit to generating.
+                    </p>
+                    <div class="admin-grid">
+                        <label class="admin-field">
+                            <span>Certification ID</span>
+                            <input id="new-cert" class="admin-input" placeholder="e.g. dp-700" autocomplete="off">
+                        </label>
+                        <label class="admin-field">
+                            <span>Microsoft Learn exam URL (optional)</span>
+                            <input id="new-exam-url" class="admin-input"
+                                   placeholder="https://learn.microsoft.com/…" autocomplete="off">
+                        </label>
+                    </div>
+                    <div class="admin-row">
+                        <button id="new-index" class="admin-button">Index this certification</button>
+                        <button id="new-test" class="admin-button admin-button-secondary">
+                            Run a test episode (~$0.15)
+                        </button>
+                    </div>
+                    <p id="new-error" class="admin-error" hidden></p>
                 </section>
 
                 <section class="admin-panel">

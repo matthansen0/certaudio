@@ -68,6 +68,12 @@ ADMIN_ROUTES = [
     ("get_jobs", "GET", None, None),
     ("post_job", "POST", None, {"certificationId": "dp-700"}),
     ("get_job", "GET", {"jobId": "j1"}, None),
+    ("get_voices", "GET", None, None),
+    ("get_courses", "GET", None, None),
+    ("get_course", "GET", {"certificationId": "dp-700"}, None),
+    ("patch_course", "PATCH", {"certificationId": "dp-700"}, {"published": False}),
+    ("delete_course", "DELETE", {"certificationId": "dp-700"}, None),
+    ("get_estimate", "GET", {"certificationId": "dp-700"}, None),
 ]
 
 
@@ -91,6 +97,33 @@ def test_admin_routes_reject_authenticated_non_admin(name, method, route_params,
     with patch.object(admin.admin_store, "is_admin", return_value=False):
         response = _fn(name)(req)
     assert response.status_code == 403
+
+
+def _declared_http_routes(decorator_api) -> list[str]:
+    routes = []
+    for builder in decorator_api._function_builders:
+        trigger = builder._function.get_trigger()
+        route = getattr(trigger, "route", None)
+        if route is not None:
+            routes.append(str(route))
+    return routes
+
+
+def test_no_route_uses_a_reserved_prefix():
+    """The Functions host silently refuses to serve any route starting with "admin".
+
+    It still registers and lists, so calling the handler directly cannot catch
+    this -- only inspecting the declared route can.
+    """
+    import function_app
+
+    routes = _declared_http_routes(admin.bp) + _declared_http_routes(function_app.app)
+    assert routes, "Route introspection returned nothing; the assertion is vacuous"
+
+    offenders = [r for r in routes if r.lower().lstrip("/").startswith("admin")]
+    assert not offenders, (
+        f"These routes collide with the host's built-in admin API and will 404: {offenders}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +229,58 @@ def test_post_job_accepts_valid_request():
         response = _fn("post_job")(req)
     assert response.status_code == 202
     assert create.call_args.kwargs["certification_id"] == "dp-700"
+
+
+@pytest.mark.parametrize(
+    "exam_url",
+    [
+        "https://evil.example.com/steal",
+        "http://learn.microsoft.com/en-us/x",  # plain http
+        "file:///etc/passwd",
+        "https://learn.microsoft.com.evil.example.com/x",
+        "javascript:alert(1)",
+    ],
+)
+def test_post_job_rejects_exam_urls_off_microsoft_learn(exam_url):
+    """The worker fetches this URL server-side, so it must not be attacker-chosen."""
+    req = _request(
+        method="POST",
+        headers=_principal_header(),
+        body={"certificationId": "dp-700", "mode": "index", "examUrl": exam_url},
+    )
+    with patch.object(admin.admin_store, "is_admin", return_value=True), \
+            patch.object(admin.admin_store, "active_job", return_value=None), \
+            patch.object(admin.admin_store, "create_job") as create, \
+            patch.object(admin, "_queue_client"):
+        response = _fn("post_job")(req)
+
+    assert response.status_code == 400
+    create.assert_not_called()
+
+
+def test_post_job_accepts_a_learn_exam_url():
+    req = _request(
+        method="POST",
+        headers=_principal_header(),
+        body={
+            "certificationId": "dp-700",
+            "mode": "index",
+            "examUrl": "https://learn.microsoft.com/en-us/credentials/certifications/exams/dp-700/",
+        },
+    )
+    job = {"jobId": "job-2", "status": "queued"}
+    with patch.object(admin.admin_store, "is_admin", return_value=True), \
+            patch.object(admin.admin_store, "active_job", return_value=None), \
+            patch.object(admin.admin_store, "create_job", return_value=job) as create, \
+            patch.object(admin, "_queue_client"):
+        response = _fn("post_job")(req)
+
+    assert response.status_code == 202
+    assert "dp-700" in create.call_args.kwargs["exam_url"]
+
+
+def test_index_is_a_valid_mode():
+    assert "index" in admin.VALID_MODES
 
 
 # ---------------------------------------------------------------------------
