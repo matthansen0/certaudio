@@ -64,6 +64,10 @@ const elements = {
     transcriptContent: document.getElementById('transcriptContent'),
     btnCloseTranscript: document.getElementById('btnCloseTranscript'),
     signInBtn: document.getElementById('signInBtn'),
+    adminLink: document.getElementById('adminLink'),
+    signinGate: document.getElementById('signinGate'),
+    audioPlayer: document.getElementById('audioPlayer'),
+    completeSection: document.getElementById('completeSection'),
     // Mobile menu
     btnMobileMenu: document.getElementById('btnMobileMenu'),
     sidebar: document.getElementById('sidebar'),
@@ -117,11 +121,28 @@ async function checkAuth() {
             state.identityProvider = principal.identityProvider || '';
             state.isAuthenticated = true;
             updateAuthUI();
+            await refreshAdminLink();
             // Load and merge server progress with localStorage
             await loadAndMergeServerProgress();
         }
     } catch (e) {
         console.debug('Auth check skipped (local dev or unavailable)');
+    }
+}
+
+// Only called once authenticated: /api/portal/* answers anonymous callers with a
+// 401 that staticwebapp.config.json turns into a redirect to the login page.
+async function refreshAdminLink() {
+    if (!state.isAuthenticated || !elements.adminLink) return;
+    try {
+        const response = await fetch(`${API_BASE}/portal/status`);
+        if (!response.ok) return;
+        const status = await response.json();
+        if (status.isAdmin) {
+            elements.adminLink.hidden = false;
+        }
+    } catch (e) {
+        console.debug('Admin status check skipped');
     }
 }
 
@@ -628,6 +649,14 @@ function playEpisode(episode) {
     updateNowPlaying(episode);
     renderEpisodeList(); // Re-render to show active state
     
+    // Returning before the src is set is what actually saves the bandwidth; the
+    // 401 from /api/audio is the enforcement, this is just the polite version.
+    if (!state.isAuthenticated) {
+        showSigninGate();
+        return;
+    }
+    hideSigninGate();
+
     // Load audio
     const episodeNumber = String(episode.sequenceNumber).padStart(3, '0');
     const audioUrl = `${API_BASE}/audio/${state.certificationId}/${state.audioFormat}/${episodeNumber}`;
@@ -648,8 +677,25 @@ function playEpisode(episode) {
     loadTranscript(episodeNumber);
 }
 
+function showSigninGate() {
+    if (elements.signinGate) elements.signinGate.hidden = false;
+    if (elements.audioPlayer) elements.audioPlayer.hidden = true;
+    if (elements.completeSection) elements.completeSection.hidden = true;
+}
+
+function hideSigninGate() {
+    if (elements.signinGate) elements.signinGate.hidden = true;
+    if (elements.audioPlayer) elements.audioPlayer.hidden = false;
+    if (elements.completeSection) elements.completeSection.hidden = false;
+}
+
 function togglePlay() {
     if (!state.currentEpisode) return;
+    
+    if (!state.isAuthenticated) {
+        showSigninGate();
+        return;
+    }
     
     if (elements.audioElement.paused) {
         elements.audioElement.play();

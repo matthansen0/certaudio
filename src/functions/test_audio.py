@@ -1,5 +1,6 @@
 """Unit tests for the private Blob Storage audio proxy."""
 
+import base64
 import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -10,8 +11,24 @@ from azure.core.exceptions import ResourceNotFoundError
 from function_app import _parse_byte_range, get_audio, readyz
 
 
-def _make_request(method: str = "GET", range_header: str | None = None):
+def _principal_header() -> str:
+    payload = {
+        "identityProvider": "aad",
+        "userId": "aad-abc123",
+        "userDetails": "user@example.com",
+        "userRoles": ["authenticated"],
+    }
+    return base64.b64encode(json.dumps(payload).encode()).decode()
+
+
+def _make_request(
+    method: str = "GET",
+    range_header: str | None = None,
+    authenticated: bool = True,
+):
     headers = {"Range": range_header} if range_header else {}
+    if authenticated:
+        headers["x-ms-client-principal"] = _principal_header()
     return func.HttpRequest(
         method=method,
         url="https://localhost/api/audio/ai-102/podcast/1",
@@ -128,6 +145,41 @@ def test_missing_blob_returns_404(mock_get_blob_service):
     response = get_audio(_make_request())
 
     assert response.status_code == 404
+
+
+@patch("function_app.get_blob_service")
+def test_anonymous_request_is_rejected_before_any_blob_access(mock_get_blob_service):
+    service, blob = _mock_blob()
+    mock_get_blob_service.return_value = service
+
+    response = get_audio(_make_request(authenticated=False))
+
+    assert response.status_code == 401
+    service.get_blob_client.assert_not_called()
+    blob.download_blob.assert_not_called()
+
+
+@patch("function_app.get_blob_service")
+def test_anonymous_head_is_rejected(mock_get_blob_service):
+    service, _ = _mock_blob()
+    mock_get_blob_service.return_value = service
+
+    response = get_audio(_make_request(method="HEAD", authenticated=False))
+
+    assert response.status_code == 401
+    service.get_blob_client.assert_not_called()
+
+
+@patch("function_app.get_blob_service")
+def test_audio_is_not_cached_by_shared_caches(mock_get_blob_service):
+    """Gated content must not land in a proxy cache an anonymous user can read."""
+    service, _ = _mock_blob()
+    mock_get_blob_service.return_value = service
+
+    response = get_audio(_make_request())
+
+    assert "public" not in response.headers["Cache-Control"]
+    assert "private" in response.headers["Cache-Control"]
 
 
 @patch("function_app.get_blob_service")

@@ -182,9 +182,32 @@ def list_certifications(req: func.HttpRequest) -> func.HttpResponse:
             container.query_items(query=query, enable_cross_partition_query=True)
         )
 
+        # Unpublished courses (the "test" course, work in progress) are hidden
+        # from the player. Falling back to listing everything keeps the player
+        # working if the metadata container is empty or unreachable.
+        hidden: set = set()
+        names: dict = {}
+        try:
+            courses = database.get_container_client("courses")
+            for course in courses.query_items(
+                query="SELECT c.id, c.published, c.displayName FROM c",
+                enable_cross_partition_query=True,
+            ):
+                if course.get("published") is False:
+                    hidden.add(course["id"])
+                if course.get("displayName"):
+                    names[course["id"]] = course["displayName"]
+        except Exception as e:
+            logger.warning("Course metadata unavailable, listing all: %s", e)
+
         # Filter/normalize, then sort.
-        cert_ids = sorted({c for c in cert_ids if isinstance(c, str) and c.strip()})
-        result = [{"id": cid, "name": _format_cert_name(cid)} for cid in cert_ids]
+        cert_ids = sorted(
+            {c for c in cert_ids if isinstance(c, str) and c.strip()} - hidden
+        )
+        result = [
+            {"id": cid, "name": names.get(cid) or _format_cert_name(cid)}
+            for cid in cert_ids
+        ]
 
         return func.HttpResponse(
             json.dumps({"certifications": result}),
@@ -343,6 +366,15 @@ def _parse_byte_range(range_header: str, blob_size: int) -> tuple[int, int]:
 )
 def get_audio(req: func.HttpRequest) -> func.HttpResponse:
     """Proxy audio from private Blob Storage with HTTP range support."""
+    # Streaming is the only expensive egress path, so reject anonymous callers
+    # before touching Blob Storage. The client gate is cosmetic; this is the control.
+    if not _get_swa_user(req):
+        return func.HttpResponse(
+            json.dumps({"error": "Sign in required to play audio"}),
+            status_code=401,
+            mimetype="application/json",
+        )
+
     cert_id = req.route_params.get("certificationId")
     audio_format = req.route_params.get("format")
     episode_num = req.route_params.get("episodeNumber")
@@ -369,7 +401,7 @@ def get_audio(req: func.HttpRequest) -> func.HttpResponse:
         )
         headers = {
             "Accept-Ranges": "bytes",
-            "Cache-Control": "public, max-age=3600",
+            "Cache-Control": "private, max-age=3600",
             "Content-Type": content_type,
         }
 
