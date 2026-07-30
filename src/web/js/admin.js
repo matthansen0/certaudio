@@ -47,6 +47,77 @@ function escapeHtml(value) {
     })[c]);
 }
 
+// ---------------------------------------------------------------------- toasts
+const TOAST_MS = 6000;
+
+function toast(message, kind = 'info') {
+    const node = document.createElement('div');
+    node.className = `admin-toast admin-toast-${kind}`;
+    node.innerHTML = `<span>${escapeHtml(message)}</span>`
+        + '<button type="button" class="admin-toast-close" aria-label="Dismiss">&times;</button>';
+    const remove = () => node.remove();
+    node.querySelector('.admin-toast-close').addEventListener('click', remove);
+    el('toasts').appendChild(node);
+    if (kind !== 'error') setTimeout(remove, TOAST_MS);
+}
+
+// Errors go to both: inline for the field that caused them, toast so they are
+// noticed when the relevant panel has scrolled out of view.
+function fail(errorId, err) {
+    setError(errorId, err.message);
+    toast(err.message, 'error');
+}
+
+/** Run an async action with the button showing a spinner and disabled. */
+async function withBusy(button, action) {
+    if (!button) return action();
+    const wasDisabled = button.disabled;
+    button.dataset.busy = 'true';
+    button.disabled = true;
+    try {
+        return await action();
+    } finally {
+        delete button.dataset.busy;
+        button.disabled = wasDisabled;
+    }
+}
+
+function skeleton(rows = 3) {
+    return `<div class="admin-skeleton" aria-hidden="true">${
+        '<div class="admin-skeleton-row"></div>'.repeat(rows)
+    }</div>`;
+}
+
+function emptyState(title, detail) {
+    return `<div class="admin-empty"><span class="admin-empty-title">${escapeHtml(title)}</span>`
+        + `<span>${escapeHtml(detail)}</span></div>`;
+}
+
+// ----------------------------------------------------------------------- views
+const VIEWS = ['courses', 'jobs', 'admins'];
+
+function showView(name) {
+    VIEWS.forEach((view) => {
+        el(`view-${view}`).hidden = view !== name;
+    });
+    document.querySelectorAll('[data-view]').forEach((button) => {
+        button.setAttribute('aria-current', String(button.dataset.view === name));
+    });
+}
+
+document.querySelectorAll('[data-view]').forEach((button) => {
+    button.addEventListener('click', () => showView(button.dataset.view));
+});
+
+function enterConsole() {
+    hide('admin-gate');
+    show('admin-console');
+    el('course-list').innerHTML = skeleton();
+    el('job-history').innerHTML = skeleton(2);
+    el('admin-list').innerHTML = skeleton(2);
+    el('active-job').innerHTML = skeleton(1);
+}
+
 // ------------------------------------------------------------------ bootstrap
 async function init() {
     let status;
@@ -67,7 +138,7 @@ async function init() {
     }
 
     if (status.isAdmin) {
-        show('admin-console');
+        enterConsole();
         await loadVoices();
         await Promise.all([refreshCourses(), refreshJobs(), refreshAdmins()]);
         return;
@@ -82,25 +153,34 @@ async function init() {
     show('admin-denied');
 }
 
-el('claim-submit').addEventListener('click', async () => {
+el('copy-bootstrap').addEventListener('click', async () => {
+    try {
+        await navigator.clipboard.writeText(el('bootstrap-command').textContent);
+        toast('Command copied to the clipboard.', 'success');
+    } catch {
+        toast('Could not copy. Select the text and copy it manually.', 'error');
+    }
+});
+
+el('claim-submit').addEventListener('click', async (event) => {
     const token = el('claim-token').value.trim();
     if (!token) {
         setError('claim-error', 'Enter the bootstrap token.');
         return;
     }
     setError('claim-error', null);
-    el('claim-submit').disabled = true;
-    try {
-        await api('portal/claim', { method: 'POST', body: JSON.stringify({ token }) });
-        hide('admin-claim');
-        show('admin-console');
-        await loadVoices();
-        await Promise.all([refreshCourses(), refreshJobs(), refreshAdmins()]);
-    } catch (err) {
-        setError('claim-error', err.message);
-    } finally {
-        el('claim-submit').disabled = false;
-    }
+    await withBusy(event.currentTarget, async () => {
+        try {
+            await api('portal/claim', { method: 'POST', body: JSON.stringify({ token }) });
+            hide('admin-claim');
+            enterConsole();
+            toast('You are now an administrator.', 'success');
+            await loadVoices();
+            await Promise.all([refreshCourses(), refreshJobs(), refreshAdmins()]);
+        } catch (err) {
+            fail('claim-error', err);
+        }
+    });
 });
 
 // -------------------------------------------------------------------- courses
@@ -220,27 +300,35 @@ async function loadVoices() {
 
 function renderCourseList() {
     const container = el('course-list');
+    el('count-courses').textContent = store.courses.length;
     if (!store.courses.length) {
-        container.className = 'admin-muted';
-        container.textContent = 'No courses yet. Add one below.';
+        container.innerHTML = emptyState(
+            'No courses yet',
+            'Add a certification below to discover and index its content.',
+        );
         return;
     }
-    container.className = '';
     container.innerHTML = `
+        <div class="admin-table-wrap">
         <table class="admin-table">
-            <thead><tr><th>Course</th><th>Format</th><th>Episodes</th><th>Last generated</th><th>State</th><th></th></tr></thead>
+            <thead><tr>
+                <th scope="col">Course</th><th scope="col">Format</th>
+                <th scope="col">Episodes</th><th scope="col">Last generated</th>
+                <th scope="col">State</th><th scope="col"><span class="sr-only">Actions</span></th>
+            </tr></thead>
             <tbody>
                 ${store.courses.map((c) => `<tr>
-                    <td>${escapeHtml(c.displayName || c.id)}</td>
-                    <td>${escapeHtml(c.audioFormat || '—')}</td>
-                    <td>${c.episodeCount || 0}</td>
-                    <td class="admin-muted">${escapeHtml((c.lastGeneratedAt || '—').replace('T', ' ').slice(0, 16))}</td>
-                    <td>${c.published === false ? '<span class="admin-muted">unpublished</span>' : 'published'}</td>
-                    <td><button class="admin-button admin-button-secondary"
+                    <td data-label="Course">${escapeHtml(c.displayName || c.id)}</td>
+                    <td data-label="Format">${escapeHtml(c.audioFormat || '—')}</td>
+                    <td data-label="Episodes">${c.episodeCount || 0}</td>
+                    <td data-label="Last generated">${escapeHtml((c.lastGeneratedAt || '—').replace('T', ' ').slice(0, 16))}</td>
+                    <td data-label="State">${c.published === false ? 'unpublished' : 'published'}</td>
+                    <td><button type="button" class="admin-button admin-button-secondary admin-button-small"
                                 data-course-id="${escapeHtml(c.id)}">Manage</button></td>
                 </tr>`).join('')}
             </tbody>
         </table>
+        </div>
     `;
     container.querySelectorAll('[data-course-id]').forEach((button) => {
         button.addEventListener('click', () => openCourse(button.dataset.courseId));
@@ -254,8 +342,47 @@ async function refreshCourses() {
         if (rates) store.rates = rates;
         renderCourseList();
     } catch (err) {
-        setError('job-error', err.message);
+        fail('job-error', err);
     }
+}
+
+// Discovery can succeed while covering only part of the exam. The report is the
+// only place that difference is visible.
+function renderDiscoveryReport(report) {
+    const container = el('course-report');
+    if (!report) {
+        container.innerHTML = '';
+        return;
+    }
+    const grade = report.coverageGrade || '?';
+    const score = Number(report.coverageScore || 0).toFixed(0);
+    const sources = Object.keys(report.sources || {}).join(', ') || 'none';
+    const gaps = (report.gaps || []).slice(0, 8);
+
+    container.innerHTML = `
+        <div class="admin-report">
+            <div class="admin-report-head">
+                <span class="admin-grade" data-grade="${escapeHtml(grade)}">${escapeHtml(grade)}</span>
+                <strong>Exam coverage ${escapeHtml(score)}%</strong>
+                <span class="admin-muted" style="margin:0">resolved via ${escapeHtml(sources)}</span>
+            </div>
+            <div class="admin-report-stats">
+                <span><strong>${report.resolvedPaths || 0}</strong> learning paths</span>
+                <span><strong>${report.unitsDiscovered || 0}</strong> units</span>
+                <span><strong>${report.unitsFailed || 0}</strong> failed downloads</span>
+                <span><strong>${report.topicsCovered || 0}</strong> topics covered</span>
+                <span><strong>${report.topicsSupplemented || 0}</strong> supplemented</span>
+                <span><strong>${report.topicsUncovered || 0}</strong> uncovered</span>
+            </div>
+            ${(report.warnings || []).map((w) =>
+                `<p class="admin-warning">${escapeHtml(w)}</p>`).join('')}
+            ${gaps.length ? `<details>
+                <summary class="admin-muted" style="cursor:pointer">Uncovered exam topics</summary>
+                <ul class="admin-gap-list">${gaps.map((g) =>
+                    `<li>${escapeHtml(g.topic || '')} <em>(${escapeHtml(g.skill || '')})</em></li>`).join('')}
+                </ul></details>` : ''}
+        </div>
+    `;
 }
 
 function renderFacts(course) {
@@ -306,13 +433,15 @@ async function openCourse(certId) {
         });
 
         renderFacts(course);
+        renderDiscoveryReport(course.discoveryReport);
         renderIndexAge(course);
         toggleVoiceFields();
         renderEstimate();
         show('course-detail');
+        el('course-detail').focus();
         el('course-detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (err) {
-        setError('job-error', err.message);
+        fail('job-error', err);
     }
 }
 
@@ -327,26 +456,37 @@ el('job-format').addEventListener('change', () => {
     renderEstimate();
 });
 
-el('course-save').addEventListener('click', async () => {
+el('course-save').addEventListener('click', async (event) => {
     if (!store.current) return;
     setError('course-error', null);
-    try {
-        await api(`portal/courses/${encodeURIComponent(store.current.id)}`, {
-            method: 'PATCH',
-            body: JSON.stringify({
-                displayName: el('course-name').value.trim(),
-                examUrl: el('course-exam-url').value.trim(),
-                published: el('course-published').checked,
-            }),
-        });
-        await refreshCourses();
-        await openCourse(store.current.id);
-    } catch (err) {
-        setError('course-error', err.message);
+    const url = el('course-exam-url').value.trim();
+    const urlField = el('course-exam-url');
+    if (url && !url.startsWith('https://learn.microsoft.com/')) {
+        urlField.setAttribute('aria-invalid', 'true');
+        setError('course-error', 'The exam URL must start with https://learn.microsoft.com/.');
+        return;
     }
+    urlField.removeAttribute('aria-invalid');
+    await withBusy(event.currentTarget, async () => {
+        try {
+            await api(`portal/courses/${encodeURIComponent(store.current.id)}`, {
+                method: 'PATCH',
+                body: JSON.stringify({
+                    displayName: el('course-name').value.trim(),
+                    examUrl: url,
+                    published: el('course-published').checked,
+                }),
+            });
+            toast('Course details saved.', 'success');
+            await refreshCourses();
+            await openCourse(store.current.id);
+        } catch (err) {
+            fail('course-error', err);
+        }
+    });
 });
 
-el('course-delete').addEventListener('click', async () => {
+el('course-delete').addEventListener('click', async (event) => {
     if (!store.current) return;
     const id = store.current.id;
     const confirmed = window.confirm(
@@ -356,37 +496,44 @@ el('course-delete').addEventListener('click', async () => {
     if (!confirmed) return;
 
     setError('course-error', null);
-    try {
-        await api(`portal/courses/${encodeURIComponent(id)}`, { method: 'DELETE' });
-        hide('course-detail');
-        store.current = null;
-        await refreshCourses();
-    } catch (err) {
-        setError('course-error', err.message);
-    }
+    await withBusy(event.currentTarget, async () => {
+        try {
+            await api(`portal/courses/${encodeURIComponent(id)}`, { method: 'DELETE' });
+            hide('course-detail');
+            store.current = null;
+            toast(`Deleted ${id}.`, 'success');
+            await refreshCourses();
+        } catch (err) {
+            fail('course-error', err);
+        }
+    });
 });
 
 // ----------------------------------------------------------------------- jobs
-async function submitJob(payload, errorTarget = 'job-error') {
+async function submitJob(payload, errorTarget = 'job-error', button = null) {
     setError(errorTarget, null);
-    try {
-        await api('portal/jobs', { method: 'POST', body: JSON.stringify(payload) });
-        await refreshJobs();
-    } catch (err) {
-        setError(errorTarget, err.message);
-    }
+    await withBusy(button, async () => {
+        try {
+            await api('portal/jobs', { method: 'POST', body: JSON.stringify(payload) });
+            toast(`Queued ${payload.mode} job for ${payload.certificationId}.`, 'success');
+            showView('jobs');
+            await refreshJobs();
+        } catch (err) {
+            fail(errorTarget, err);
+        }
+    });
 }
 
-el('run-index').addEventListener('click', () => {
+el('run-index').addEventListener('click', (event) => {
     if (!store.current) return;
     submitJob({
         mode: 'index',
         certificationId: store.current.id,
         examUrl: el('course-exam-url').value.trim(),
-    });
+    }, 'job-error', event.currentTarget);
 });
 
-el('run-refresh').addEventListener('click', () => {
+el('run-refresh').addEventListener('click', (event) => {
     if (!store.current) return;
     submitJob({
         mode: 'refresh',
@@ -394,7 +541,7 @@ el('run-refresh').addEventListener('click', () => {
         audioFormat: el('job-format').value,
         voices: selectedVoices(),
         force: el('job-force').checked,
-    });
+    }, 'job-error', event.currentTarget);
 });
 
 el('run-generate').addEventListener('click', () => {
@@ -410,11 +557,12 @@ el('run-generate').addEventListener('click', () => {
         + `(${estimate.basis}). This runs for several hours.`;
     show('confirm-panel');
     el('confirm-panel').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el('confirm-panel').focus();
 });
 
 el('confirm-cancel').addEventListener('click', () => hide('confirm-panel'));
 
-el('confirm-run').addEventListener('click', async () => {
+el('confirm-run').addEventListener('click', async (event) => {
     if (!store.current) return;
     hide('confirm-panel');
     await submitJob({
@@ -423,25 +571,29 @@ el('confirm-run').addEventListener('click', async () => {
         audioFormat: el('job-format').value,
         voices: selectedVoices(),
         force: el('job-force').checked,
-    });
+    }, 'job-error', event.currentTarget);
 });
 
 // --------------------------------------------------------------------- add new
-el('new-index').addEventListener('click', async () => {
+el('new-index').addEventListener('click', async (event) => {
     const certificationId = el('new-cert').value.trim().toLowerCase();
-    if (!certificationId) {
-        setError('new-error', 'Enter a certification ID.');
+    const field = el('new-cert');
+    if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(certificationId)) {
+        field.setAttribute('aria-invalid', 'true');
+        setError('new-error', 'Enter a certification ID such as dp-700 (lowercase letters, digits and hyphens).');
         return;
     }
+    field.removeAttribute('aria-invalid');
     await submitJob(
         { mode: 'index', certificationId, examUrl: el('new-exam-url').value.trim() },
         'new-error',
+        event.currentTarget,
     );
     await refreshCourses();
 });
 
-el('new-test').addEventListener('click', async () => {
-    await submitJob({ mode: 'index', certificationId: 'test' }, 'new-error');
+el('new-test').addEventListener('click', async (event) => {
+    await submitJob({ mode: 'index', certificationId: 'test' }, 'new-error', event.currentTarget);
     await refreshCourses();
 });
 
@@ -455,8 +607,7 @@ function setRunButtonsDisabled(disabled) {
 function renderActiveJob(job) {
     const container = el('active-job');
     if (!job) {
-        container.className = 'admin-muted';
-        container.textContent = 'No job running.';
+        container.innerHTML = emptyState('No job running', 'Start one from a course.');
         hide('redeploy-warning');
         setRunButtonsDisabled(false);
         return;
@@ -467,30 +618,57 @@ function renderActiveJob(job) {
     const current = progress.current || 0;
     const pct = total > 0 ? Math.round((current / total) * 100) : 0;
 
-    container.className = '';
     container.innerHTML = `
-        <div><strong>${escapeHtml(job.mode)}</strong> &middot;
-             ${escapeHtml(job.certificationId)} / ${escapeHtml(job.audioFormat)}
-             <span class="admin-status admin-status-${escapeHtml(job.status)}">${escapeHtml(job.status)}</span></div>
-        <div class="admin-progress"><div class="admin-progress-bar" style="width:${pct}%"></div></div>
-        <div class="admin-muted">${escapeHtml(job.phase || '')} &mdash;
-             ${escapeHtml(progress.message || '')}${total ? ` (${current}/${total})` : ''}</div>
+        <div class="admin-row admin-row-between" style="margin-top:0">
+            <div><strong>${escapeHtml(job.mode)}</strong> &middot;
+                 ${escapeHtml(job.certificationId)} / ${escapeHtml(job.audioFormat)}
+                 <span class="admin-status admin-status-${escapeHtml(job.status)}">${escapeHtml(job.status)}</span></div>
+            <button type="button" id="cancel-job" class="admin-button admin-button-danger admin-button-small"
+                    data-job-id="${escapeHtml(job.jobId)}">Cancel job</button>
+        </div>
+        <div class="admin-progress" role="progressbar" aria-valuenow="${pct}"
+             aria-valuemin="0" aria-valuemax="100">
+            <div class="admin-progress-bar" style="width:${pct}%"></div>
+        </div>
+        <p class="admin-muted" style="margin:0">${escapeHtml(job.phase || '')} &mdash;
+             ${escapeHtml(progress.message || '')}${total ? ` (${current}/${total})` : ''}</p>
     `;
+    container.querySelector('#cancel-job').addEventListener('click', (event) =>
+        cancelJob(job.jobId, event.currentTarget));
     show('redeploy-warning');
     setRunButtonsDisabled(true);
 }
 
-function renderHistory(jobs) {
-    const container = el('job-history');
-    if (!jobs.length) {
-        container.className = 'admin-muted';
-        container.textContent = 'No jobs yet.';
+async function cancelJob(jobId, button) {
+    if (!window.confirm('Cancel this job? A run already in progress finishes its current step.')) {
         return;
     }
-    container.className = '';
+    setError('jobs-error', null);
+    await withBusy(button, async () => {
+        try {
+            await api(`portal/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' });
+            toast('Job cancelled.', 'success');
+            await refreshJobs();
+        } catch (err) {
+            fail('jobs-error', err);
+        }
+    });
+}
+
+function renderHistory(jobs) {
+    const container = el('job-history');
+    el('count-jobs').textContent = jobs.length;
+    if (!jobs.length) {
+        container.innerHTML = emptyState('No jobs yet', 'Index a course to run the first one.');
+        return;
+    }
     container.innerHTML = `
+        <div class="admin-table-wrap">
         <table class="admin-table">
-            <thead><tr><th>Started</th><th>Mode</th><th>Target</th><th>Status</th><th>Result</th></tr></thead>
+            <thead><tr>
+                <th scope="col">Started</th><th scope="col">Mode</th><th scope="col">Target</th>
+                <th scope="col">Status</th><th scope="col">Result</th>
+            </tr></thead>
             <tbody>
                 ${jobs.map((job) => {
                     const started = job.startedAt || job.createdAt || '';
@@ -500,15 +678,16 @@ function renderHistory(jobs) {
                             ? `${job.result.episodesGenerated ?? 0} generated`
                             : '';
                     return `<tr>
-                        <td>${escapeHtml(started.replace('T', ' ').slice(0, 19))}</td>
-                        <td>${escapeHtml(job.mode)}</td>
-                        <td>${escapeHtml(job.certificationId)}/${escapeHtml(job.audioFormat)}</td>
-                        <td><span class="admin-status admin-status-${escapeHtml(job.status)}">${escapeHtml(job.status)}</span></td>
-                        <td class="admin-muted">${result}</td>
+                        <td data-label="Started">${escapeHtml(started.replace('T', ' ').slice(0, 19))}</td>
+                        <td data-label="Mode">${escapeHtml(job.mode)}</td>
+                        <td data-label="Target">${escapeHtml(job.certificationId)}/${escapeHtml(job.audioFormat)}</td>
+                        <td data-label="Status"><span class="admin-status admin-status-${escapeHtml(job.status)}">${escapeHtml(job.status)}</span></td>
+                        <td data-label="Result">${result}</td>
                     </tr>`;
                 }).join('')}
             </tbody>
         </table>
+        </div>
     `;
 }
 
@@ -518,6 +697,7 @@ async function refreshJobs() {
         const active = jobs.find((j) => j.status === 'queued' || j.status === 'running');
         renderActiveJob(active);
         renderHistory(jobs);
+        setError('jobs-error', null);
 
         if (active && !pollTimer) {
             pollTimer = setInterval(refreshJobs, POLL_INTERVAL_MS);
@@ -526,7 +706,7 @@ async function refreshJobs() {
             pollTimer = null;
         }
     } catch (err) {
-        setError('job-error', err.message);
+        fail('jobs-error', err);
     }
 }
 
@@ -535,57 +715,74 @@ async function refreshAdmins() {
     try {
         const { admins } = await api('portal/admins');
         const container = el('admin-list');
+        el('count-admins').textContent = admins.length;
         if (!admins.length) {
-            container.className = 'admin-muted';
-            container.textContent = 'No administrators registered.';
+            container.innerHTML = emptyState('No administrators', 'Add one below.');
             return;
         }
-        container.className = '';
         container.innerHTML = `
+            <div class="admin-table-wrap">
             <table class="admin-table">
-                <thead><tr><th>Account</th><th>Added by</th><th></th></tr></thead>
+                <thead><tr>
+                    <th scope="col">Account</th><th scope="col">Added by</th>
+                    <th scope="col"><span class="sr-only">Actions</span></th>
+                </tr></thead>
                 <tbody>
                     ${admins.map((a) => `<tr>
-                        <td>${escapeHtml(a.userDetails || a.id)}</td>
-                        <td class="admin-muted">${escapeHtml(a.addedBy || '')}</td>
-                        <td><button class="admin-button admin-button-danger"
+                        <td data-label="Account">${escapeHtml(a.userDetails || a.id)}</td>
+                        <td data-label="Added by">${escapeHtml(a.addedBy || '')}</td>
+                        <td><button type="button" class="admin-button admin-button-danger admin-button-small"
                                     data-admin-id="${escapeHtml(a.id)}">Remove</button></td>
                     </tr>`).join('')}
                 </tbody>
             </table>
+            </div>
         `;
         container.querySelectorAll('[data-admin-id]').forEach((button) => {
-            button.addEventListener('click', () => removeAdmin(button.dataset.adminId));
+            button.addEventListener('click', (event) =>
+                removeAdmin(button.dataset.adminId, event.currentTarget));
         });
     } catch (err) {
-        setError('admins-error', err.message);
+        fail('admins-error', err);
     }
 }
 
-async function removeAdmin(adminId) {
-    setError('admins-error', null);
-    try {
-        await api(`portal/admins/${encodeURIComponent(adminId)}`, { method: 'DELETE' });
-        await refreshAdmins();
-    } catch (err) {
-        setError('admins-error', err.message);
-    }
-}
-
-el('add-admin').addEventListener('click', async () => {
-    const userDetails = el('new-admin').value.trim();
-    if (!userDetails) {
-        setError('admins-error', 'Enter an account address.');
+async function removeAdmin(adminId, button) {
+    if (!window.confirm(`Remove ${adminId} from the administrators of this environment?`)) {
         return;
     }
     setError('admins-error', null);
-    try {
-        await api('portal/admins', { method: 'POST', body: JSON.stringify({ userDetails }) });
-        el('new-admin').value = '';
-        await refreshAdmins();
-    } catch (err) {
-        setError('admins-error', err.message);
+    await withBusy(button, async () => {
+        try {
+            await api(`portal/admins/${encodeURIComponent(adminId)}`, { method: 'DELETE' });
+            toast('Administrator removed.', 'success');
+            await refreshAdmins();
+        } catch (err) {
+            fail('admins-error', err);
+        }
+    });
+}
+
+el('add-admin').addEventListener('click', async (event) => {
+    const userDetails = el('new-admin').value.trim();
+    const field = el('new-admin');
+    if (!userDetails) {
+        field.setAttribute('aria-invalid', 'true');
+        setError('admins-error', 'Enter an account address.');
+        return;
     }
+    field.removeAttribute('aria-invalid');
+    setError('admins-error', null);
+    await withBusy(event.currentTarget, async () => {
+        try {
+            await api('portal/admins', { method: 'POST', body: JSON.stringify({ userDetails }) });
+            el('new-admin').value = '';
+            toast(`Added ${userDetails}.`, 'success');
+            await refreshAdmins();
+        } catch (err) {
+            fail('admins-error', err);
+        }
+    });
 });
 
 init();
