@@ -123,6 +123,10 @@ def synthesize_ssml(
         result = synthesizer.speak_ssml_async(ssml_content).get()
 
         if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+            # Billed per character of SSML submitted, so meter on success only.
+            from .cost import record_tts_usage
+
+            record_tts_usage(len(ssml_content))
             # Calculate duration from audio data
             # MP3 at 192kbps: duration = file_size_bytes * 8 / 192000
             file_size = os.path.getsize(output_path)

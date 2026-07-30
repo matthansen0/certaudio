@@ -6,16 +6,23 @@ sequentially instead of as a workflow matrix, and progress is reported through
 a callback so the admin portal can surface it.
 """
 
+import json
 import math
 import os
 import re
+from datetime import datetime, timezone
 from typing import Callable, Optional
 
+from azure.core.exceptions import ResourceNotFoundError
+from azure.storage.blob import ContentSettings
+
 from . import deep_discover
+from . import cost
 from .check_content_delta import check_content_delta, get_affected_episodes
 from .generate_episodes import SHARED_SEARCH_INDEX, run_generation
 from .generate_index import generate_index
 from .index_content import index_content
+from .upload_to_blob import get_blob_service_client
 
 REQUIRED_ENV = (
     "OPENAI_ENDPOINT",
@@ -77,7 +84,7 @@ def affected_batch_indices(
     return sorted(batches)
 
 
-def _discover(certification_id: str, progress: ProgressFn) -> dict:
+def _discover(certification_id: str, progress: ProgressFn, exam_url: Optional[str] = None) -> dict:
     progress("discover", 0, 1, f"Discovering content for {certification_id}")
 
     if certification_id == "test":
@@ -89,7 +96,9 @@ def _discover(certification_id: str, progress: ProgressFn) -> dict:
             certification_id=certification_id,
             catalog=catalog,
         )
-        exam_skills = deep_discover.fetch_exam_skills_outline(certification_id)
+        exam_skills = deep_discover.fetch_exam_skills_outline(
+            certification_id, study_guide_url=exam_url
+        )
         discovery = deep_discover.result_to_dict(result, exam_skills)
 
     if not isinstance(discovery.get("skillsOutline"), list):
@@ -200,32 +209,127 @@ def _voices(overrides: Optional[dict]) -> dict:
     }
 
 
+DISCOVERY_CONTAINER = "scripts"
+
+
+def _discovery_blob_path(certification_id: str) -> str:
+    return f"{certification_id}/discovery/latest.json"
+
+
+def _discovery_blob(certification_id: str):
+    return get_blob_service_client().get_blob_client(
+        container=DISCOVERY_CONTAINER, blob=_discovery_blob_path(certification_id)
+    )
+
+
+def _save_discovery(
+    certification_id: str,
+    discovery: dict,
+    exam_url: Optional[str],
+    unit_count: int,
+) -> str:
+    """Store only what generation needs.
+
+    The full discovery dict carries the body text of every unit (~1 MB for a
+    large certification); generation reads nothing but the outline, so the
+    bodies are dropped rather than persisted.
+    """
+    artifact = {
+        "certificationId": certification_id,
+        "examUrl": exam_url or "",
+        "discoveredAt": datetime.now(timezone.utc).isoformat(),
+        "skillsOutline": discovery["skillsOutline"],
+        "sourceUrls": discovery["sourceUrls"],
+        "totalUnits": discovery.get("totalUnits", 0),
+        "totalWords": discovery.get("totalWords", 0),
+        "estimatedEpisodes": discovery.get("estimatedEpisodes", 0),
+        "unitCount": unit_count,
+    }
+    _discovery_blob(certification_id).upload_blob(
+        json.dumps(artifact),
+        overwrite=True,
+        content_settings=ContentSettings(content_type="application/json"),
+    )
+    return _discovery_blob_path(certification_id)
+
+
+def load_discovery(certification_id: str) -> Optional[dict]:
+    try:
+        return json.loads(_discovery_blob(certification_id).download_blob().readall())
+    except ResourceNotFoundError:
+        return None
+
+
+def run_index(
+    certification_id: str,
+    audio_format: str = "instructional",
+    voices: Optional[dict] = None,
+    force: bool = False,
+    exam_url: Optional[str] = None,
+    topics_per_episode: int = DEFAULT_TOPICS_PER_EPISODE,
+    progress: Optional[ProgressFn] = None,
+) -> dict:
+    """Discover and index grounding content, then stop.
+
+    Separated from generation because this half costs cents and minutes while
+    generation costs dollars and hours, so the exact episode count and a cost
+    estimate can be reviewed before committing to the expensive half.
+    """
+    require_environment()
+    progress = progress or _noop_progress
+
+    discovery = _discover(certification_id, progress, exam_url)
+    unit_count = episode_unit_count(discovery["skillsOutline"], topics_per_episode)
+    if not unit_count:
+        raise RuntimeError("Discovery produced zero episode units")
+
+    blob_path = _save_discovery(certification_id, discovery, exam_url, unit_count)
+    _index(certification_id, discovery["sourceUrls"], progress)
+
+    return {
+        "mode": "index",
+        "certificationId": certification_id,
+        "unitCount": unit_count,
+        "totalUnits": discovery.get("totalUnits", 0),
+        "totalWords": discovery.get("totalWords", 0),
+        "sourceCount": len(discovery["sourceUrls"]),
+        "discoveryBlobPath": blob_path,
+    }
+
+
 def run_generate(
     certification_id: str,
     audio_format: str = "instructional",
     voices: Optional[dict] = None,
     force: bool = False,
+    exam_url: Optional[str] = None,
     batch_size: int = DEFAULT_BATCH_SIZE,
     topics_per_episode: int = DEFAULT_TOPICS_PER_EPISODE,
     progress: Optional[ProgressFn] = None,
 ) -> dict:
-    """Full generation: discover, index, generate every batch, publish."""
+    """Generate every batch from the stored discovery outline, then publish."""
     require_environment()
     progress = progress or _noop_progress
     resolved_voices = _voices(voices)
 
-    discovery = _discover(certification_id, progress)
-    _index(certification_id, discovery["sourceUrls"], progress)
+    artifact = load_discovery(certification_id)
+    if not artifact:
+        raise RuntimeError(
+            f"No indexed content for '{certification_id}'. Run an index job first — "
+            "generation reuses the stored discovery outline instead of re-crawling."
+        )
 
-    unit_count = episode_unit_count(discovery["skillsOutline"], topics_per_episode)
+    skills = artifact["skillsOutline"]
+    unit_count = artifact.get("unitCount") or episode_unit_count(skills, topics_per_episode)
     if not unit_count:
-        raise RuntimeError("Discovery produced zero episode units")
+        raise RuntimeError("Stored discovery outline produced zero episode units")
     batch_count = math.ceil(unit_count / batch_size)
 
+    cost.reset_usage()
     outcome = _run_batches(
         certification_id,
         audio_format,
-        discovery["skillsOutline"],
+        skills,
         list(range(batch_count)),
         resolved_voices,
         batch_size,
@@ -239,10 +343,12 @@ def run_generate(
         "mode": "generate",
         "certificationId": certification_id,
         "audioFormat": audio_format,
+        "discoveredAt": artifact.get("discoveredAt"),
         "episodesGenerated": len(outcome["generated"]),
         "episodesSkipped": len(outcome["skipped"]),
         "totalEpisodes": index_data.get("totalEpisodes", 0),
         "totalDurationMinutes": index_data.get("totalDurationMinutes", 0),
+        "usage": cost.snapshot_usage(),
     }
 
 
@@ -251,11 +357,16 @@ def run_refresh(
     audio_format: str = "instructional",
     voices: Optional[dict] = None,
     force: bool = False,
+    exam_url: Optional[str] = None,
     batch_size: int = DEFAULT_BATCH_SIZE,
     topics_per_episode: int = DEFAULT_TOPICS_PER_EPISODE,
     progress: Optional[ProgressFn] = None,
 ) -> dict:
-    """Selective refresh: regenerate only batches affected by changed sources."""
+    """Selective refresh: regenerate only batches affected by changed sources.
+
+    Discovery stays inline here because the delta check has to run first, so
+    there is nothing to review before committing.
+    """
     require_environment()
     progress = progress or _noop_progress
     resolved_voices = _voices(voices)
@@ -279,12 +390,15 @@ def run_refresh(
             "message": "No content updates found",
         }
 
-    discovery = _discover(certification_id, progress)
-    _index(certification_id, discovery["sourceUrls"], progress)
-
+    discovery = _discover(certification_id, progress, exam_url)
     unit_count = episode_unit_count(discovery["skillsOutline"], topics_per_episode)
     if not unit_count:
         raise RuntimeError("Discovery produced zero episode units")
+
+    _save_discovery(certification_id, discovery, exam_url, unit_count)
+    _index(certification_id, discovery["sourceUrls"], progress)
+
+    cost.reset_usage()
     batch_count = math.ceil(unit_count / batch_size)
 
     batch_indices = affected_batch_indices(
@@ -318,7 +432,8 @@ def run_refresh(
         "episodesGenerated": len(outcome["generated"]),
         "episodesSkipped": len(outcome["skipped"]),
         "totalEpisodes": index_data.get("totalEpisodes", 0),
+        "usage": cost.snapshot_usage(),
     }
 
 
-RUNNERS = {"generate": run_generate, "refresh": run_refresh}
+RUNNERS = {"index": run_index, "generate": run_generate, "refresh": run_refresh}

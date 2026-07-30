@@ -34,6 +34,7 @@ from jinja2 import Environment, FileSystemLoader
 from openai import AzureOpenAI, RateLimitError
 
 # Import sibling tools
+from . import cost
 from .synthesize_audio import synthesize_audio, synthesize_audio_segments
 from .upload_to_blob import upload_to_blob
 from .save_episode import save_episode
@@ -77,7 +78,8 @@ def _get_speech_headers() -> dict:
     return {"Authorization": f"Bearer {speech_token}"}
 
 
-def _fetch_speech_voices() -> tuple[str, set[str]]:
+def _fetch_speech_voice_catalog() -> tuple[str, list[dict]]:
+    """Return (region, raw voice records) from the Speech voices/list API."""
     region = _get_speech_region()
     url = f"https://{region}.tts.speech.microsoft.com/cognitiveservices/voices/list"
     headers = _get_speech_headers()
@@ -86,7 +88,11 @@ def _fetch_speech_voices() -> tuple[str, set[str]]:
         raise RuntimeError(
             f"Voice list request failed ({resp.status_code}): {resp.text[:200]}"
         )
-    data = resp.json()
+    return region, resp.json()
+
+
+def _fetch_speech_voices() -> tuple[str, set[str]]:
+    region, data = _fetch_speech_voice_catalog()
     # Use ShortName which is the format used in SSML voice names (e.g., "en-US-JennyNeural")
     voice_names = {v.get("ShortName") for v in data if v.get("ShortName")}
     return region, voice_names
@@ -177,7 +183,9 @@ def call_openai_with_retry(openai_client: AzureOpenAI, max_retries: int = 5, **k
     
     for attempt in range(max_retries):
         try:
-            return openai_client.chat.completions.create(**kwargs)
+            response = openai_client.chat.completions.create(**kwargs)
+            cost.record_gpt_usage(getattr(response, "usage", None))
+            return response
         except RateLimitError as e:
             if attempt == max_retries - 1:
                 raise  # Re-raise on final attempt
@@ -397,7 +405,9 @@ def generate_ssml(
 
 def _is_dragon_hd_voice(voice_name: str) -> bool:
     """Check if a voice is a Dragon HD voice (which has SSML compatibility issues)."""
-    return "DragonHD" in voice_name or ":Dragon" in voice_name
+    from .cost import is_dragon_hd_voice
+
+    return is_dragon_hd_voice(voice_name)
 
 
 def build_ssml_from_narration(

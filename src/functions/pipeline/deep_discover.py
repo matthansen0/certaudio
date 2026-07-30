@@ -642,7 +642,9 @@ def build_unit_url(module_url: str, unit_uid: str, unit_index: int = 1) -> str:
     return f"https://learn.microsoft.com/en-us/training/modules/{module_slug}/{unit_index}-{unit_slug}/"
 
 
-def fetch_exam_skills_outline(certification_id: str) -> list[dict]:
+def fetch_exam_skills_outline(
+    certification_id: str, study_guide_url: str = None
+) -> list[dict]:
     """
     Fetch the exam skills outline from the official study guide.
     
@@ -658,7 +660,7 @@ def fetch_exam_skills_outline(certification_id: str) -> list[dict]:
         "isExamSkill": True  # Flag to distinguish from learning path content
     }
     """
-    study_guide_url = (
+    study_guide_url = study_guide_url or (
         f"https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/"
         f"{certification_id.lower()}"
     )
