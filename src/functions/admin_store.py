@@ -136,8 +136,11 @@ def claim_bootstrap(user: dict) -> dict:
 # ----------------------------------------------------------------------- jobs
 def active_job() -> Optional[dict]:
     states = ", ".join(f"'{state}'" for state in ACTIVE_JOB_STATES)
-    query = f"SELECT * FROM c WHERE c.status IN ({states}) ORDER BY c.createdAt DESC"
+    # Ordered in Python: a cross-partition ORDER BY on a property other than the
+    # filtered one needs a composite index, and the container has none.
+    query = f"SELECT * FROM c WHERE c.status IN ({states})"
     results = list(_jobs().query_items(query=query, enable_cross_partition_query=True))
+    results.sort(key=lambda job: job.get("createdAt") or "", reverse=True)
     return results[0] if results else None
 
 

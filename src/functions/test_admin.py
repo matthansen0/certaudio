@@ -419,6 +419,31 @@ def test_is_stale_ignores_running_jobs():
     assert not admin.admin_store.is_stale({"status": "running", "createdAt": _aged(86400)})
 
 
+def test_active_job_returns_the_newest_without_ordering_in_cosmos():
+    """The jobs container has no composite index.
+
+    A cross-partition ORDER BY on a property other than the filtered one needs
+    one, and Cosmos answers 400 without it -- which would break every job
+    submission, since post_job calls this first.
+    """
+    captured = {}
+    rows = [
+        {"jobId": "older", "status": "queued", "createdAt": _aged(600)},
+        {"jobId": "newest", "status": "running", "createdAt": _aged(60)},
+    ]
+
+    class _Container:
+        def query_items(self, query, **kwargs):
+            captured["query"] = query
+            return iter(rows)
+
+    with patch.object(admin.admin_store, "_jobs", return_value=_Container()):
+        job = admin.admin_store.active_job()
+
+    assert job["jobId"] == "newest"
+    assert "order by" not in captured["query"].lower()
+
+
 def test_stale_queued_job_does_not_block_new_submissions():
     """A job the worker never picked up must not lock the portal out forever."""
     stale = {"jobId": "orphan", "status": "queued", "createdAt": _aged(3600)}
