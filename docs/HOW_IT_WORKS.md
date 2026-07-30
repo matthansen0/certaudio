@@ -364,9 +364,9 @@ Basic (B1):
 **The API Endpoints**:
 ```
 GET  /api/healthz                          # Health check
-GET  /api/certifications                   # List available certs
+GET  /api/certifications                   # List available certs (unpublished hidden)
 GET  /api/episodes/{certId}/{format}       # Get episode list
-GET  /api/audio/{certId}/{format}/{num}    # Stream audio (proxied from blob)
+GET  /api/audio/{certId}/{format}/{num}    # Stream audio (requires sign-in)
 GET  /api/script/{certId}/{format}/{num}   # Get transcript
 POST /api/progress/{userId}/{certId}       # Save progress (anonymous)
 GET  /api/progress/{userId}/{certId}       # Get progress (anonymous)
@@ -374,6 +374,13 @@ GET  /api/me                               # Get authenticated user identity
 GET  /api/me/progress/{certId}             # Get progress (authenticated)
 POST /api/me/progress/{certId}             # Update progress (authenticated)
 ```
+
+The episode list is deliberately public so visitors can see what a course covers,
+but `/api/audio/*` rejects anonymous callers with `401` before it reads the blob.
+Streaming is the only expensive egress path, so the check has to happen server
+side; the player also refuses to set the `<audio>` src when signed out, which
+means no request is made at all. Because the response is now per-user it is sent
+`Cache-Control: private` so a shared cache cannot hand it to a stranger.
 
 **🎓 Learn More**:
 - [Functions hosting options](https://learn.microsoft.com/en-us/azure/azure-functions/functions-scale)
@@ -600,7 +607,7 @@ SWA automatically injects this base64-encoded JSON header on requests to the lin
 The `userId` is stable per-provider—same user always gets the same ID, perfect for keying Cosmos documents.
 
 **Progress Sync Flow**:
-1. **Anonymous users**: progress saved to `localStorage` only (device-local)
+1. **Anonymous users**: can browse the episode list, but playback requires signing in
 2. **Authenticated users**: progress saved to both `localStorage` (instant) and Cosmos DB (durable)
 3. **Sign in on new device**: server progress merges with local, keeping most-complete state per episode
 4. **Merge logic**: `completed = server OR local`, `position = max(server, local)`
@@ -985,8 +992,9 @@ settings.
 | Field | Default | Description |
 |-------|---------|-------------|
 | `certificationId` | *required* | Lowercase letters, digits and hyphens |
-| `mode` | `generate` | `generate` or `refresh` |
+| `mode` | `generate` | `index`, `generate` or `refresh` |
 | `audioFormat` | `instructional` | `instructional` or `podcast` |
+| `examUrl` | *(derived)* | Must be an `https://learn.microsoft.com/` URL |
 | `force` | `false` | Regenerate episodes that already exist |
 | `voices.instructional` | `en-US-Andrew:DragonHDLatestNeural` | Voice for instructional format |
 | `voices.podcastHost` | `en-US-Ava:DragonHDLatestNeural` | Host voice for podcast format |
@@ -995,6 +1003,51 @@ settings.
 The voice role names have to match what `_voices()` reads. They did not once, and
 an override was accepted by the API and then silently dropped, so a test now
 asserts the two agree.
+
+`examUrl` is fetched server-side from inside the VNet, so it is restricted to
+`learn.microsoft.com` at the API boundary rather than trusted.
+
+### Why generation is two jobs
+
+`index` discovers content and indexes it for RAG. `generate` reads the outline
+that `index` stored and synthesises audio from it. They are separate because the
+costs are separated by roughly three orders of magnitude:
+
+| Phase | Spends on | Typical cost |
+|-------|-----------|--------------|
+| `index` | Embeddings only (`text-embedding-3-large`) | ~$0.03 |
+| `generate` | GPT-4o per episode, then Speech per character | ~$0.25/episode |
+
+Splitting them means the exact episode count is known *before* committing to the
+expensive half. That count is not estimated: `episode_unit_count()` is
+deterministic over the stored outline. Only the per-episode size is modelled, and
+once a run has completed the measured characters-per-episode replaces the
+estimate, so the figure self-corrects.
+
+It also shrinks the blast radius of an interrupted run. The queue is configured
+`maxDequeueCount: 2` with a five-minute visibility timeout, so a host restart
+mid-job costs one retry before the message is poisoned — far more likely across a
+multi-hour generate than a five-minute index.
+
+### Admin portal endpoints
+
+```
+GET    /api/portal/status                          # Caller's admin state
+GET    /api/portal/voices                          # en-* voices the region supports
+GET    /api/portal/courses                         # Course list + price table
+GET    /api/portal/courses/{certId}                # Detail, job history, rates
+PATCH  /api/portal/courses/{certId}                # Display name, exam URL, published
+DELETE /api/portal/courses/{certId}                # Purge episodes, blobs, search docs
+GET    /api/portal/courses/{certId}/estimate       # Server-side cost estimate
+GET    /api/portal/jobs                            # Job history
+POST   /api/portal/jobs                            # Submit index/generate/refresh
+GET    /api/portal/jobs/{jobId}                    # Job progress
+```
+
+Deleting a course also removes that certification's documents from the AI Search
+index. The index is shared across certifications and filtered by
+`certificationId`, so dropping the index itself would take every other course
+with it — the documents have to go individually.
 
 `enableStudyPartner` and `location` are deployment parameters, set with
 `azd env set` before `azd up` rather than per job.

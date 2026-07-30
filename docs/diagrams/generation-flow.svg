@@ -1,19 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1480" height="590" viewBox="0 0 1480 590" role="img" aria-label="certaudio - generation job lifecycle" font-family="Segoe UI, Helvetica Neue, Arial, DejaVu Sans, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="1480" height="760" viewBox="0 0 1480 760" role="img" aria-label="certaudio - generation job lifecycle" font-family="Segoe UI, Helvetica Neue, Arial, DejaVu Sans, sans-serif">
 <title>certaudio - generation job lifecycle</title>
 <defs>
 <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#343a40"/></marker>
 </defs>
-<rect width="1480" height="590" fill="#ffffff"/>
+<rect width="1480" height="760" fill="#ffffff"/>
 <text x="60" y="44" font-size="24" font-weight="600" fill="#1e1e1e">certaudio - generation job lifecycle</text>
-<path d="M 320 116 L 430 116" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
+<path d="M 320 128 L 430 128" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
 <path d="M 730 128 L 860 128" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
 <path d="M 580 166 L 580.0 193.0 Q 580 205 568.0 205.0 L 212.0 205.0 Q 200 205 200.0 217.0 L 200 250" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
 <path d="M 310 294 L 400 294" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
 <path d="M 600 294 L 660 294" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
 <path d="M 860 294 L 920 294" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
-<path d="M 1160 294 L 1220 294" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
-<path d="M 1040 338 L 1040.0 373.0 Q 1040 385 1028.0 385.0 L 722.0 385.0 Q 710 385 710.0 397.0 L 710 430" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
-<path d="M 860 474 L 940 474" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="7 5" marker-end="url(#ah)"/>
+<path d="M 1050 338 L 1050.0 372.0 Q 1050 384 1038.0 384.0 L 242.0 384.0 Q 230 384 230.0 396.0 L 230 430" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
+<path d="M 370 474 L 490 474" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
+<path d="M 730 474 L 790 474" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
+<path d="M 990 474 L 1050 474" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
+<path d="M 610 518 L 610.0 552.0 Q 610 564 598.0 564.0 L 462.0 564.0 Q 450 564 450.0 576.0 L 450 610" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#ah)"/>
+<path d="M 600 654 L 700 654" fill="none" stroke="#343a40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="7 5" marker-end="url(#ah)"/>
 <rect x="90" y="90" width="230" height="76" rx="12" ry="12" fill="#ffec99" stroke="#343a40" stroke-width="2"/>
 <text x="205.0" y="123.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Admin browser</text>
 <text x="205.0" y="144.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">starts a job</text>
@@ -32,38 +35,51 @@
 <rect x="660" y="250" width="200" height="88" rx="12" ry="12" fill="#a5d8ff" stroke="#343a40" stroke-width="2"/>
 <text x="760.0" y="289.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Index</text>
 <text x="760.0" y="310.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">Azure AI Search</text>
-<rect x="920" y="250" width="240" height="88" rx="12" ry="12" fill="#a5d8ff" stroke="#343a40" stroke-width="2"/>
-<text x="1040.0" y="289.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Generate episodes</text>
-<text x="1040.0" y="310.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">OpenAI + Speech</text>
-<rect x="1220" y="250" width="200" height="88" rx="12" ry="12" fill="#d8f5a2" stroke="#343a40" stroke-width="2"/>
-<text x="1320.0" y="289.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Publish</text>
-<text x="1320.0" y="310.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">Cosmos + Blob</text>
-<rect x="560" y="430" width="300" height="88" rx="12" ry="12" fill="#d8f5a2" stroke="#343a40" stroke-width="2"/>
-<text x="710.0" y="469.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Cosmos jobs container</text>
-<text x="710.0" y="490.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">status + progress</text>
-<rect x="940" y="430" width="340" height="88" rx="12" ry="12" fill="#ffec99" stroke="#343a40" stroke-width="2"/>
-<text x="1110.0" y="469.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Admin UI polls</text>
-<text x="1110.0" y="490.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">GET /api/portal/jobs/{id}</text>
-<rect x="349.2" y="95.0" width="51.7" height="19" fill="#ffffff"/>
-<text x="375.0" y="107.0" font-size="13" fill="#5c5f66" text-anchor="middle">submit</text>
+<rect x="920" y="250" width="260" height="88" rx="12" ry="12" fill="#a5d8ff" stroke="#343a40" stroke-width="2"/>
+<text x="1050.0" y="289.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Episode count</text>
+<text x="1050.0" y="310.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">+ cost estimate</text>
+<rect x="90" y="430" width="280" height="88" rx="12" ry="12" fill="#ffec99" stroke="#343a40" stroke-width="2"/>
+<text x="230.0" y="469.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Admin confirms</text>
+<text x="230.0" y="490.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">estimated cost</text>
+<rect x="490" y="430" width="240" height="88" rx="12" ry="12" fill="#a5d8ff" stroke="#343a40" stroke-width="2"/>
+<text x="610.0" y="469.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Generate episodes</text>
+<text x="610.0" y="490.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">OpenAI + Speech</text>
+<rect x="790" y="430" width="200" height="88" rx="12" ry="12" fill="#d8f5a2" stroke="#343a40" stroke-width="2"/>
+<text x="890.0" y="469.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Publish</text>
+<text x="890.0" y="490.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">Cosmos + Blob</text>
+<rect x="1050" y="430" width="260" height="88" rx="12" ry="12" fill="#d8f5a2" stroke="#343a40" stroke-width="2"/>
+<text x="1180.0" y="469.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Metered actual</text>
+<text x="1180.0" y="490.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">chars + tokens</text>
+<rect x="300" y="610" width="300" height="88" rx="12" ry="12" fill="#d8f5a2" stroke="#343a40" stroke-width="2"/>
+<text x="450.0" y="649.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Cosmos jobs container</text>
+<text x="450.0" y="670.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">status + progress</text>
+<rect x="700" y="610" width="340" height="88" rx="12" ry="12" fill="#ffec99" stroke="#343a40" stroke-width="2"/>
+<text x="870.0" y="649.5" font-size="16" font-weight="600" fill="#1e1e1e" text-anchor="middle">Admin UI polls</text>
+<text x="870.0" y="670.5" font-size="15" font-weight="400" fill="#5c5f66" text-anchor="middle">GET /api/portal/jobs/{id}</text>
+<rect x="349.2" y="107.0" width="51.7" height="19" fill="#ffffff"/>
+<text x="375.0" y="119.0" font-size="13" fill="#5c5f66" text-anchor="middle">submit</text>
 <rect x="751.0" y="107.0" width="88.1" height="19" fill="#ffffff"/>
 <text x="795.0" y="119.0" font-size="13" fill="#5c5f66" text-anchor="middle">immediately</text>
 <rect x="360.5" y="184.0" width="59.0" height="19" fill="#ffffff"/>
 <text x="390.0" y="196.0" font-size="13" fill="#5c5f66" text-anchor="middle">enqueue</text>
-<rect x="325.5" y="273.0" width="59.0" height="19" fill="#ffffff"/>
-<text x="355.0" y="285.0" font-size="13" fill="#5c5f66" text-anchor="middle">trigger</text>
-<rect x="816.4" y="364.0" width="117.2" height="19" fill="#ffffff"/>
-<text x="875.0" y="376.0" font-size="13" fill="#5c5f66" text-anchor="middle">writes progress</text>
-<rect x="874.2" y="453.0" width="51.7" height="19" fill="#ffffff"/>
-<text x="900.0" y="465.0" font-size="13" fill="#5c5f66" text-anchor="middle">status</text>
-<rect x="60" y="546" width="16" height="16" rx="4" ry="4" fill="#ffec99" stroke="#343a40" stroke-width="1.5"/>
-<text x="84" y="559" font-size="14" fill="#5c5f66">Browser</text>
-<rect x="164.88" y="546" width="16" height="16" rx="4" ry="4" fill="#a5d8ff" stroke="#343a40" stroke-width="1.5"/>
-<text x="188.88" y="559" font-size="14" fill="#5c5f66">Functions code</text>
-<rect x="324.64" y="546" width="16" height="16" rx="4" ry="4" fill="#b2f2bb" stroke="#343a40" stroke-width="1.5"/>
-<text x="348.64" y="559" font-size="14" fill="#5c5f66">HTTP response</text>
-<rect x="476.56" y="546" width="16" height="16" rx="4" ry="4" fill="#ffd8a8" stroke="#343a40" stroke-width="1.5"/>
-<text x="500.56" y="559" font-size="14" fill="#5c5f66">Storage queue</text>
-<rect x="628.48" y="546" width="16" height="16" rx="4" ry="4" fill="#d8f5a2" stroke="#343a40" stroke-width="1.5"/>
-<text x="652.48" y="559" font-size="14" fill="#5c5f66">Data plane</text>
+<rect x="318.2" y="273.0" width="73.5" height="19" fill="#ffffff"/>
+<text x="355.0" y="285.0" font-size="13" fill="#5c5f66" text-anchor="middle">index job</text>
+<rect x="559.6" y="363.0" width="160.9" height="19" fill="#ffffff"/>
+<text x="640.0" y="375.0" font-size="13" fill="#5c5f66" text-anchor="middle">cheap half stops here</text>
+<rect x="382.3" y="453.0" width="95.4" height="19" fill="#ffffff"/>
+<text x="430.0" y="465.0" font-size="13" fill="#5c5f66" text-anchor="middle">generate job</text>
+<rect x="471.4" y="543.0" width="117.2" height="19" fill="#ffffff"/>
+<text x="530.0" y="555.0" font-size="13" fill="#5c5f66" text-anchor="middle">writes progress</text>
+<rect x="624.2" y="633.0" width="51.7" height="19" fill="#ffffff"/>
+<text x="650.0" y="645.0" font-size="13" fill="#5c5f66" text-anchor="middle">status</text>
+<rect x="60" y="716" width="16" height="16" rx="4" ry="4" fill="#ffec99" stroke="#343a40" stroke-width="1.5"/>
+<text x="84" y="729" font-size="14" fill="#5c5f66">Browser</text>
+<rect x="164.88" y="716" width="16" height="16" rx="4" ry="4" fill="#a5d8ff" stroke="#343a40" stroke-width="1.5"/>
+<text x="188.88" y="729" font-size="14" fill="#5c5f66">Functions code</text>
+<rect x="324.64" y="716" width="16" height="16" rx="4" ry="4" fill="#b2f2bb" stroke="#343a40" stroke-width="1.5"/>
+<text x="348.64" y="729" font-size="14" fill="#5c5f66">HTTP response</text>
+<rect x="476.56" y="716" width="16" height="16" rx="4" ry="4" fill="#ffd8a8" stroke="#343a40" stroke-width="1.5"/>
+<text x="500.56" y="729" font-size="14" fill="#5c5f66">Storage queue</text>
+<rect x="628.48" y="716" width="16" height="16" rx="4" ry="4" fill="#d8f5a2" stroke="#343a40" stroke-width="1.5"/>
+<text x="652.48" y="729" font-size="14" fill="#5c5f66">Data plane</text>
 </svg>
