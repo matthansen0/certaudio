@@ -408,6 +408,53 @@
     transition: width var(--transition-normal);
 }
 
+/* ------------------------------------------------------------- job log */
+.admin-log {
+    margin-top: 0.9rem;
+    border-top: 1px solid var(--color-border);
+    padding-top: 0.6rem;
+}
+
+.admin-log summary {
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--color-text-secondary);
+}
+
+.admin-log-list {
+    list-style: none;
+    margin: 0.5rem 0 0;
+    padding: 0;
+    max-height: 15rem;
+    overflow-y: auto;
+    font-size: 0.84rem;
+}
+
+.admin-log-list li {
+    display: grid;
+    grid-template-columns: 4.5rem 5.5rem minmax(0, 1fr);
+    gap: 0.5rem;
+    padding: 0.22rem 0;
+    border-bottom: 1px solid var(--color-border-light);
+}
+
+.admin-log-list li:last-child {
+    border-bottom: none;
+}
+
+.admin-log-time {
+    color: var(--color-text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.admin-log-phase {
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    align-self: center;
+}
+
 /* ------------------------------------------------------------ skeletons */
 .admin-skeleton {
     display: flex;
@@ -708,6 +755,14 @@
     .admin-facts {
         grid-template-columns: minmax(0, 1fr);
         gap: 0.1rem;
+    }
+
+    .admin-log-list li {
+        grid-template-columns: 4.5rem minmax(0, 1fr);
+    }
+
+    .admin-log-phase {
+        display: none;
     }
 
     .admin-facts dd {

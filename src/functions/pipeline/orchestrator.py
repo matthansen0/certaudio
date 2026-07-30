@@ -91,6 +91,7 @@ def _discover(certification_id: str, progress: ProgressFn, exam_url: Optional[st
         result = deep_discover.discover_test_content()
         discovery = deep_discover.result_to_dict(result)
     else:
+        progress("discover", 0, 1, f"Reading the Microsoft Learn catalog for {certification_id}")
         catalog = deep_discover.fetch_catalog()
         cert_ref = deep_discover.resolve_certification(certification_id, catalog)
         if cert_ref is None:
@@ -103,6 +104,7 @@ def _discover(certification_id: str, progress: ProgressFn, exam_url: Optional[st
             certification_id=certification_id,
             catalog=catalog,
             cert_ref=cert_ref,
+            progress=progress,
         )
         progress("discover", 0, 1, "Reading the exam skills outline")
         exam_skills = deep_discover.merge_exam_skills(
@@ -187,7 +189,7 @@ def _index(certification_id: str, source_urls: list[str], progress: ProgressFn) 
     certification: retrieval filters on the tag, and the Study Partner reads the
     same content instead of maintaining a duplicate copy.
     """
-    progress("index", 0, 1, f"Indexing {len(source_urls)} sources")
+    progress("index", 0, len(source_urls), f"Indexing {len(source_urls)} sources")
     index_content(
         certification_id=certification_id,
         source_urls=source_urls,
@@ -195,8 +197,9 @@ def _index(certification_id: str, source_urls: list[str], progress: ProgressFn) 
         openai_endpoint=os.environ["OPENAI_ENDPOINT"],
         update_mode=True,
         index_name=SHARED_SEARCH_INDEX,
+        progress=progress,
     )
-    progress("index", 1, 1, "Indexing complete")
+    progress("index", len(source_urls), len(source_urls), "Indexing complete")
 
 
 def _run_batches(

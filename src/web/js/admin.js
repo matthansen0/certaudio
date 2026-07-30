@@ -604,6 +604,37 @@ function setRunButtonsDisabled(disabled) {
     });
 }
 
+// An index job returns unit and coverage counts; only generate/refresh produce
+// episodes. Reading episodesGenerated for both showed every index run as
+// "0 generated", which reads as "found nothing".
+function jobOutcome(job) {
+    if (job.error) return escapeHtml(job.error.slice(0, 120));
+    const result = job.result;
+    if (!result) return '';
+    if (job.mode === 'index') {
+        const report = result.discoveryReport || {};
+        const bits = [`${result.totalUnits ?? 0} units`, `${result.unitCount ?? 0} episodes`];
+        if (result.totalWords) bits.push(`${Number(result.totalWords).toLocaleString()} words`);
+        if (report.coverageGrade) bits.push(`coverage ${escapeHtml(report.coverageGrade)}`);
+        if (report.unitsFailed) bits.push(`${report.unitsFailed} failed`);
+        return escapeHtml(bits.join(' · '));
+    }
+    return `${result.episodesGenerated ?? 0} episodes generated`;
+}
+
+function renderJobLog(job) {
+    const entries = job.log || [];
+    if (!entries.length) return '';
+    const rows = entries.slice(-12).reverse().map((e) =>
+        `<li><span class="admin-log-time">${escapeHtml((e.at || '').slice(11, 19))}</span>`
+        + `<span class="admin-log-phase">${escapeHtml(e.phase || '')}</span>`
+        + `<span>${escapeHtml(e.message || '')}</span></li>`).join('');
+    return `<details class="admin-log" open>
+        <summary>Activity (${entries.length})</summary>
+        <ul class="admin-log-list">${rows}</ul>
+    </details>`;
+}
+
 function renderActiveJob(job) {
     const container = el('active-job');
     if (!job) {
@@ -631,7 +662,8 @@ function renderActiveJob(job) {
             <div class="admin-progress-bar" style="width:${pct}%"></div>
         </div>
         <p class="admin-muted" style="margin:0">${escapeHtml(job.phase || '')} &mdash;
-             ${escapeHtml(progress.message || '')}${total ? ` (${current}/${total})` : ''}</p>
+             ${escapeHtml(progress.message || '')}${total ? ` (${current}/${total}${pct ? `, ${pct}%` : ''})` : ''}</p>
+        ${renderJobLog(job)}
     `;
     container.querySelector('#cancel-job').addEventListener('click', (event) =>
         cancelJob(job.jobId, event.currentTarget));
@@ -672,17 +704,12 @@ function renderHistory(jobs) {
             <tbody>
                 ${jobs.map((job) => {
                     const started = job.startedAt || job.createdAt || '';
-                    const result = job.error
-                        ? escapeHtml(job.error.slice(0, 90))
-                        : job.result
-                            ? `${job.result.episodesGenerated ?? 0} generated`
-                            : '';
                     return `<tr>
                         <td data-label="Started">${escapeHtml(started.replace('T', ' ').slice(0, 19))}</td>
                         <td data-label="Mode">${escapeHtml(job.mode)}</td>
                         <td data-label="Target">${escapeHtml(job.certificationId)}/${escapeHtml(job.audioFormat)}</td>
                         <td data-label="Status"><span class="admin-status admin-status-${escapeHtml(job.status)}">${escapeHtml(job.status)}</span></td>
-                        <td data-label="Result">${result}</td>
+                        <td data-label="Result">${jobOutcome(job)}</td>
                     </tr>`;
                 }).join('')}
             </tbody>

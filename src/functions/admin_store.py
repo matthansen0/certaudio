@@ -19,6 +19,9 @@ ACTIVE_JOB_STATES = ("queued", "running")
 # A queued job the worker never picked up. Pickup is near-instant when the queue
 # trigger is healthy, so anything older than this is orphaned, not waiting.
 STALE_QUEUED_AFTER_SECONDS = 900
+# Rolling progress log kept on the job document. Bounded because a long run
+# emits hundreds of updates and the document has a 2 MB ceiling.
+JOB_LOG_LIMIT = 60
 
 _client = None
 _credential = None
@@ -261,11 +264,21 @@ def mark_cancelled(job_id: str, reason: str = "") -> Optional[dict]:
 
 
 def record_progress(job_id: str, phase: str, current: int, total: int, message: str) -> None:
-    update_job(
-        job_id,
-        phase=phase,
-        progress={"current": current, "total": total, "message": message},
+    job = get_job(job_id)
+    if not job:
+        return
+    log = list(job.get("log") or [])
+    # Collapse repeats so a throttled counter does not flood the log.
+    if not log or log[-1].get("message") != message:
+        log.append({"at": _now(), "phase": phase, "message": message})
+    job.update(
+        {
+            "phase": phase,
+            "progress": {"current": current, "total": total, "message": message},
+            "log": log[-JOB_LOG_LIMIT:],
+        }
     )
+    _jobs().upsert_item(job)
 
 
 # -------------------------------------------------------------------- courses

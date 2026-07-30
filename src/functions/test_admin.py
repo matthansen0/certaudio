@@ -511,3 +511,49 @@ def test_cancel_job_rejects_a_finished_job():
         response = _fn("cancel_job")(req)
 
     assert response.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# Progress reporting
+# ---------------------------------------------------------------------------
+
+class _JobContainer:
+    def __init__(self, job):
+        self.job = job
+
+    def upsert_item(self, item):
+        self.job = item
+
+
+def _record(container, *messages):
+    with patch.object(admin.admin_store, "_jobs", return_value=container), \
+            patch.object(admin.admin_store, "get_job", side_effect=lambda _: container.job):
+        for i, message in enumerate(messages):
+            admin.admin_store.record_progress("j1", "discover", i, len(messages), message)
+    return container.job
+
+
+def test_progress_is_appended_to_a_job_log():
+    """A run takes minutes with nothing to show; the log is what makes it legible."""
+    job = _record(_JobContainer({"jobId": "j1"}), "Reading catalog", "Path 1", "Path 2")
+    assert [e["message"] for e in job["log"]] == ["Reading catalog", "Path 1", "Path 2"]
+    assert job["progress"]["message"] == "Path 2"
+    assert job["phase"] == "discover"
+
+
+def test_repeated_progress_messages_are_collapsed():
+    job = _record(_JobContainer({"jobId": "j1"}), "Same", "Same", "Different")
+    assert [e["message"] for e in job["log"]] == ["Same", "Different"]
+
+
+def test_the_job_log_is_bounded():
+    """Cosmos documents cap at 2 MB and a long run emits hundreds of updates."""
+    limit = admin.admin_store.JOB_LOG_LIMIT
+    job = _record(_JobContainer({"jobId": "j1"}), *[f"step {i}" for i in range(limit + 25)])
+    assert len(job["log"]) == limit
+    assert job["log"][-1]["message"] == f"step {limit + 24}"
+
+
+def test_record_progress_ignores_a_missing_job():
+    with patch.object(admin.admin_store, "get_job", return_value=None):
+        admin.admin_store.record_progress("gone", "discover", 1, 2, "x")

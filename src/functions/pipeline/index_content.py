@@ -197,6 +197,7 @@ def index_content(
     openai_endpoint: str,
     update_mode: bool = False,
     index_name: Optional[str] = None,
+    progress: Optional[callable] = None,
 ) -> None:
     """Index content from source URLs into Azure AI Search.
     
@@ -263,6 +264,11 @@ def index_content(
     for source_index, url in enumerate(source_urls, start=1):
         if source_index == 1 or source_index == total_sources or source_index % progress_every == 0:
             print(f"Processing source {source_index}/{total_sources}: {url}")
+            if progress:
+                progress(
+                    "index", source_index, total_sources,
+                    f"Indexing source {source_index} of {total_sources}",
+                )
         chunks = fetch_and_chunk_content(url)
         
         for chunk in chunks:

@@ -38,6 +38,8 @@ LEARN_SEARCH_URL = "https://learn.microsoft.com/api/search"
 STANDALONE_MODULES_UID = "__exam_study_guide_modules__"
 # Ceiling on the tag-matching fallback, which is broad by nature.
 MAX_TAG_FILTER_PATHS = 25
+# Units between progress callbacks during the crawl.
+UNIT_PROGRESS_EVERY = 5
 
 # Dynamic cert → role + product mapping for catalog-based learning path resolution.
 # The catalog API tags every learning path with roles and products. By filtering on
@@ -1058,6 +1060,7 @@ def deep_discover(
     skip_content: bool = False,
     catalog: Optional[dict] = None,
     cert_ref: Optional["CertificationRef"] = None,
+    progress: Optional[callable] = None,
 ) -> DeepDiscoveryResult:
     """
     Perform deep discovery using the Microsoft Learn Catalog API.
@@ -1118,6 +1121,20 @@ def deep_discover(
     total_units = 0
     total_words = 0
     units_failed = 0
+
+    # The catalog already knows how many units each module has, so the total is
+    # exact before a single page is fetched. Without it the portal has nothing
+    # to show but 0/1 for the several minutes this takes.
+    planned_units = sum(
+        len(modules_by_uid.get(module_uid, {}).get("units", []))
+        for path_uid in path_uids
+        for module_uid in paths_by_uid.get(path_uid, {}).get("modules", [])
+    )
+    if progress:
+        progress(
+            "discover", 0, planned_units,
+            f"Reading {planned_units} units across {len(path_uids)} learning paths",
+        )
     
     # Process each learning path
     for i, path_uid in enumerate(path_uids):
@@ -1205,6 +1222,13 @@ def deep_discover(
                 
                 module.units.append(unit)
                 total_units += 1
+                # Throttled: a Cosmos write per unit would be hundreds per run.
+                if progress and (total_units % UNIT_PROGRESS_EVERY == 0
+                                 or total_units == planned_units):
+                    progress(
+                        "discover", total_units, max(planned_units, total_units),
+                        f"{module.title} ({total_words:,} words so far)",
+                    )
             
             path.modules.append(module)
             total_modules += 1
