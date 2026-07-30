@@ -31,6 +31,10 @@ REQUIRED_ENV = (
     "SEARCH_ENDPOINT",
     "COSMOS_DB_ENDPOINT",
     "STORAGE_ACCOUNT_NAME",
+    # Speech resolves its ARM resource id from these for Entra auth. Missing,
+    # generation writes ten scripts with the model before failing at synthesis.
+    "AZURE_SUBSCRIPTION_ID",
+    "AZURE_RESOURCE_GROUP",
 )
 
 DEFAULT_BATCH_SIZE = 10

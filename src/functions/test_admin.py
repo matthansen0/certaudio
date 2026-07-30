@@ -514,6 +514,24 @@ def test_cancel_job_rejects_a_finished_job():
 
 
 # ---------------------------------------------------------------------------
+# Deployment contract
+# ---------------------------------------------------------------------------
+
+def test_bicep_declares_every_required_app_setting():
+    """A generate run reached synthesis before discovering AZURE_SUBSCRIPTION_ID
+    was never declared, having already paid the model for ten scripts."""
+    import re
+
+    from pipeline.orchestrator import REQUIRED_ENV
+
+    bicep = (pathlib.Path(__file__).parents[2] / "infra/modules/web.bicep").read_text()
+    declared = set(re.findall(r"name:\s*'([A-Z_]+)'", bicep))
+
+    missing = [name for name in REQUIRED_ENV if name not in declared]
+    assert not missing, f"REQUIRED_ENV entries absent from web.bicep: {missing}"
+
+
+# ---------------------------------------------------------------------------
 # Progress reporting
 # ---------------------------------------------------------------------------
 

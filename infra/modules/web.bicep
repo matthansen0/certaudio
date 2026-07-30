@@ -189,6 +189,16 @@ resource functionsApp 'Microsoft.Web/sites@2023-12-01' = {
           name: 'SPEECH_REGION'
           value: speechRegion
         }
+        // Entra auth for the Speech SDK needs the full ARM resource id of the
+        // Speech account, which it builds from these two.
+        {
+          name: 'AZURE_SUBSCRIPTION_ID'
+          value: subscription().subscriptionId
+        }
+        {
+          name: 'AZURE_RESOURCE_GROUP'
+          value: resourceGroup().name
+        }
         // Admin portal: one-time bootstrap claim token.
         {
           name: 'ADMIN_BOOTSTRAP_TOKEN'
