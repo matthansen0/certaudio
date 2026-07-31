@@ -500,3 +500,48 @@ def test_a_real_gap_still_grades_f():
     score = deep_discover.compute_confidence_score(coverage, [{"name": "s"}])
     assert score["grade"] == "F"
     assert score["overallScore"] == 0.0
+
+
+def _catalog_skills(*names):
+    return [
+        {"name": n, "weight": None, "topics": [n], "sourceUrls": [], "isExamSkill": True}
+        for n in names
+    ]
+
+
+# ai-103's five skills collapsed to two: sibling domains share "Implement ...
+# solutions", which clears the 0.45 fuzzy threshold against each other.
+def test_similarly_phrased_catalog_skills_are_all_kept():
+    catalog = _catalog_skills(
+        "Plan and manage an Azure AI solution",
+        "Implement generative AI and agentic solutions",
+        "Implement computer vision solutions",
+        "Implement text analysis solutions",
+        "Implement information extraction solutions",
+    )
+    assert len(deep_discover.merge_exam_skills([], catalog)) == 5
+
+
+def test_catalog_skills_already_in_the_scrape_are_dropped():
+    scraped = [
+        {
+            "name": "Implement computer vision solutions",
+            "weight": "20-25%",
+            "topics": ["Analyse images"],
+            "sourceUrls": [],
+            "isExamSkill": True,
+        }
+    ]
+    merged = deep_discover.merge_exam_skills(
+        scraped, _catalog_skills("Implement computer vision solutions", "Plan an AI solution")
+    )
+    assert [s["name"] for s in merged] == [
+        "Implement computer vision solutions",
+        "Plan an AI solution",
+    ]
+    assert merged[0]["weight"] == "20-25%"
+
+
+def test_exact_duplicate_catalog_skills_are_deduped():
+    catalog = _catalog_skills("Plan an AI solution", "Plan an AI solution")
+    assert len(deep_discover.merge_exam_skills([], catalog)) == 1

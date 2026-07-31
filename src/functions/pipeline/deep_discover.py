@@ -1058,12 +1058,21 @@ def merge_exam_skills(scraped: list[dict], catalog_skills: list[dict]) -> list[d
     The scrape wins on overlap because it carries weights and sub-topics.
     """
     merged = list(scraped)
-    seen = {_normalize(s.get("name", "")) for s in scraped}
+    # Matched by containment, not similarity: the scrape names domains
+    # "<domain>: <objective>", so a catalog skill already present appears
+    # verbatim inside one. Similarity cannot separate these — unrelated siblings
+    # ("computer vision" vs "text analysis", 0.74) outscore true matches (0.51),
+    # which collapsed ai-103's five skills to two.
+    scraped_names = [_normalize(s.get("name", "")) for s in scraped]
+    seen = set(scraped_names)
     for skill in catalog_skills:
         key = _normalize(skill.get("name", ""))
-        if key and key not in seen and not _topic_covered(skill["name"], list(seen)):
-            seen.add(key)
-            merged.append(skill)
+        if not key or key in seen:
+            continue
+        if any(key in name for name in scraped_names):
+            continue
+        seen.add(key)
+        merged.append(skill)
     return merged
 
 
