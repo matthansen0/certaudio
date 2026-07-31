@@ -95,6 +95,16 @@ def _catalog() -> dict:
             }
         ],
         "certifications": [],
+        "courses": [
+            {
+                "uid": "course.dp-700t00",
+                "title": "Instructor-led course",
+                "study_guide": [
+                    {"uid": "lp.curated-one", "type": "learningPath"},
+                    {"uid": "mod.standalone", "type": "module"},
+                ],
+            }
+        ],
     }
 
 
@@ -168,6 +178,56 @@ def test_roles_and_products_come_from_the_catalog():
     ref = deep_discover.resolve_certification("dp-700", _catalog(), slug=SLUG)
     assert "data-engineer" in ref.roles
     assert "fabric" in ref.products
+
+
+# 48 certifications (ai-103, az-104, azure-fundamentals...) point only at an
+# instructor-led course. Discarding those entries dropped them to tag matching,
+# which gave ai-103 25 alphabetically chosen paths instead of its real 4.
+def test_a_course_study_guide_entry_is_expanded():
+    catalog = _catalog()
+    catalog["exams"] = []
+    catalog["mergedCertifications"][0]["study_guide"] = [
+        {"uid": "course.dp-700t00", "type": "course"}
+    ]
+    ref = deep_discover.resolve_certification("dp-700", catalog, slug=SLUG)
+    assert ref.study_guide_paths == ["lp.curated-one"]
+    assert ref.study_guide_modules == ["mod.standalone"]
+
+
+def test_a_curated_course_syllabus_beats_tag_matching():
+    catalog = _catalog()
+    catalog["exams"] = []
+    catalog["mergedCertifications"][0]["study_guide"] = [
+        {"uid": "course.dp-700t00", "type": "course"}
+    ]
+    paths, _, report = deep_discover.resolve_content_sources("dp-700", catalog, slug=SLUG)
+    assert paths == ["lp.curated-one"]
+    assert "studyGuide" in report["sources"]
+    assert "tagFilter" not in report["sources"]
+
+
+def test_an_unknown_course_uid_falls_through():
+    catalog = _catalog()
+    catalog["exams"] = []
+    catalog["mergedCertifications"][0]["study_guide"] = [
+        {"uid": "course.does-not-exist", "type": "course"}
+    ]
+    ref = deep_discover.resolve_certification("dp-700", catalog, slug=SLUG)
+    assert ref.study_guide_paths == []
+
+
+def test_course_expansion_does_not_recurse():
+    """A course listing another course is ignored rather than followed."""
+    catalog = _catalog()
+    catalog["courses"].append(
+        {"uid": "course.outer", "study_guide": [{"uid": "course.dp-700t00", "type": "course"}]}
+    )
+    catalog["exams"] = []
+    catalog["mergedCertifications"][0]["study_guide"] = [
+        {"uid": "course.outer", "type": "course"}
+    ]
+    ref = deep_discover.resolve_certification("dp-700", catalog, slug=SLUG)
+    assert ref.study_guide_paths == []
 
 
 @pytest.mark.parametrize(

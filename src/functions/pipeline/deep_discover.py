@@ -286,7 +286,7 @@ class CertificationRef:
     sources: list[str] = field(default_factory=list)
 
 
-def _split_study_guide(entries) -> tuple[list[str], list[str]]:
+def _split_study_guide(entries, courses: Optional[dict] = None) -> tuple[list[str], list[str]]:
     paths, modules = [], []
     for entry in entries or []:
         if not isinstance(entry, dict):
@@ -298,6 +298,16 @@ def _split_study_guide(entries) -> tuple[list[str], list[str]]:
             paths.append(uid)
         elif kind == "module":
             modules.append(uid)
+        elif kind == "course" and courses is not None:
+            # 48 certifications point only at an instructor-led course, whose own
+            # study guide holds the curated paths. Dropping these sent ai-103 to
+            # tag matching: 25 alphabetically chosen paths instead of its real 4.
+            # Not recursed further -- courses list paths and modules directly.
+            course_paths, course_modules = _split_study_guide(
+                (courses.get(uid) or {}).get("study_guide")
+            )
+            paths.extend(course_paths)
+            modules.extend(course_modules)
     return paths, modules
 
 
@@ -351,12 +361,13 @@ def resolve_certification(
     cert_lower = certification_id.lower()
     wanted_uid = f"exam.{cert_lower}"
     ref = CertificationRef(certification_id=cert_lower)
+    courses = {c["uid"]: c for c in catalog.get("courses") or [] if c.get("uid")}
 
     for record in catalog.get("exams", []):
         if record.get("uid", "").lower() == wanted_uid or (
             record.get("display_name", "").lower() == cert_lower
         ):
-            paths, modules = _split_study_guide(record.get("study_guide"))
+            paths, modules = _split_study_guide(record.get("study_guide"), courses)
             ref.exam_uid = record.get("uid", wanted_uid)
             ref.title = record.get("title", "")
             ref.url = record.get("url", "")
@@ -373,7 +384,7 @@ def resolve_certification(
     ref.certification_slug = slug
 
     for collection, record in _certification_records(slug, catalog):
-        cert_paths, cert_modules = _split_study_guide(record.get("study_guide"))
+        cert_paths, cert_modules = _split_study_guide(record.get("study_guide"), courses)
         ref.study_guide_paths.extend(cert_paths)
         ref.study_guide_modules.extend(cert_modules)
         ref.skills_measured.extend(record.get("skills") or [])
@@ -389,7 +400,7 @@ def resolve_certification(
         for record in catalog.get("certifications", []):
             if ref.exam_uid not in (record.get("exams") or []):
                 continue
-            cert_paths, cert_modules = _split_study_guide(record.get("study_guide"))
+            cert_paths, cert_modules = _split_study_guide(record.get("study_guide"), courses)
             ref.study_guide_paths.extend(cert_paths)
             ref.study_guide_modules.extend(cert_modules)
             ref.skills_measured.extend(record.get("skills") or [])
