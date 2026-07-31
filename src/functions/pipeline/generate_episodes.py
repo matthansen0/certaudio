@@ -21,6 +21,7 @@ import time
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from types import SimpleNamespace
+from typing import Optional
 from xml.sax.saxutils import escape
 from pathlib import Path
 import requests
@@ -38,6 +39,10 @@ from . import cost
 from .synthesize_audio import synthesize_audio, synthesize_audio_segments
 from .upload_to_blob import upload_to_blob
 from .save_episode import save_episode
+
+# Below this many chunks, scoped retrieval is treated as a miss and the search
+# widens to the whole certification rather than narrating from almost nothing.
+MIN_SCOPED_CHUNKS = 3
 
 
 def _get_speech_region() -> str:
@@ -214,9 +219,15 @@ def retrieve_content(
     skill_topics: list[str],
     search_client: SearchClient,
     openai_client: AzureOpenAI,
+    source_urls: Optional[list[str]] = None,
+    top: int = 15,
 ) -> dict:
     """
     Retrieve relevant content from Azure AI Search.
+
+    ``source_urls`` are the units this episode is actually about. Without them
+    the filter is the whole certification, so an episode competes for chunks
+    with every other module and can be narrated from content it is not about.
 
     Returns:
         Dict with 'content', 'source_urls', and 'content_hash'
@@ -227,33 +238,50 @@ def retrieve_content(
     # Defence in depth: certificationId is already validated at the admin API,
     # but OData string literals escape a quote by doubling it.
     cert_filter = "certificationId eq '{}'".format(certification_id.replace("'", "''"))
+    scoped_filter = cert_filter
+    if source_urls:
+        # search.in beats an OR chain: no length blow-up, and URLs cannot
+        # contain the delimiter.
+        joined = "|".join(source_urls).replace("'", "''")
+        scoped_filter = f"{cert_filter} and search.in(sourceUrl, '{joined}', '|')"
 
-    # Generate embedding for hybrid search
-    try:
-        query_embedding = get_embedding(query_text, openai_client)
-
-        # Perform hybrid search (keyword + vector)
-        vector_query = VectorizedQuery(
-            vector=query_embedding,
-            k_nearest_neighbors=10,
-            fields="contentVector",
-        )
-
-        results = search_client.search(
+    def _run(filter_expr: str, vector: bool):
+        if vector:
+            query_embedding = get_embedding(query_text, openai_client)
+            return search_client.search(
+                search_text=query_text,
+                vector_queries=[VectorizedQuery(
+                    vector=query_embedding,
+                    k_nearest_neighbors=top,
+                    fields="contentVector",
+                )],
+                select=["content", "sourceUrl", "title", "chunkId"],
+                filter=filter_expr,
+                top=top,
+            )
+        return search_client.search(
             search_text=query_text,
-            vector_queries=[vector_query],
             select=["content", "sourceUrl", "title", "chunkId"],
-            filter=f"certificationId eq '{certification_id}'",
-            top=15,
+            filter=filter_expr,
+            top=top,
         )
-    except Exception as e:
-        print(f"Warning: Vector search failed ({e}), falling back to keyword search")
-        results = search_client.search(
-            search_text=query_text,
-            select=["content", "sourceUrl", "title", "chunkId"],
-            filter=f"certificationId eq '{certification_id}'",
-            top=15,
+
+    def _collect(filter_expr: str) -> list:
+        try:
+            return list(_run(filter_expr, vector=True))
+        except Exception as e:
+            print(f"Warning: Vector search failed ({e}), falling back to keyword search")
+            return list(_run(filter_expr, vector=False))
+
+    results = _collect(scoped_filter)
+    # An episode indexed before scoping existed, or whose pages all failed to
+    # fetch, would otherwise be narrated from nothing at all.
+    if scoped_filter != cert_filter and len(results) < MIN_SCOPED_CHUNKS:
+        print(
+            f"  - Only {len(results)} chunk(s) for this episode's own units; "
+            f"widening to the whole certification"
         )
+        results = _collect(cert_filter)
 
     # Aggregate results
     content_parts = []
@@ -671,6 +699,7 @@ def process_skill_domain(
         skill_topics=skill_topics,
         search_client=search_client,
         openai_client=openai_client,
+        source_urls=source_urls,
     )
     print(f"  - Retrieved {len(retrieved_content['source_urls'])} source URLs")
     print(f"  - Content hash: {retrieved_content['content_hash']}")
@@ -909,6 +938,7 @@ def prepare_episode(
         skill_topics=skill_topics,
         search_client=search_client,
         openai_client=openai_client,
+        source_urls=source_urls,
     )
     
     all_source_urls = list(set(source_urls + retrieved_content["source_urls"]))
@@ -1107,6 +1137,30 @@ def main() -> None:
     _generate(args)
 
 
+def _group_topics(topics: list[str], target: int) -> list[tuple[int, list[str]]]:
+    """Split a module's topics into balanced episode-sized groups.
+
+    Fixed-size chunking left ragged remainders: six topics became a full episode
+    plus a one-topic stub. Keeping the episode count the same but spreading the
+    topics evenly (3+3) avoids both the stub and an overstuffed episode, and no
+    topic is ever split across episodes.
+
+    Returns (start_index, topics) so the caller can take the matching slice of
+    the module's source URLs.
+    """
+    if not topics:
+        return []
+    target = max(1, target)
+    count = max(1, (len(topics) + target - 1) // target)
+    base, extra = divmod(len(topics), count)
+    groups, start = [], 0
+    for i in range(count):
+        size = base + (1 if i < extra else 0)
+        groups.append((start, topics[start:start + size]))
+        start += size
+    return groups
+
+
 def _generate(args) -> dict:
     """Shared implementation for both the CLI and the in-process entry point."""
     # Preflight voice availability to fail fast on unsupported voices/regions.
@@ -1127,16 +1181,21 @@ def _generate(args) -> dict:
         domain_name = skill["name"]
         topics = skill.get("topics", [])
         source_urls = skill.get("sourceUrls", [])
-        
-        # Split topics into chunks of args.topics_per_episode
-        for chunk_idx in range(0, len(topics), args.topics_per_episode):
-            chunk_topics = topics[chunk_idx:chunk_idx + args.topics_per_episode]
+        # topics and sourceUrls are built in parallel from the same units, but a
+        # unit without a URL desynchronises them; only pair them when they still
+        # line up, otherwise fall back to the whole module.
+        paired = len(source_urls) == len(topics)
+
+        groups = _group_topics(topics, args.topics_per_episode)
+        for part_idx, (start, chunk_topics) in enumerate(groups, start=1):
             episode_units.append({
                 "domain": domain_name,
                 "topics": chunk_topics,
-                "sourceUrls": source_urls,
-                "part": (chunk_idx // args.topics_per_episode) + 1,
-                "total_parts": (len(topics) + args.topics_per_episode - 1) // args.topics_per_episode,
+                "sourceUrls": (
+                    source_urls[start:start + len(chunk_topics)] if paired else source_urls
+                ),
+                "part": part_idx,
+                "total_parts": len(groups),
             })
 
     print(f"Expanded {len(main_skills)} domains into {len(episode_units)} episode units")
