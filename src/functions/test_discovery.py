@@ -432,3 +432,71 @@ def test_discovery_report_summarises_gaps_and_coverage():
 
 def test_discovery_report_tolerates_a_bare_result():
     assert orchestrator.discovery_report({})["coverageGrade"] == ""
+
+
+# ---------------------------------------------------------------------------
+# Exam skills outline
+# ---------------------------------------------------------------------------
+
+STUDY_GUIDE_HTML = """
+<h3>Design identity, governance, and monitoring solutions (25-30%)</h3>
+<ul><li>Design a solution for logging and monitoring</li>
+    <li>Design authentication and authorization solutions</li></ul>
+"""
+
+
+def _outline_pages(monkeypatch, pages):
+    """Serve canned HTML per URL and record the order pages were requested in."""
+    requested = []
+
+    def _fetch(url, *a, **k):
+        requested.append(url)
+        if url not in pages:
+            raise RuntimeError(f"404 {url}")
+        return pages[url]
+
+    monkeypatch.setattr(deep_discover, "fetch_page", _fetch)
+    return requested
+
+
+# An exam landing page parses to zero skills, which used to surface as grade F
+# with 0% coverage on a discovery that had in fact worked.
+def test_exam_url_falls_back_to_the_canonical_study_guide(monkeypatch):
+    exam_url = "https://learn.microsoft.com/en-us/credentials/certifications/exams/az-305/"
+    canonical = deep_discover.study_guide_url_for("az-305")
+    requested = _outline_pages(
+        monkeypatch, {exam_url: "<h2>Exam AZ-305</h2>", canonical: STUDY_GUIDE_HTML}
+    )
+
+    skills = deep_discover.fetch_exam_skills_outline("az-305", study_guide_url=exam_url)
+
+    assert requested == [exam_url, canonical]
+    assert sum(len(s["topics"]) for s in skills) == 2
+
+
+def test_a_usable_supplied_study_guide_is_not_refetched(monkeypatch):
+    supplied = "https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/custom"
+    requested = _outline_pages(monkeypatch, {supplied: STUDY_GUIDE_HTML})
+
+    assert deep_discover.fetch_exam_skills_outline("az-305", study_guide_url=supplied)
+    assert requested == [supplied]
+
+
+def test_the_canonical_url_is_tried_once_when_supplied(monkeypatch):
+    canonical = deep_discover.study_guide_url_for("az-305")
+    requested = _outline_pages(monkeypatch, {})
+
+    assert deep_discover.fetch_exam_skills_outline("az-305", study_guide_url=canonical) == []
+    assert requested == [canonical]
+
+
+def test_unmeasurable_coverage_is_not_a_failing_grade():
+    empty = {"covered": [], "supplemented": [], "gaps": []}
+    assert deep_discover.compute_confidence_score(empty, [])["grade"] == "n/a"
+
+
+def test_a_real_gap_still_grades_f():
+    coverage = {"covered": [], "supplemented": [], "gaps": [{"skill": "s", "topic": "t"}]}
+    score = deep_discover.compute_confidence_score(coverage, [{"name": "s"}])
+    assert score["grade"] == "F"
+    assert score["overallScore"] == 0.0

@@ -733,12 +733,14 @@ def compute_confidence_score(
     total = lp_count + catalog_count + search_count + gap_count
 
     if total == 0:
+        # Nothing to measure against is "unverified", not "fails the exam". An F
+        # here reads as bad content when the skills outline simply wasn't found.
         return {
             "overallScore": 0.0,
             "totalTopics": 0,
             "breakdown": {},
             "perSkillScores": [],
-            "grade": "F",
+            "grade": "n/a",
         }
 
     # Weighted score
@@ -912,15 +914,26 @@ def build_unit_url(module_url: str, unit_uid: str, unit_index: int = 1) -> str:
     return f"https://learn.microsoft.com/en-us/training/modules/{module_slug}/{unit_index}-{unit_slug}/"
 
 
+def study_guide_url_for(certification_id: str) -> str:
+    return (
+        "https://learn.microsoft.com/en-us/credentials/certifications/resources/"
+        f"study-guides/{certification_id.lower()}"
+    )
+
+
 def fetch_exam_skills_outline(
     certification_id: str, study_guide_url: str = None
 ) -> list[dict]:
     """
     Fetch the exam skills outline from the official study guide.
-    
+
     This provides the specific testable skills that may not be fully covered
     by learning path content alone.
-    
+
+    A caller-supplied URL is tried first but not trusted: the portal's examUrl
+    is an exam or certification landing page, which carries no skills outline,
+    and accepting the empty parse from one reports as zero exam coverage.
+
     Returns list of skill dicts with format:
     {
         "name": "Skill name",
@@ -930,20 +943,27 @@ def fetch_exam_skills_outline(
         "isExamSkill": True  # Flag to distinguish from learning path content
     }
     """
-    study_guide_url = study_guide_url or (
-        f"https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/"
-        f"{certification_id.lower()}"
-    )
-    print(f"\nFetching exam skills outline from: {study_guide_url}")
-    
-    try:
-        html = fetch_page(study_guide_url)
-    except Exception as e:
-        print(f"  Warning: Could not fetch study guide: {e}")
-        return []
-    
+    candidates = [u for u in (study_guide_url, study_guide_url_for(certification_id)) if u]
+    for url in dict.fromkeys(candidates):
+        print(f"\nFetching exam skills outline from: {url}")
+        try:
+            html = fetch_page(url)
+        except Exception as e:
+            print(f"  Warning: Could not fetch study guide: {e}")
+            continue
+        skills = _parse_exam_skills(html)
+        print(
+            f"  Found {len(skills)} objectives with "
+            f"{sum(len(s['topics']) for s in skills)} specific skills"
+        )
+        if skills:
+            return skills
+    return []
+
+
+def _parse_exam_skills(html: str) -> list[dict]:
     soup = BeautifulSoup(html, "lxml")
-    
+
     skills = []
     current_domain = None
     current_objective = None
@@ -1009,12 +1029,7 @@ def fetch_exam_skills_outline(
         skills.append(current_domain)
     
     # Filter out empty skills
-    skills = [s for s in skills if s.get("topics")]
-    
-    total_specific_skills = sum(len(s["topics"]) for s in skills)
-    print(f"  Found {len(skills)} objectives with {total_specific_skills} specific skills")
-    
-    return skills
+    return [s for s in skills if s.get("topics")]
 
 
 def exam_skills_from_catalog(cert_ref: Optional[CertificationRef]) -> list[dict]:

@@ -409,6 +409,9 @@ def run_index(
     Separated from generation because this half costs cents and minutes while
     generation costs dollars and hours, so the exact episode count and a cost
     estimate can be reviewed before committing to the expensive half.
+
+    ``audio_format`` and ``voices`` are accepted only to keep the RUNNERS
+    signature uniform: the index is shared and format-agnostic.
     """
     require_environment()
     progress = progress or _noop_progress

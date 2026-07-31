@@ -371,7 +371,8 @@ function renderDiscoveryReport(report) {
         container.innerHTML = '';
         return;
     }
-    const grade = report.coverageGrade || '?';
+    const graded = report.coverageGrade && report.coverageGrade !== 'n/a';
+    const grade = graded ? report.coverageGrade : '—';
     const score = Number(report.coverageScore || 0).toFixed(0);
     const sources = Object.keys(report.sources || {}).join(', ') || 'none';
     const gaps = (report.gaps || []).slice(0, 8);
@@ -380,7 +381,7 @@ function renderDiscoveryReport(report) {
         <div class="admin-report">
             <div class="admin-report-head">
                 <span class="admin-grade" data-grade="${escapeHtml(grade)}">${escapeHtml(grade)}</span>
-                <strong>Exam coverage ${escapeHtml(score)}%</strong>
+                <strong>${graded ? `Exam coverage ${escapeHtml(score)}%` : 'Exam coverage not verified'}</strong>
                 <span class="admin-muted" style="margin:0">resolved via ${escapeHtml(sources)}</span>
             </div>
             <div class="admin-report-stats">
@@ -391,6 +392,9 @@ function renderDiscoveryReport(report) {
                 <span><strong>${report.topicsSupplemented || 0}</strong> supplemented</span>
                 <span><strong>${report.topicsUncovered || 0}</strong> uncovered</span>
             </div>
+            ${graded ? '' : `<p class="admin-warning">No exam skills outline was found for this
+                certification, so coverage could not be measured. The discovered content above
+                is unaffected.</p>`}
             ${(report.warnings || []).map((w) =>
                 `<p class="admin-warning">${escapeHtml(w)}</p>`).join('')}
             ${gaps.length ? `<details>
@@ -677,7 +681,9 @@ function jobOutcome(job) {
         const report = result.discoveryReport || {};
         const bits = [`${result.totalUnits ?? 0} units`, `${result.unitCount ?? 0} episodes`];
         if (result.totalWords) bits.push(`${Number(result.totalWords).toLocaleString()} words`);
-        if (report.coverageGrade) bits.push(`coverage ${escapeHtml(report.coverageGrade)}`);
+        if (report.coverageGrade && report.coverageGrade !== 'n/a') {
+            bits.push(`coverage ${escapeHtml(report.coverageGrade)}`);
+        }
         if (report.unitsFailed) bits.push(`${report.unitsFailed} failed`);
         return escapeHtml(bits.join(' · '));
     }
@@ -697,6 +703,14 @@ function renderJobLog(job) {
     </details>`;
 }
 
+// Indexing writes to the shared, format-agnostic search index, so the format
+// stored against an index job is a meaningless default. Don't show it.
+function jobTarget(job, separator = '/') {
+    return job.mode === 'index'
+        ? job.certificationId
+        : `${job.certificationId}${separator}${job.audioFormat}`;
+}
+
 function renderActiveJob(job) {
     const container = el('active-job');
     if (!job) {
@@ -714,7 +728,7 @@ function renderActiveJob(job) {
     container.innerHTML = `
         <div class="admin-row admin-row-between" style="margin-top:0">
             <div><strong>${escapeHtml(job.mode)}</strong> &middot;
-                 ${escapeHtml(job.certificationId)} / ${escapeHtml(job.audioFormat)}
+                 ${escapeHtml(jobTarget(job, ' / '))}
                  <span class="admin-status admin-status-${escapeHtml(job.status)}">${escapeHtml(job.status)}</span></div>
             <button type="button" id="cancel-job" class="admin-button admin-button-danger admin-button-small"
                     data-job-id="${escapeHtml(job.jobId)}">Cancel job</button>
@@ -769,7 +783,7 @@ function renderHistory(jobs) {
                     return `<tr>
                         <td data-label="Started">${escapeHtml(started.replace('T', ' ').slice(0, 19))}</td>
                         <td data-label="Mode">${escapeHtml(job.mode)}</td>
-                        <td data-label="Target">${escapeHtml(job.certificationId)}/${escapeHtml(job.audioFormat)}</td>
+                        <td data-label="Target">${escapeHtml(jobTarget(job))}</td>
                         <td data-label="Status"><span class="admin-status admin-status-${escapeHtml(job.status)}">${escapeHtml(job.status)}</span></td>
                         <td data-label="Result">${jobOutcome(job)}</td>
                     </tr>`;

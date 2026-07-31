@@ -147,10 +147,12 @@
                                 <input id="course-name" class="admin-input" placeholder="DP-700: Fabric Data Engineer">
                             </label>
                             <label class="admin-field" for="course-exam-url">
-                                <span>Microsoft Learn exam URL</span>
+                                <span>Study guide URL</span>
                                 <input id="course-exam-url" class="admin-input" type="url"
-                                       placeholder="https://learn.microsoft.com/en-us/credentials/certifications/exams/dp-700/">
-                                <span class="admin-field-hint">Must be a learn.microsoft.com address.</span>
+                                       placeholder="https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/dp-700">
+                                <span class="admin-field-hint">Optional. Blank uses the standard
+                                    study guide for this exam code, which is almost always right.
+                                    Must be a learn.microsoft.com address.</span>
                             </label>
                             <label class="admin-field admin-field-check" for="course-published">
                                 <input id="course-published" type="checkbox">
@@ -183,6 +185,7 @@
                                     <option value="instructional">Instructional</option>
                                     <option value="podcast">Podcast</option>
                                 </select>
+                                <span class="admin-field-hint">Applies to audio generation. Indexing is format-independent.</span>
                             </label>
                             <label class="admin-field" id="field-voice-instructional" for="voice-instructional">
                                 <span>Voice</span>
@@ -240,9 +243,12 @@
                                 <span class="admin-field-hint">Lowercase exam code, as used on Microsoft Learn.</span>
                             </label>
                             <label class="admin-field" for="new-exam-url">
-                                <span>Microsoft Learn exam URL (optional)</span>
+                                <span>Study guide URL (optional)</span>
                                 <input id="new-exam-url" class="admin-input" type="url"
                                        placeholder="https://learn.microsoft.com/…" autocomplete="off">
+                                <span class="admin-field-hint">Leave blank. Only set this if the
+                                    study guide is not at the standard
+                                    <code>/certifications/resources/study-guides/&lt;exam code&gt;</code> address.</span>
                             </label>
                         </div>
                         <div class="admin-row">
