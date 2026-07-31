@@ -259,6 +259,18 @@ function renderEstimate() {
         `${estimate.episodes} episodes · ${money(estimate.tts)} speech + ${money(estimate.llm)} model · ${estimate.basis}`;
 }
 
+// unitCount is what the current outline implies; episodeCount is what exists.
+// The gap is the work a non-forced generate would actually do.
+function pendingEpisodes(course) {
+    return Math.max(0, (course.unitCount || 0) - (course.episodeCount || 0));
+}
+
+function episodeSummary(course) {
+    const pending = pendingEpisodes(course);
+    const have = course.episodeCount || 0;
+    return pending ? `${have} generated, ${pending} pending` : String(have);
+}
+
 function renderIndexAge(course) {
     const node = el('index-age');
     if (!course.lastDiscoveryAt) {
@@ -268,9 +280,14 @@ function renderIndexAge(course) {
     const days = Math.floor((Date.now() - new Date(course.lastDiscoveryAt).getTime()) / 86400000);
     const when = days <= 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`;
     const words = (course.totalWords || 0).toLocaleString();
-    node.textContent =
-        `Content indexed ${when} — ${course.unitCount} episodes from ${words} words. `
-        + 'Re-index if Microsoft Learn has changed since.';
+    const pending = pendingEpisodes(course);
+    node.innerHTML =
+        `Content indexed ${when} \u2014 ${course.unitCount} episodes from ${words} words. `
+        + 'Re-index if Microsoft Learn has changed since.'
+        + (pending
+            ? `<br><strong>${pending} episode${pending === 1 ? '' : 's'} not yet generated.</strong>
+               Run <em>Generate audio</em> with force off to add only those.`
+            : '');
 }
 
 function toggleVoiceFields() {
@@ -399,7 +416,7 @@ function renderFacts(course) {
         ['Episodes by format', breakdownText],
         ['Voice', voices.instructional || '—'],
         ['Podcast voices', voices.podcastHost ? `${voices.podcastHost} / ${voices.podcastExpert}` : '—'],
-        ['Episodes', course.episodeCount || 0],
+        ['Episodes', episodeSummary(course)],
         ['Total audio', course.totalDurationSeconds
             ? `${(course.totalDurationSeconds / 3600).toFixed(1)} hours` : '—'],
         ['Last generated', (course.lastGeneratedAt || '—').replace('T', ' ').slice(0, 16)],
