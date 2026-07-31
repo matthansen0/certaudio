@@ -230,6 +230,52 @@ def test_course_expansion_does_not_recurse():
     assert ref.study_guide_paths == []
 
 
+# sc-500 is a current exam whose /exams/sc-500/ page 404s, so the redirect that
+# normally maps an exam code to its certification yields nothing and the exam
+# read as "not a Microsoft Learn exam". The catalog links them by course number.
+def _catalog_without_a_redirect() -> dict:
+    catalog = _catalog()
+    catalog["exams"] = []
+    catalog["courses"] = [{
+        "uid": "course.dp-700t00",
+        "course_number": "DP-700T00",
+        "study_guide": [{"uid": "lp.curated-one", "type": "learningPath"}],
+    }]
+    catalog["mergedCertifications"][0]["study_guide"] = [
+        {"uid": "course.dp-700t00", "type": "course"}
+    ]
+    return catalog
+
+
+def test_an_exam_with_no_exam_page_resolves_through_its_course_number():
+    ref = deep_discover.resolve_certification("dp-700", _catalog_without_a_redirect(), slug="")
+    assert ref is not None
+    assert ref.study_guide_paths == ["lp.curated-one"]
+    assert ref.certification_slug == SLUG
+
+
+def test_the_bare_exam_code_also_matches_the_course_number():
+    catalog = _catalog_without_a_redirect()
+    catalog["courses"][0]["course_number"] = "DP-700"
+    ref = deep_discover.resolve_certification("dp-700", catalog, slug="")
+    assert ref is not None and ref.study_guide_paths == ["lp.curated-one"]
+
+
+def test_a_course_number_for_a_different_exam_is_not_matched():
+    catalog = _catalog_without_a_redirect()
+    catalog["courses"][0]["course_number"] = "DP-701T00"
+    assert deep_discover.resolve_certification("dp-700", catalog, slug="") is None
+
+
+def test_the_redirect_still_wins_when_it_works():
+    """The course fallback must not override a slug that resolved normally."""
+    catalog = _catalog_without_a_redirect()
+    records = list(deep_discover._certification_records(SLUG, catalog))
+    assert records, "slug lookup should still find the record"
+    ref = deep_discover.resolve_certification("dp-700", catalog, slug=SLUG)
+    assert ref.certification_slug == SLUG
+
+
 @pytest.mark.parametrize(
     "path,expected",
     [

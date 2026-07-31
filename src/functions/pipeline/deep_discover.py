@@ -311,6 +311,17 @@ def _split_study_guide(entries, courses: Optional[dict] = None) -> tuple[list[st
     return paths, modules
 
 
+def _slug_from_url(url: str) -> str:
+    """Certification slug from a catalog URL, ignoring any query string."""
+    parts = [p for p in urlparse(url or "").path.split("/") if p]
+    if "certifications" not in parts:
+        return ""
+    tail = parts[parts.index("certifications") + 1:]
+    # A single segment means a certification page; two means /exams/<code>/,
+    # which has no certification of its own.
+    return tail[0] if len(tail) == 1 else ""
+
+
 def resolve_certification_slug(certification_id: str) -> str:
     """Follow the exam page redirect to the certification that owns the exam.
 
@@ -331,13 +342,7 @@ def resolve_certification_slug(certification_id: str) -> str:
     if resp.status_code != 200:
         return ""
 
-    parts = [p for p in urlparse(resp.url).path.split("/") if p]
-    if "certifications" not in parts:
-        return ""
-    tail = parts[parts.index("certifications") + 1:]
-    # A single segment means we landed on a certification page; two means we
-    # stayed on /exams/<code>/, which has no certification of its own.
-    return tail[0] if len(tail) == 1 else ""
+    return _slug_from_url(resp.url)
 
 
 def _certification_records(slug: str, catalog: dict):
@@ -348,6 +353,29 @@ def _certification_records(slug: str, catalog: dict):
         for record in catalog.get(collection, []):
             if needle in (record.get("url") or ""):
                 yield collection, record
+
+
+def _certification_records_via_course(certification_id: str, catalog: dict, courses: dict):
+    """Find a certification through the instructor-led course carrying its exam code.
+
+    Newer exams have no /exams/<code>/ page to redirect off -- sc-500 returns 404
+    -- so the slug lookup yields nothing and the exam reads as non-existent. The
+    catalog still links them: course_number "SC-500T00" belongs to course.sc-500t00,
+    which is what certification.cloud-and-ai-security-engineer-associate lists.
+    """
+    pattern = re.compile(rf"{re.escape(certification_id.lower())}(t\d+)?$")
+    course_uids = {
+        uid for uid, course in courses.items()
+        if pattern.fullmatch((course.get("course_number") or "").lower())
+    }
+    if not course_uids:
+        return
+    for collection in ("mergedCertifications", "certifications"):
+        for record in catalog.get(collection, []):
+            for entry in record.get("study_guide") or []:
+                if isinstance(entry, dict) and entry.get("uid") in course_uids:
+                    yield collection, record
+                    break
 
 
 def resolve_certification(
@@ -383,7 +411,13 @@ def resolve_certification(
         slug = resolve_certification_slug(cert_lower)
     ref.certification_slug = slug
 
-    for collection, record in _certification_records(slug, catalog):
+    records = list(_certification_records(slug, catalog))
+    if not records:
+        records = list(_certification_records_via_course(cert_lower, catalog, courses))
+        if records:
+            ref.certification_slug = _slug_from_url(records[0][1].get("url", ""))
+
+    for collection, record in records:
         cert_paths, cert_modules = _split_study_guide(record.get("study_guide"), courses)
         ref.study_guide_paths.extend(cert_paths)
         ref.study_guide_modules.extend(cert_modules)
