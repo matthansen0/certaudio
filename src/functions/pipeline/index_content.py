@@ -193,6 +193,28 @@ def wait_for_openai_embeddings_access(
     raise TimeoutError("Timed out waiting for Azure OpenAI embeddings access")
 
 
+def _existing_document_ids(search_client, certification_id: str) -> set[str]:
+    """Every document the shared index already holds for this certification."""
+    escaped = certification_id.replace("'", "''")
+    return {
+        doc["id"]
+        for doc in search_client.search(
+            search_text="*",
+            filter=f"certificationId eq '{escaped}'",
+            select=["id"],
+            top=100000,
+        )
+    }
+
+
+def _delete_documents(search_client, doc_ids) -> None:
+    ids = list(doc_ids)
+    for start in range(0, len(ids), 500):
+        search_client.delete_documents(
+            [{"id": doc_id} for doc_id in ids[start:start + 500]]
+        )
+
+
 def index_content(
     certification_id: str,
     source_urls: list[str],
@@ -252,11 +274,17 @@ def index_content(
     if not update_mode:
         create_search_index(index_client, index_name)
 
+    # Snapshotted before the upload, not after: newly written documents are not
+    # immediately searchable, so a post-upload query could miss them and delete
+    # the run's own output.
+    previous_ids = _existing_document_ids(search_client, certification_id) if update_mode else set()
+
     # Ensure OpenAI embeddings are available before we start heavy work
     wait_for_openai_embeddings_access(openai_client)
     
     # Process each URL
     documents = []
+    written_ids: set[str] = set()
 
     total_sources = len(source_urls)
     try:
@@ -300,6 +328,7 @@ def index_content(
             }
             
             documents.append(doc)
+            written_ids.add(doc_id)
             
             # Batch upload every 100 documents
             if len(documents) >= 100:
@@ -311,6 +340,20 @@ def index_content(
     if documents:
         search_client.upload_documents(documents)
         print(f"Uploaded {len(documents)} documents")
+
+    # upload_documents only upserts. Without this, a syllabus that shrank keeps
+    # serving the content it dropped: ai-103 went from 795 units to 237, and the
+    # 795 would have stayed in the index grounding both generation and the
+    # Study Partner.
+    stale = previous_ids - written_ids
+    if stale:
+        _delete_documents(search_client, stale)
+        print(f"Deleted {len(stale)} document(s) no longer in the syllabus")
+        if progress:
+            progress(
+                "index", len(source_urls), len(source_urls),
+                f"Removed {len(stale)} document(s) no longer in the syllabus",
+            )
     
     print(f"Indexing complete for {certification_id}")
 
