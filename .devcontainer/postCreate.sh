@@ -33,7 +33,7 @@ npm install -g \
   "@azure/static-web-apps-cli@${SWA_CLI_VERSION}" \
   "azurite@${AZURITE_VERSION}"
 
-python -c "import azure.functions, azure.identity, azure.cosmos, azure.storage.blob, promptflow"
+python -c "import azure.functions, azure.identity, azure.cosmos, azure.storage.blob"
 az version --output none
 func --version
 swa --version
