@@ -59,7 +59,7 @@ charset-normalizer==3.4.9
     # via requests
 click==8.4.2
     # via pip-tools
-cryptography==49.0.0
+cryptography==50.0.0
     # via
     #   azure-identity
     #   azure-storage-blob
@@ -127,7 +127,7 @@ pydantic-core==2.46.4
     # via pydantic
 pygments==2.20.0
     # via pytest
-pyjwt==2.13.0
+pyjwt==2.15.0
     # via
     #   msal
     #   pyjwt
@@ -135,7 +135,7 @@ pyproject-hooks==1.2.0
     # via
     #   build
     #   pip-tools
-pytest==8.4.2
+pytest==9.0.3
     # via -r requirements-dev.in
 requests==2.34.2
     # via
@@ -168,7 +168,7 @@ typing-extensions==4.16.0
     #   typing-inspection
 typing-inspection==0.4.2
     # via pydantic
-urllib3==2.7.0
+urllib3==2.8.0
     # via requests
 werkzeug==3.1.8
     # via azure-functions
