@@ -5,7 +5,9 @@ Run:  python -m pytest src/functions/test_auth.py -v
 """
 
 import base64
+import fnmatch
 import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import azure.functions as func
@@ -16,8 +18,10 @@ import pytest
 # ---------------------------------------------------------------------------
 from function_app import (
     _get_swa_user,
+    get_episodes,
     get_me,
     get_my_progress,
+    list_certifications,
     update_my_progress,
 )
 
@@ -102,6 +106,106 @@ class TestGetSwaUser:
         req = _make_request(headers={"x-ms-client-principal": header})
         user = _get_swa_user(req)
         assert user["identityProvider"] == "google"
+
+
+# =========================================================================
+# Catalog endpoints
+# =========================================================================
+
+@pytest.mark.parametrize("endpoint", [list_certifications, get_episodes])
+@pytest.mark.parametrize("principal", [
+    None,
+    "not-base64!!!",
+    base64.b64encode(b"not json").decode(),
+    base64.b64encode(b'{"userRoles": ["anonymous"]}').decode(),
+    base64.b64encode(b"[]").decode(),
+])
+def test_catalog_rejects_unauthenticated_before_cosmos(endpoint, principal):
+    headers = {"x-ms-client-principal": principal} if principal else {}
+    with patch("function_app.get_cosmos_client") as cosmos:
+        response = endpoint(_make_request(headers=headers))
+
+    assert response.status_code == 401
+    assert json.loads(response.get_body()) == {"error": "Not authenticated"}
+    assert response.headers["Cache-Control"] == "private, no-store"
+    cosmos.assert_not_called()
+
+
+@patch("function_app.get_cosmos_client")
+def test_authenticated_certifications_preserve_visibility_and_names(cosmos):
+    database = cosmos.return_value.get_database_client.return_value
+    episodes = MagicMock()
+    episodes.query_items.return_value = ["az-900", "ai-102", "test"]
+    courses = MagicMock()
+    courses.query_items.return_value = [
+        {"id": "test", "published": False},
+        {"id": "ai-102", "displayName": "AI Engineer"},
+    ]
+    database.get_container_client.side_effect = lambda name: {
+        "episodes": episodes, "courses": courses,
+    }[name]
+    response = list_certifications(_make_request(
+        headers={"x-ms-client-principal": _make_principal_header()},
+    ))
+
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "private, no-store"
+    assert json.loads(response.get_body()) == {"certifications": [
+        {"id": "ai-102", "name": "AI Engineer"},
+        {"id": "az-900", "name": "AZ-900: Azure Fundamentals"},
+    ]}
+
+
+@patch("function_app.get_cosmos_client")
+def test_authenticated_episodes_preserve_grouping_and_metrics(cosmos):
+    container = cosmos.return_value.get_database_client.return_value.get_container_client.return_value
+    container.query_items.return_value = [{
+        "id": "ep-001", "sequenceNumber": 1, "title": "Introduction",
+        "skillDomain": "AI", "durationSeconds": 360,
+    }]
+    response = get_episodes(_make_request(
+        headers={"x-ms-client-principal": _make_principal_header()},
+        route_params={"certificationId": "ai-102", "format": "instructional"},
+    ))
+
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "private, no-store"
+    body = json.loads(response.get_body())
+    assert body["certificationId"] == "ai-102"
+    assert body["format"] == "instructional"
+    assert body["totalEpisodes"] == 1
+    assert body["totalDurationSeconds"] == 360
+    assert body["totalHours"] == 0.1
+    assert body["domains"]["AI"]["episodeCount"] == 1
+    assert body["domains"]["AI"]["episodes"][0]["id"] == "ep-001"
+
+
+def test_authenticated_episodes_still_validate_route_parameters():
+    response = get_episodes(_make_request(
+        headers={"x-ms-client-principal": _make_principal_header()},
+    ))
+    assert response.status_code == 400
+
+
+@pytest.mark.parametrize("route", [
+    "/api/certifications",
+    "/api/episodes/ai-102/instructional",
+    "/api/episodes/az-900/podcast",
+])
+def test_swa_catalog_rules_require_authentication_before_public_wildcard(route):
+    config_path = Path(__file__).parents[1] / "web" / "staticwebapp.config.json"
+    config = json.loads(config_path.read_text())
+    rule = next(rule for rule in config["routes"]
+                if fnmatch.fnmatchcase(route, rule["route"]))
+    assert rule["allowedRoles"] == ["authenticated"]
+
+
+def test_swa_health_check_remains_accessible_without_user_signin():
+    config_path = Path(__file__).parents[1] / "web" / "staticwebapp.config.json"
+    config = json.loads(config_path.read_text())
+    rule = next(rule for rule in config["routes"]
+                if fnmatch.fnmatchcase("/api/healthz", rule["route"]))
+    assert "anonymous" in rule["allowedRoles"]
 
 
 # =========================================================================

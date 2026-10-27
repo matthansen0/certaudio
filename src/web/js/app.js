@@ -6,7 +6,6 @@
 // Configuration
 const API_BASE = '/api';
 const STORAGE_KEY_PROGRESS = 'certaudio_progress';
-const STORAGE_KEY_USER = 'certaudio_user';
 const STORAGE_KEY_LAST_CERT = 'certaudio_last_cert';
 
 const FALLBACK_CERTIFICATIONS = [
@@ -85,24 +84,20 @@ async function init() {
     // Check SWA authentication
     await checkAuth();
     
-    // Fall back to anonymous ID if not authenticated
-    if (!state.isAuthenticated) {
-        state.userId = localStorage.getItem(STORAGE_KEY_USER) || generateUserId();
-        localStorage.setItem(STORAGE_KEY_USER, state.userId);
-    }
-    
     // Set up event listeners
     setupEventListeners();
+
+    if (!state.isAuthenticated) {
+        showCatalogSigninGate();
+        return;
+    }
+    hideSigninGate();
 
     // Load certifications list (dynamic) and pick last selection if available
     await loadCertifications();
     
     // Load episodes for default certification
     await loadEpisodes();
-}
-
-function generateUserId() {
-    return 'anon_' + Math.random().toString(36).substring(2, 15);
 }
 
 // ============================================
@@ -321,10 +316,12 @@ function setCertOptions(certs, selectedId) {
 }
 
 async function loadCertifications() {
+    if (!state.isAuthenticated) return;
     const lastCert = localStorage.getItem(STORAGE_KEY_LAST_CERT) || state.certificationId;
 
     try {
-        const response = await fetch(`${API_BASE}/certifications`);
+        const response = await fetch(`${API_BASE}/certifications`, { redirect: 'manual' });
+        if (handleCatalogAuthFailure(response)) return;
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const payload = await response.json();
 
@@ -351,13 +348,16 @@ async function loadCertifications() {
 // ============================================
 
 async function loadEpisodes() {
+    if (!state.isAuthenticated) return;
     elements.episodeList.innerHTML = '<div class="loading">Loading episodes...</div>';
     
     try {
         const response = await fetch(
-            `${API_BASE}/episodes/${state.certificationId}/${state.audioFormat}`
+            `${API_BASE}/episodes/${state.certificationId}/${state.audioFormat}`,
+            { redirect: 'manual' }
         );
-        
+        if (handleCatalogAuthFailure(response)) return;
+
         if (!response.ok) {
             throw new Error('Failed to load episodes');
         }
@@ -675,6 +675,37 @@ function playEpisode(episode) {
     
     // Load transcript
     loadTranscript(episodeNumber);
+}
+
+function handleCatalogAuthFailure(response) {
+    if (response.type === 'opaqueredirect' || response.redirected ||
+        response.status === 401 || response.status === 403 ||
+        (response.status >= 300 && response.status < 400)) {
+        showCatalogSigninGate();
+        return true;
+    }
+    return false;
+}
+
+function showCatalogSigninGate() {
+    state.isAuthenticated = false;
+    state.currentEpisode = null;
+    state.episodes = {};
+    state.domains = {};
+    state.domainMeta = {};
+    updateAuthUI();
+    if (elements.adminLink) elements.adminLink.hidden = true;
+    elements.certSelect.disabled = true;
+    elements.formatSelect.disabled = true;
+    elements.certSelect.innerHTML = '<option value="">Sign in to browse certifications</option>';
+    elements.episodeList.innerHTML = '<div class="loading">Sign in to browse episodes.</div>';
+    elements.episodeTitle.textContent = 'Sign in to browse and listen';
+    elements.episodeDomain.textContent = '';
+    elements.episodeTopics.innerHTML = '';
+    elements.audioElement.pause();
+    elements.audioElement.removeAttribute('src');
+    elements.audioElement.load();
+    showSigninGate();
 }
 
 function showSigninGate() {

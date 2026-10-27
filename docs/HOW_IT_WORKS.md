@@ -364,8 +364,8 @@ Basic (B1):
 **The API Endpoints**:
 ```
 GET  /api/healthz                          # Health check
-GET  /api/certifications                   # List available certs (unpublished hidden)
-GET  /api/episodes/{certId}/{format}       # Get episode list
+GET  /api/certifications                   # List available certs (requires sign-in; unpublished hidden)
+GET  /api/episodes/{certId}/{format}       # Get episode list (requires sign-in)
 GET  /api/audio/{certId}/{format}/{num}    # Stream audio (requires sign-in)
 GET  /api/script/{certId}/{format}/{num}   # Get transcript
 POST /api/progress/{userId}/{certId}       # Save progress (anonymous)
@@ -375,12 +375,14 @@ GET  /api/me/progress/{certId}             # Get progress (authenticated)
 POST /api/me/progress/{certId}             # Update progress (authenticated)
 ```
 
-The episode list is deliberately public so visitors can see what a course covers,
-but `/api/audio/*` rejects anonymous callers with `401` before it reads the blob.
-Streaming is the only expensive egress path, so the check has to happen server
-side; the player also refuses to set the `<audio>` src when signed out, which
-means no request is made at all. Because the response is now per-user it is sent
-`Cache-Control: private` so a shared cache cannot hand it to a stranger.
+The certification and episode catalogs require sign-in. SWA restricts these
+routes to the `authenticated` role before the public `/api/*` wildcard, and both
+Functions handlers reject missing or malformed principals with `401` before
+accessing Cosmos DB. Catalog responses use `Cache-Control: private, no-store`.
+The player shows a sign-in gate without fetching catalog data when signed out;
+expired sessions and API login redirects return it to that gate, not a fallback
+catalog. `/api/audio/*` also rejects anonymous callers before reading Blob
+Storage, and the player never sets the `<audio>` src while signed out.
 
 **🎓 Learn More**:
 - [Functions hosting options](https://learn.microsoft.com/en-us/azure/azure-functions/functions-scale)
@@ -634,24 +636,29 @@ SWA automatically injects this base64-encoded JSON header on requests to the lin
 The `userId` is stable per-provider—same user always gets the same ID, perfect for keying Cosmos documents.
 
 **Progress Sync Flow**:
-1. **Anonymous users**: can browse the episode list, but playback requires signing in
+1. **Anonymous users**: see a sign-in prompt; browsing certifications, episodes, and playback require signing in
 2. **Authenticated users**: progress saved to both `localStorage` (instant) and Cosmos DB (durable)
 3. **Sign in on new device**: server progress merges with local, keeping most-complete state per episode
 4. **Merge logic**: `completed = server OR local`, `position = max(server, local)`
 
 **Authenticated API Endpoints**:
 ```
+GET  /api/certifications                   # List available certifications
+GET  /api/episodes/{certId}/{format}       # List episodes
 GET  /api/me                              # User identity (from SWA header)
 GET  /api/me/progress/{certId}            # Get progress (requires authenticated role)
 POST /api/me/progress/{certId}            # Update progress (single or bulk merge)
 ```
 
-The `/api/me/*` routes require the `authenticated` role in `staticwebapp.config.json`. SWA enforces this before the request reaches Functions.
+The catalog and `/api/me/*` routes require the `authenticated` role in
+`staticwebapp.config.json`. SWA enforces this before the request reaches Functions.
 
 **Route Configuration** (`staticwebapp.config.json`):
 ```json
 {
   "routes": [
+    { "route": "/api/certifications", "allowedRoles": ["authenticated"] },
+    { "route": "/api/episodes/*", "allowedRoles": ["authenticated"] },
     { "route": "/api/me/*", "allowedRoles": ["authenticated"] },
     { "route": "/.auth/login/github", "statusCode": 404 },
     { "route": "/.auth/login/twitter", "statusCode": 404 },
@@ -659,6 +666,22 @@ The `/api/me/*` routes require the `authenticated` role in `staticwebapp.config.
   ]
 }
 ```
+
+**Backend trust and Defender verification**:
+The HTTP triggers retain `AuthLevel.ANONYMOUS` because user authentication is
+performed by SWA and the handlers, not Function keys. Never put a Function key
+in browser code. Enforced EasyAuth with the linked SWA provider is mandatory:
+it blocks direct Function-host requests and prevents callers from forging the
+trusted `x-ms-client-principal` header. The post-provision hook enforces and
+verifies this boundary.
+
+After deploying **both** the API and web changes, verify that signed-out requests
+to `/api/certifications` and `/api/episodes/{certId}/{format}` on the SWA hostname
+redirect to sign-in (do not follow redirects when checking), signed-in requests
+return `200`, and direct Function-host requests still return `401` or `403`,
+including requests with a fabricated principal header. `/api/healthz` through
+SWA should remain `200`. Then request or wait for Defender for Cloud to reassess
+both affected API endpoints; local tests alone do not prove the alerts cleared.
 
 **🎓 Learn More**:
 - [SWA Built-in Authentication](https://learn.microsoft.com/en-us/azure/static-web-apps/authentication-authorization)

@@ -169,6 +169,14 @@ def get_blob_service():
 )
 def list_certifications(req: func.HttpRequest) -> func.HttpResponse:
     """List certifications currently present in Cosmos episodes."""
+    if not _get_swa_user(req):
+        return func.HttpResponse(
+            json.dumps({"error": "Not authenticated"}),
+            status_code=401,
+            mimetype="application/json",
+            headers={"Cache-Control": "private, no-store"},
+        )
+
     try:
         client = get_cosmos_client()
         database = client.get_database_client(
@@ -212,6 +220,7 @@ def list_certifications(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({"certifications": result}),
             mimetype="application/json",
+            headers={"Cache-Control": "private, no-store"},
         )
     except Exception as e:
         logger.error(f"Error listing certifications: {e}")
@@ -219,6 +228,7 @@ def list_certifications(req: func.HttpRequest) -> func.HttpResponse:
             json.dumps({"error": str(e)}),
             status_code=500,
             mimetype="application/json",
+            headers={"Cache-Control": "private, no-store"},
         )
 
 
@@ -237,6 +247,14 @@ def get_episodes(req: func.HttpRequest) -> func.HttpResponse:
     Returns:
         JSON array of episode metadata
     """
+    if not _get_swa_user(req):
+        return func.HttpResponse(
+            json.dumps({"error": "Not authenticated"}),
+            status_code=401,
+            mimetype="application/json",
+            headers={"Cache-Control": "private, no-store"},
+        )
+
     cert_id = req.route_params.get("certificationId")
     audio_format = req.route_params.get("format")
 
@@ -245,6 +263,7 @@ def get_episodes(req: func.HttpRequest) -> func.HttpResponse:
             json.dumps({"error": "certificationId and format are required"}),
             status_code=400,
             mimetype="application/json",
+            headers={"Cache-Control": "private, no-store"},
         )
 
     try:
@@ -311,6 +330,7 @@ def get_episodes(req: func.HttpRequest) -> func.HttpResponse:
                 "domains": domains,
             }),
             mimetype="application/json",
+            headers={"Cache-Control": "private, no-store"},
         )
 
     except Exception as e:
@@ -319,6 +339,7 @@ def get_episodes(req: func.HttpRequest) -> func.HttpResponse:
             json.dumps({"error": str(e)}),
             status_code=500,
             mimetype="application/json",
+            headers={"Cache-Control": "private, no-store"},
         )
 
 
@@ -366,8 +387,8 @@ def _parse_byte_range(range_header: str, blob_size: int) -> tuple[int, int]:
 )
 def get_audio(req: func.HttpRequest) -> func.HttpResponse:
     """Proxy audio from private Blob Storage with HTTP range support."""
-    # Streaming is the only expensive egress path, so reject anonymous callers
-    # before touching Blob Storage. The client gate is cosmetic; this is the control.
+    # Reject anonymous callers before touching Blob Storage.
+    # The client gate is cosmetic; this is the control.
     if not _get_swa_user(req):
         return func.HttpResponse(
             json.dumps({"error": "Sign in required to play audio"}),

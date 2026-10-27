@@ -116,6 +116,9 @@ content generation in-process off the `content-jobs` queue, triggered from the
 admin portal — it is already VNet integrated, so jobs reach Cosmos DB and Storage
 over Private Endpoints and no credential ever leaves Azure.
 
+Browsing certifications and episodes, as well as audio playback, requires
+Microsoft sign-in. Signed-out visitors see a sign-in prompt instead of the catalog.
+
 Private networking is not optional: tenant Azure Policy forces
 `publicNetworkAccess=Disabled` and disables shared-key access, so anything
 touching the data plane has to run inside the VNet.
