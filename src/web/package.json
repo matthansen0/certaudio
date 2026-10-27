@@ -4,6 +4,7 @@
   "private": true,
   "description": "Static front end for the certification audio platform. There is no bundler; azd requires a package.json to package a Static Web Apps service, so build is a no-op.",
   "scripts": {
+    "test": "node --test tests/*.test.cjs",
     "build": "echo \"No build step: static assets are served as-is.\""
   }
 }

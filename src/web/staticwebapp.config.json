@@ -41,6 +41,18 @@
       ]
     },
     {
+      "route": "/api/certifications",
+      "allowedRoles": [
+        "authenticated"
+      ]
+    },
+    {
+      "route": "/api/episodes/*",
+      "allowedRoles": [
+        "authenticated"
+      ]
+    },
+    {
       "route": "/api/*",
       "allowedRoles": [
         "anonymous",
